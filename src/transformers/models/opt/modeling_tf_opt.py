@@ -25,7 +25,6 @@ from ...modeling_tf_outputs import TFBaseModelOutputWithPast, TFCausalLMOutputWi
 
 # Public API
 from ...modeling_tf_utils import (
-    DUMMY_INPUTS,
     TFCausalLanguageModelingLoss,
     TFModelInputType,
     TFPreTrainedModel,
@@ -35,6 +34,7 @@ from ...modeling_tf_utils import (
 )
 from ...tf_utils import check_embeddings_within_bounds, shape_list, stable_softmax
 from ...utils import (
+    DUMMY_INPUTS,
     add_code_sample_docstrings,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,

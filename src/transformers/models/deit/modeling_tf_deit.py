@@ -18,7 +18,7 @@
 import collections.abc
 import math
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import tensorflow as tf
 
@@ -566,38 +566,6 @@ class TFDeiTPreTrainedModel(TFPreTrainedModel):
     base_model_prefix = "deit"
     main_input_name = "pixel_values"
 
-    @property
-    def dummy_inputs(self) -> Dict[str, tf.Tensor]:
-        """
-        Dummy inputs to build the network.
-
-        Returns:
-            `Dict[str, tf.Tensor]`: The dummy inputs.
-        """
-        VISION_DUMMY_INPUTS = tf.random.uniform(
-            shape=(3, self.config.num_channels, self.config.image_size, self.config.image_size), dtype=tf.float32
-        )
-        return {"pixel_values": tf.constant(VISION_DUMMY_INPUTS)}
-
-    @tf.function(
-        input_signature=[
-            {
-                "pixel_values": tf.TensorSpec((None, None, None, None), tf.float32, name="pixel_values"),
-            }
-        ]
-    )
-    def serving(self, inputs):
-        """
-        Method used for serving the model.
-
-        Args:
-            inputs (`Dict[str, tf.Tensor]`):
-                The input of the saved model as a dictionary of tensors.
-        """
-        output = self.call(inputs)
-
-        return self.serving_output(output)
-
 
 DEIT_START_DOCSTRING = r"""
     This model is a TensorFlow
@@ -676,17 +644,6 @@ class TFDeiTModel(TFDeiTPreTrainedModel):
             training=training,
         )
         return outputs
-
-    def serving_output(self, output: TFBaseModelOutputWithPooling) -> TFBaseModelOutputWithPooling:
-        hidden_states = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attentions = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFBaseModelOutputWithPooling(
-            last_hidden_state=output.last_hidden_state,
-            pooler_output=output.pooler_output,
-            hidden_states=hidden_states,
-            attentions=attentions,
-        )
 
 
 # Copied from transformers.models.vit.modeling_tf_vit.TFViTPooler with ViT->DeiT
@@ -863,14 +820,6 @@ class TFDeiTForMaskedImageModeling(TFDeiTPreTrainedModel):
             attentions=outputs.attentions,
         )
 
-    def serving_output(self, output: TFMaskedImageModelingOutput) -> TFMaskedImageModelingOutput:
-        hidden_states = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attentions = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFMaskedImageModelingOutput(
-            reconstruction=output.reconstruction, hidden_states=hidden_states, attentions=attentions
-        )
-
 
 @add_start_docstrings(
     """
@@ -968,12 +917,6 @@ class TFDeiTForImageClassification(TFDeiTPreTrainedModel, TFSequenceClassificati
             attentions=outputs.attentions,
         )
 
-    def serving_output(self, output: TFImageClassifierOutput) -> TFImageClassifierOutput:
-        hidden_states = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attentions = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFImageClassifierOutput(logits=output.logits, hidden_states=hidden_states, attentions=attentions)
-
 
 @add_start_docstrings(
     """
@@ -1052,18 +995,4 @@ class TFDeiTForImageClassificationWithTeacher(TFDeiTPreTrainedModel):
             distillation_logits=distillation_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
-        )
-
-    def serving_output(
-        self, output: TFDeiTForImageClassificationWithTeacherOutput
-    ) -> TFDeiTForImageClassificationWithTeacherOutput:
-        hidden_states = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attentions = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFDeiTForImageClassificationWithTeacherOutput(
-            logits=output.logits,
-            cls_logits=output.cls_logits,
-            distillation_logits=output.distillation_logits,
-            hidden_states=hidden_states,
-            attentions=attentions,
         )

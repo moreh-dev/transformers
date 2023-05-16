@@ -1129,6 +1129,15 @@ class TFFunnelBaseModel(TFFunnelPreTrainedModel):
             training=training,
         )
 
+    def serving_output(self, output):
+        # hidden_states and attentions not converted to Tensor with tf.convert_to_tensor as they are all of
+        # different dimensions
+        return TFBaseModelOutput(
+            last_hidden_state=output.last_hidden_state,
+            hidden_states=output.hidden_states,
+            attentions=output.attentions,
+        )
+
 
 @add_start_docstrings(
     "The bare Funnel Transformer Model transformer outputting raw hidden-states without any specific head on top.",
@@ -1166,6 +1175,15 @@ class TFFunnelModel(TFFunnelPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             training=training,
+        )
+
+    def serving_output(self, output):
+        # hidden_states and attentions not converted to Tensor with tf.convert_to_tensor as they are all of
+        # different dimensions
+        return TFBaseModelOutput(
+            last_hidden_state=output.last_hidden_state,
+            hidden_states=output.hidden_states,
+            attentions=output.attentions,
         )
 
 
@@ -1232,6 +1250,13 @@ class TFFunnelForPreTraining(TFFunnelPreTrainedModel):
             logits=logits,
             hidden_states=discriminator_hidden_states.hidden_states,
             attentions=discriminator_hidden_states.attentions,
+        )
+
+    def serving_output(self, output):
+        # hidden_states and attentions not converted to Tensor with tf.convert_to_tensor as they are all of
+        # different dimensions
+        return TFFunnelForPreTrainingOutput(
+            logits=output.logits, hidden_states=output.hidden_states, attentions=output.attentions
         )
 
 
@@ -1301,6 +1326,11 @@ class TFFunnelForMaskedLM(TFFunnelPreTrainedModel, TFMaskedLanguageModelingLoss)
             attentions=outputs.attentions,
         )
 
+    def serving_output(self, output: TFMaskedLMOutput) -> TFMaskedLMOutput:
+        # hidden_states and attentions not converted to Tensor with tf.convert_to_tensor as they are all of
+        # different dimensions
+        return TFMaskedLMOutput(logits=output.logits, hidden_states=output.hidden_states, attentions=output.attentions)
+
 
 @add_start_docstrings(
     """
@@ -1367,6 +1397,13 @@ class TFFunnelForSequenceClassification(TFFunnelPreTrainedModel, TFSequenceClass
             logits=logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+        )
+
+    def serving_output(self, output: TFSequenceClassifierOutput) -> TFSequenceClassifierOutput:
+        # hidden_states and attentions not converted to Tensor with tf.convert_to_tensor as they are all of
+        # different dimensions
+        return TFSequenceClassifierOutput(
+            logits=output.logits, hidden_states=output.hidden_states, attentions=output.attentions
         )
 
 
@@ -1453,6 +1490,13 @@ class TFFunnelForMultipleChoice(TFFunnelPreTrainedModel, TFMultipleChoiceLoss):
             attentions=outputs.attentions,
         )
 
+    def serving_output(self, output: TFMultipleChoiceModelOutput) -> TFMultipleChoiceModelOutput:
+        # hidden_states and attentions not converted to Tensor with tf.convert_to_tensor as they are all of
+        # different dimensions
+        return TFMultipleChoiceModelOutput(
+            logits=output.logits, hidden_states=output.hidden_states, attentions=output.attentions
+        )
+
 
 @add_start_docstrings(
     """
@@ -1521,6 +1565,13 @@ class TFFunnelForTokenClassification(TFFunnelPreTrainedModel, TFTokenClassificat
             logits=logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+        )
+
+    def serving_output(self, output: TFTokenClassifierOutput) -> TFTokenClassifierOutput:
+        # hidden_states and attentions not converted to Tensor with tf.convert_to_tensor as they are all of
+        # different dimensions
+        return TFTokenClassifierOutput(
+            logits=output.logits, hidden_states=output.hidden_states, attentions=output.attentions
         )
 
 
@@ -1604,4 +1655,14 @@ class TFFunnelForQuestionAnswering(TFFunnelPreTrainedModel, TFQuestionAnsweringL
             end_logits=end_logits,
             hidden_states=outputs.hidden_states,
             attentions=outputs.attentions,
+        )
+
+    def serving_output(self, output: TFQuestionAnsweringModelOutput) -> TFQuestionAnsweringModelOutput:
+        # hidden_states and attentions not converted to Tensor with tf.convert_to_tensor as they are all of
+        # different dimensions
+        return TFQuestionAnsweringModelOutput(
+            start_logits=output.start_logits,
+            end_logits=output.end_logits,
+            hidden_states=output.hidden_states,
+            attentions=output.attentions,
         )

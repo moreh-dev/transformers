@@ -18,10 +18,15 @@ ARGS="$(<args.txt)"
 
 python3 ./run_swag.py \
     --model_name_or_path $model \
-    --output_dir $output_dir \
     --per_device_eval_batch_size $bs \
     --per_device_train_batch_size $bs \
+    --output_dir $output_dir \
     --do_train \
     --do_eval \
     ${ARGS} \
     2>&1 | tee $log_file
+
+echo Done training
+echo Terminal log: $log_file
+echo Results file: $output_dir/all_results.json
+echo Other results: $output_dir

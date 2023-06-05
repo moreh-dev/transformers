@@ -1,3 +1,33 @@
+## Set up
+
+    bash set_up.sh
+
+## Run multiple models
+
+- Put your training arguments in the file `args.txt`
+
+- Put your model's name and corresponding batchsize in the file `model_batchsize.txt`. The file can contain 1 or many models.
+
+- Run
+
+      bash train_all.sh
+
+## Run only 1 model
+
+- Put your training arguments in `args.txt` or in `train.sh`
+
+- Run
+
+      bash train.sh ${model_name} ${batch_size}
+
+## Output
+
+These info will be echoed to the terminal after training is done
+
+- Path to the saved terminal log
+- Path to the .json file containing all training and evaluation results
+- Path to the folder containing all other output files such as checkpoints, training config etc
+
 <!---
 Copyright 2020 The HuggingFace Team. All rights reserved.
 

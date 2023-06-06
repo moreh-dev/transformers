@@ -1,3 +1,51 @@
+
+## Train script
+
+Inside the task's folder, create a training bash script
+
+- This script should take into 3 arguments
+
+    - model
+    - batch_size
+    - output_dir
+
+- And then run the Python training command
+
+Naming:
+
+- If there's only 1 Python training file, create 1 bash script for it using the default name `train.sh`
+
+    Example file: `multiple-choice/train.sh`
+
+- If there are multiple Python training file, create a bash script for each
+
+    Example files: `speech-recognition/train_ctc.sh` and `speech-recognition/train_seq2seq.sh`
+
+## Model list
+
+Inside the task's folder, create a list of models and corresponding batch size
+
+File can contain 1 or many models
+
+Example file `multiple-choice/model_batchsize.txt`
+
+
+## Train
+
+From the `transformers/examples/pytorch` dir, run
+
+    bash run_task.sh $task_name $train_script $model_batchsize_file
+
+For example:
+
+    bash run_task.sh speech-recognition train_ctc.sh ctc_models.txt
+
+If you use the defalt files `train.sh` and `model_batchsize.txt`, you dont need to specify them again.
+
+For example:
+
+    bash run_task.sh multiple-choice
+
 <!---
 Copyright 2020 The HuggingFace Team. All rights reserved.
 Licensed under the Apache License, Version 2.0 (the "License");

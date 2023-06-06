@@ -1,3 +1,6 @@
+bash run_task.sh multiple-choice 
+
+
 <!---
 Copyright 2020 The HuggingFace Team. All rights reserved.
 

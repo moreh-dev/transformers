@@ -1,3 +1,22 @@
+# Install
+
+Install stable version 4.9.2
+
+    https://github.com/moreh-dev/transformers.git
+    cd transformers
+    git checkout -b new/v4.29.2 v4.29.2
+    pip install -e .
+
+Check versions number by looking into `setup.py` and find the phrase`version=`
+
+
+Set up cache
+
+    export TRANSFORMERS_CACHE=/some_path
+    export HF_DATASETS_CACHE=/some_path
+    export HUGGINGFACE_HUB_CACHE=/some_path
+
+
 <!---
 Copyright 2020 The HuggingFace Team. All rights reserved.
 

@@ -1,6 +1,6 @@
-datasets >= 1.18.0
-torch >= 1.5
+datasets
 torchaudio
 librosa
 jiwer
 evaluate
+soundfile

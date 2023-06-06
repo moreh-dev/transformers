@@ -21,7 +21,7 @@ mkdir -p $task/$LOG_DIR
 OUTPUT_DIR="outputs"
 mkdir -p $task/$OUTPUT_DIR
 
-# Train each model in task
+# Go into task folder and run train script
 # ==================================
 
 cd $task

@@ -1,0 +1,2 @@
+openai/whisper-small 32
+### end list ##

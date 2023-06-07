@@ -1,65 +1,81 @@
 
-## Train script
+# Train individual models
 
-Inside the task's folder, create a training bash script:
+## Script
 
-- This script should take into 3 arguments
+Inside each task's folder, there's a bash script for training:
 
-    - model
-    - batch_size
-    - output_dir
+This script takes into 3 arguments
 
-- And then run the Python training command
+- `model`: name of the model to be downloaded from huggingface hub
+- `batch_size`
+- `output_dir`: where to save checkpoints and results
+
+And then it runs the Python training command.
+
+Modify this script if you want to change other arguments to the Python training file.
+
+## Run
+
+Usage:
+
+    cd ${task}
+    bash ${train_script} ${model} ${batch_size} ${output_dir}
+
+Example:
+
+    cd multiple-choice
+    bash train.sh google/mobilebert-uncased 64 outputs
+
+## Multiple training scripts
+
+- Some task only have 1 training script with the default name `train.sh`
+
+    Example: `multiple-choice/train.sh`
 
 
-If there's only 1 Python training file, create 1 bash script for it using the default name `train.sh`
+- Some tasks may have multiple training scripts for different training strategies or different types of models.
 
-    Example file: `multiple-choice/train.sh`
+    Example: `speech-recognition/train_ctc.sh` and `speech-recognition/train_seq2seq.sh`
 
-If there are multiple Python training file, create a bash script for each
 
-    Example files: `speech-recognition/train_ctc.sh` and `speech-recognition/train_seq2seq.sh`
+# Train mulitple models for a task
 
-## Model list
+## Script
 
-Inside the task's folder, create a list of models and corresponding batch size
+Each task can use different model architectures to train with.
 
-File can contain 1 or many models
+This master script automatically train multiple models at once for the same task for easy comparison.
 
-Default name is `model_batchsize.txt`
+This script takes into 3 arguments:
+
+- `task`: name of the task
+
+- `train_script`: the .sh script to train individual model inside the task's folder
+
+- `model_batchsize_file`: a .txt file inside the task's folder containing a list of all models you want to train and their corresponding batch size
 
     Example file: `multiple-choice/model_batchsize.txt`
 
 
-## Train using master script
+## Run
 
-From the `transformers/examples/pytorch` dir, run
+Usage:
 
-    bash run_task.sh $task_name $train_script $model_batchsize_file
+    bash run_task.sh $task $train_script $model_batchsize_file
 
-For example:
+Example:
 
     bash run_task.sh speech-recognition train_ctc.sh ctc_models.txt
 
     bash run_task.sh speech-recognition train_seq2seq.sh seq2seq_models.txt
 
-If you use the defalt files `train.sh` and `model_batchsize.txt`, you dont need to specify them again.
+If you use the default files `train.sh` and `model_batchsize.txt`, you dont need to specify them again.
 
-For example:
+Example:
 
     bash run_task.sh multiple-choice
 
-What the script does:
-
-- Loop through all models in the list and train each for the specified task
-
-- Auto saves the terminal log to a file
-
-- Echo path to the results .json file and other outputs
-
-Future work:
-- Auto record GPU memory
-- Auto upload to S3
 
 <!---
 Copyright 2020 The HuggingFace Team. All rights reserved.

@@ -2,7 +2,6 @@ model=$1
 batch_size=$2
 output_dir=${3:-"./outputs/$model"}
 
-
 args="
 --do_train
 --do_eval

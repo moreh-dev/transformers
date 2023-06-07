@@ -45,7 +45,11 @@ Example:
 
 Each task can use different model architectures to train with.
 
-This master script automatically train multiple models at once for the same task for easy comparison.
+What this script does:
+
+- train multiple models at once for the same task for easy comparison.
+
+- records the memory and terminal outputs of each model
 
 This script takes into 3 arguments:
 

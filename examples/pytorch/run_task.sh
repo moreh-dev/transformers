@@ -15,33 +15,40 @@ bash all_scripts/check_file_exist.sh $model_batchsize_file $task
 # Create log and output dir inside task folder
 # ==================================
 
-LOG_DIR="logs"
-mkdir -p $task/$LOG_DIR
+LOG_DIR=$(pwd)/logs/$task
+mkdir -p $LOG_DIR
 
-OUTPUT_DIR="outputs"
-mkdir -p $task/$OUTPUT_DIR
+OUTPUT_DIR=$(pwd)/outputs/$task
+mkdir -p $OUTPUT_DIR
 
 # Go into task folder and run train script
 # ==================================
 
-cd $task
+# cd $task
 
 while read model batch_size ; do
-    echo Running: $model
-    echo Batchsize: $batch_size
+    echo Model: $model
+    echo Batch_size: $batch_size
 
     model_name=${model#*/}
 
-    log_file="${LOG_DIR}/${model_name}.log"
+    terminal_log_file="${LOG_DIR}/${model_name}_terminal.log"
+    memory_log_file="${LOG_DIR}/${model_name}_memory.log"
+
     output_dir="${OUTPUT_DIR}/${model_name}"
 
-    bash $train_script $model $batch_size $output_dir 2>&1 | tee $log_file
+    commands_to_run="
+        cd $task
+        bash $train_script $model $batch_size $output_dir
+    "
 
-    echo Done training $model
-    echo Terminal log: $log_file
-    echo Results file: $output_dir/all_results.json
-    echo Other results: $output_dir
+    bash record.sh 0 $memory_log_file $terminal_log_file "$commands_to_run"
 
-done < $model_batchsize_file
+    # echo Done training $model
+    # echo Terminal log: $terminal_log_file
+    # echo Results file: $output_dir/all_results.json
+    # echo Other results: $output_dir
+
+done < $task/$model_batchsize_file
 
 echo Done

@@ -6,9 +6,10 @@ mkdir -p $OUTPUT_DIR
 ##    SETTINGS     ## 
 MODEL=$1
 BATCH_SIZE=$2
+gpu_size=$3
 log_file="${LOG_DIR}/${model_name}.log"
-output_dir=${3:-"$OUTPUT_DIR/$model_name"}
-gpu_size=$4
+output_dir="$OUTPUT_DIR/$model_name"
+
 ## END OF SETTINGS ##
 
 export TRANSFORMERS_CACHE=/nas/huggingface_pretrained_models

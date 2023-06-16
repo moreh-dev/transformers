@@ -6,7 +6,7 @@ mkdir -p $OUTPUT_DIR
 ##    SETTINGS     ## 
 MODEL=$1
 BATCH_SIZE=$2
-gpu_size=$3
+device_id=$3
 log_file="${LOG_DIR}/${model_name}.log"
 output_dir="$OUTPUT_DIR/$model_name"
 
@@ -30,7 +30,7 @@ args="
 "
 
 ## Using moreh device
-moreh-switch-model --model $gpu_size
+export MOREH_VISIBLE_DEVICE=$device_id
 
 python3 run_swag.py \
     --model_name_or_path $MODEL \

@@ -6,14 +6,14 @@ mkdir -p $OUTPUT_DIR
 ##    SETTINGS     ## 
 MODEL=$1
 BATCH_SIZE=$2
+device_id=$3
 log_file="${LOG_DIR}/${model_name}.log"
-output_dir=${3:-"$OUTPUT_DIR/$model_name"}
-gpu_size=$4
+output_dir="$OUTPUT_DIR/$model_name"
 ## END OF SETTINGS ## 
 
 export TRANSFORMERS_CACHE=/nas/huggingface_pretrained_models
 export HF_DATASETS_CACHE=/nas/common_data/huggingface
-export TASK_NAME=${5:-mrcp}
+export TASK_NAME=${4:-mrcp}
 
 ## task list ##
 task_list=(
@@ -44,7 +44,7 @@ args="
 "
 
 ## Using moreh device
-moreh-switch-model --model $gpu_size
+export MOREH_VISIBLE_DEVICE=$device_id
 
 python run_glue.py \
   --model_name_or_path $MODEL \

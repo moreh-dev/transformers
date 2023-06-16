@@ -1,3 +1,20 @@
+# Record GPU usage
+
+While running a Python process, open **another terminal** and run:
+
+    bash all_scripts/memory_record_moreh.sh ${DEVICE_ID} | tee ${LOG_FILE}
+
+- DEVICE_ID is the id of the Moreh device you are running the python process on and whose memory you want to record
+
+- LOG_FILE is the file you want to save the memory to
+
+For example, when I have 2 different processes like this
+
+![Process](image.png)
+
+If I want to record the memory of device 1, I will run
+
+    bash all_scripts/memory_record_moreh.sh 1 | tee memory.log
 
 # Train individual models
 

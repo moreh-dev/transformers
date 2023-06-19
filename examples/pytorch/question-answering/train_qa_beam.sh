@@ -13,7 +13,6 @@ output_dir=$OUTPUT_DIR/$model
 mkdir -p "$(dirname $log_file)"
 mkdir -p "$(dirname $output_dir)"
 
-## Using moreh device
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="

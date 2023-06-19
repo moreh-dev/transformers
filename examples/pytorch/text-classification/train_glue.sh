@@ -1,7 +1,12 @@
-model=$1
-batch_size=$2
-device_id=$3
-task_name=${4:-cola}
+while getopts m:b:g:t: flag
+do
+    case "${flag}" in
+        m) model=${OPTARG};;
+        b) batch_size=${OPTARG};;
+        g) device_id=${OPTARG};;
+        t) task_name=${OPTARG};;
+    esac
+done
 
 task_list=(
     "mrpc"
@@ -40,9 +45,11 @@ export MOREH_VISIBLE_DEVICE=$device_id
 
 export TASK_NAME=$task_name
 
+echo $TASK_NAME
+
 python run_glue.py \
   --model_name_or_path $model \
-  --task_name $TASK_NAME \
+  --task_name ${TASK_NAME} \
   --per_device_train_batch_size $batch_size \
   --per_device_eval_batch_size $batch_size \
   --output_dir $output_dir \

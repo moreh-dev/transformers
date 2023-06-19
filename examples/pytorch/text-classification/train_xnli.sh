@@ -1,6 +1,11 @@
-model=$1
-batch_size=$2
-device_id=$3
+while getopts m:b:g: flag
+do
+    case "${flag}" in
+        m) model=${OPTARG};;
+        b) batch_size=${OPTARG};;
+        g) device_id=${OPTARG};;
+    esac
+done
 
 args="
 --do_train \

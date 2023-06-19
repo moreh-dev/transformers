@@ -26,13 +26,21 @@ args="
 --use_auth_token True \
 --save_total_limit 2 \
 --save_strategy epoch \
---seed 42 \
+--seed 1337 \
+--skip_memory_metrics False \
+--remove_unused_columns False \
+--report_to none \
+--learning_rate 0.00006 \
+--lr_scheduler_type polynomial \
+--evaluation_strategy steps \
+--max_steps 10000 \
+--evaluation_strategy epoch \
 "
 
 ## Using moreh device
 export MOREH_VISIBLE_DEVICE=$device_id
 
-python3 run_swag.py \
+python3 run_semantic_segmentation.py \
     --model_name_or_path $MODEL \
     --per_device_eval_batch_size $BATCH_SIZE \
     --per_device_train_batch_size $BATCH_SIZE \

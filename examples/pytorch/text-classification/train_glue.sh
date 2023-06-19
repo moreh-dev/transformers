@@ -26,6 +26,11 @@ output_dir=$OUTPUT_DIR/$model
 mkdir -p "$(dirname $log_file)"
 mkdir -p "$(dirname $output_dir)"
 
+## Using moreh device
+export MOREH_VISIBLE_DEVICE=$device_id
+
+export TASK_NAME=$task_name
+
 args="
 --do_train \
 --do_eval \
@@ -39,13 +44,6 @@ args="
 --save_total_limit 2 \
 --seed 42
 "
-
-## Using moreh device
-export MOREH_VISIBLE_DEVICE=$device_id
-
-export TASK_NAME=$task_name
-
-echo $TASK_NAME
 
 python run_glue.py \
   --model_name_or_path $model \

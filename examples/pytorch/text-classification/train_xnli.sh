@@ -7,6 +7,15 @@ do
     esac
 done
 
+log_file=$LOG_DIR/$model.log
+output_dir=$OUTPUT_DIR/$model
+
+mkdir -p "$(dirname $log_file)"
+mkdir -p "$(dirname $output_dir)"
+
+## Using moreh device
+export MOREH_VISIBLE_DEVICE=$device_id
+
 args="
 --do_train \
 --do_eval \
@@ -21,15 +30,6 @@ args="
 --save_total_limit 2 \
 --seed 42
 "
-
-log_file=$LOG_DIR/$model.log
-output_dir=$OUTPUT_DIR/$model
-
-mkdir -p "$(dirname $log_file)"
-mkdir -p "$(dirname $output_dir)"
-
-## Using moreh device
-export MOREH_VISIBLE_DEVICE=$device_id
 
 python run_xnli.py \
   --model_name_or_path $model \

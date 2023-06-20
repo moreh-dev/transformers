@@ -22,13 +22,13 @@ args="
 --max_seq_length 128 \
 --pad_to_max_length True \
 --do_train \
---do_eval
+--do_eval \
 --seed 42 \
 "
 
 python run_ner.py \
-  --model_name_or_path=$MODEL \
+  --model_name_or_path=$model \
   --dataset_name conll2003 \
-  --output_dir $outputs \
+  --output_dir $output_dir \
   $args 
   2>&1 | tee $log_file

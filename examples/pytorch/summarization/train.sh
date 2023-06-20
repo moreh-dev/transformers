@@ -1,3 +1,5 @@
+#!/bin/bash
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -7,6 +9,8 @@ do
     esac
 done
 
+LOG_DIR="./logs"
+OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 
@@ -16,6 +20,7 @@ mkdir -p "$(dirname $output_dir)"
 ## Using moreh device
 export MOREH_VISIBLE_DEVICE=$device_id
 
+
 args="
 --do_train \
 --do_eval \
@@ -23,18 +28,17 @@ args="
 --num_train_epochs 2 \
 --logging_strategy steps \
 --logging_steps 100 \
---max_seq_length 384 \
---doc_stride 128 \
 --overwrite_output_dir \
 --save_strategy epoch \
 --save_total_limit 2 \
 --seed 42
+--predict_with_generate
 "
 
-python run_qa.py \
+python run_summarization.py \
   --model_name_or_path $model \
-  --dataset_name squad_v2 \
-  --version_2_with_negative \
+  --dataset_name xsum \
+  --source_prefix "summarize: " \
   --per_device_train_batch_size $batch_size \
   --per_device_eval_batch_size $batch_size \
   --output_dir $output_dir \

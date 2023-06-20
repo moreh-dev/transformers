@@ -17,20 +17,13 @@ mkdir -p "$(dirname $output_dir)"
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="
+--dataset_name wikitext \
+--dataset_config_name wikitext-2-raw-v1 \
 --do_train \
 --do_eval \
---learning_rate 5e-5 \
---num_train_epochs 3 \
---logging_strategy steps \
---logging_steps 100 \
---overwrite_output \
---use_auth_token True \
---save_total_limit 2 \
---save_strategy epoch \
---seed 42 \
 "
 
-python3 run_swag.py \
+python3 run_clm.py \
     --model_name_or_path $model \
     --per_device_eval_batch_size $batch_size \
     --per_device_train_batch_size $batch_size \

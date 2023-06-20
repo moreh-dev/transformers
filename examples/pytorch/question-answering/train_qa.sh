@@ -1,6 +1,3 @@
-#!/bin/bash
-##    SETTINGS     ## 
-#Get the input arg
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -10,15 +7,14 @@ do
     esac
 done
 
-## END OF SETTINGS ## 
-
-LOG_DIR="./logs"
-OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 
 mkdir -p "$(dirname $log_file)"
 mkdir -p "$(dirname $output_dir)"
+
+## Using moreh device
+export MOREH_VISIBLE_DEVICE=$device_id
 
 args="
 --do_train \
@@ -34,8 +30,6 @@ args="
 --save_total_limit 2 \
 --seed 42
 "
-## Using moreh device
-export MOREH_VISIBLE_DEVICE=$device_id
 
 python run_qa.py \
   --model_name_or_path $model \

@@ -1,0 +1,4 @@
+openmmlab/upernet-convnext-base 16
+facebook/data2vec-vision-base 64
+google/mobilenet_v2_1.0_224 256
+Intel/dpt-large 8

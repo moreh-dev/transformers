@@ -41,7 +41,7 @@ args="
 ## Using moreh device
 export MOREH_VISIBLE_DEVICE=$device_id
 
-python run_qa_beam_search.py \
+python run_seq2seq_qa.py \
   --model_name_or_path $model \
   --dataset_name squad_v2 \
   --version_2_with_negative \

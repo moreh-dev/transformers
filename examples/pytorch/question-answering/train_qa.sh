@@ -1,3 +1,5 @@
+#!/bin/bash
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -7,6 +9,8 @@ do
     esac
 done
 
+LOG_DIR="./logs"
+OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 
@@ -31,7 +35,7 @@ args="
 --seed 42
 "
 
-python run_qa.py \
+python train_qa.sh \
   --model_name_or_path $model \
   --dataset_name squad_v2 \
   --version_2_with_negative \

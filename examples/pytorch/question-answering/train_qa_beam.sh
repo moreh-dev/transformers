@@ -1,3 +1,5 @@
+#!/bin/bash
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -7,12 +9,15 @@ do
     esac
 done
 
+LOG_DIR="./logs"
+OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 
 mkdir -p "$(dirname $log_file)"
 mkdir -p "$(dirname $output_dir)"
 
+## Using moreh devic
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="

@@ -1,3 +1,4 @@
+#!/bin/bash
 while getopts m:b:g:t: flag
 do
     case "${flag}" in
@@ -20,6 +21,8 @@ task_list=(
     "wnli"
 )
 
+LOG_DIR="./logs"
+OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 

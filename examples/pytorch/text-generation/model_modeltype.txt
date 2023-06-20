@@ -1,0 +1,4 @@
+openai-gpt  openai-gpt
+gpt2    gpt2
+xlm-roberta-base    xlm
+xlnet-base-cased    xlnet

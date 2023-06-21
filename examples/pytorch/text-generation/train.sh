@@ -1,9 +1,22 @@
 #!/bin/bash
-while getopts m:g: flag
+
+$model_type=openai-gpt
+# Model type
+model_type_lst=(
+    "gpt2"
+    "ctrl"
+    "openai-gpt"
+    "xlnet"
+    "transfo-xl"
+    "xlm"
+)
+
+while getopts m:g:t: flag
 do
     case "${flag}" in
         m) model=${OPTARG};;
         g) device_id=${OPTARG};;
+        t) model_type=${OPTARG};;
     esac
 done
 
@@ -19,16 +32,17 @@ mkdir -p "$(dirname $output_dir)"
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="
---max_seq_length 128 \
---pad_to_max_length True \
---do_train \
---do_eval \
+--length 20 \
+--k 0 \
+--p 0.95 \
+--prefix '' \
+--xlm_language '' \
 --seed 42 \
 "
 
-python run_ner.py \
+python run_generation.py \
+  --model_type=$model_type \
   --model_name_or_path=$model \
-  --dataset_name conll2003 \
-  --output_dir $output_dir \
+  --prompt="Once upon a time," \
   $args 
   2>&1 | tee $log_file

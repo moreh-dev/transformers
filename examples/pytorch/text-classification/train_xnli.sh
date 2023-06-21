@@ -1,20 +1,6 @@
-while getopts m:b:g: flag
-do
-    case "${flag}" in
-        m) model=${OPTARG};;
-        b) batch_size=${OPTARG};;
-        g) device_id=${OPTARG};;
-    esac
-done
-
-log_file=$LOG_DIR/$model.log
-output_dir=$OUTPUT_DIR/$model
-
-mkdir -p "$(dirname $log_file)"
-mkdir -p "$(dirname $output_dir)"
-
-## Using moreh device
-export MOREH_VISIBLE_DEVICE=$device_id
+model=$1
+batch_size=$2
+device_id=$3
 
 args="
 --do_train \
@@ -30,6 +16,15 @@ args="
 --save_total_limit 2 \
 --seed 42
 "
+
+log_file=$LOG_DIR/$model.log
+output_dir=$OUTPUT_DIR/$model
+
+mkdir -p "$(dirname $log_file)"
+mkdir -p "$(dirname $output_dir)"
+
+## Using moreh device
+export MOREH_VISIBLE_DEVICE=$device_id
 
 python run_xnli.py \
   --model_name_or_path $model \

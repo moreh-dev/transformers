@@ -1,4 +1,0 @@
-Helsinki-NLP/opus-mt-en-ro 32
-t5-small 64
-t5-base 64
-facebook/mbart-large-en-ro 32

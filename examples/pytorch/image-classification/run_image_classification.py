@@ -160,7 +160,7 @@ class ModelArguments:
         },
     )
     ignore_mismatched_sizes: bool = field(
-        default=False,
+        default=True,
         metadata={"help": "Will enable to load a pretrained model whose head dimensions are different."},
     )
 

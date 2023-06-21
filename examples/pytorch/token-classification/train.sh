@@ -9,7 +9,8 @@ BATCH_SIZE=$2
 device_id=$3
 log_file="${LOG_DIR}/${model_name}.log"
 output_dir="$OUTPUT_DIR/$model_name"
-## END OF SETTINGS ## 
+
+## END OF SETTINGS ##
 
 export TRANSFORMERS_CACHE=/nas/huggingface_pretrained_models
 export HF_DATASETS_CACHE=/nas/common_data/huggingface
@@ -17,26 +18,19 @@ export HF_DATASETS_CACHE=/nas/common_data/huggingface
 args="
 --do_train \
 --do_eval \
---learning_rate 3e-5 \
---num_train_epochs 2 \
---logging_strategy steps \
---logging_steps 100 \
---max_seq_length 384 \
---overwrite_output_dir \
+--dataset_name conll2003 \
+--save_total_limit 3 \
 --save_strategy epoch \
---save_total_limit 2 \
---seed 42
+--ignore_mismatched_sizes \
 "
 
 ## Using moreh device
 export MOREH_VISIBLE_DEVICE=$device_id
 
-python run_xnli.py \
-  --model_name_or_path $MODEL \
-  --language de \
-  --train_language en \
-  --per_device_train_batch_size $BATCH_SIZE \
-  --per_device_eval_batch_size $BATCH_SIZE \
-  --output_dir $output_dir \
-  $args \
-  2>&1 | tee $log_file
+python3 run_ner.py \
+    --model_name_or_path $MODEL \
+    --per_device_eval_batch_size $BATCH_SIZE \
+    --per_device_train_batch_size $BATCH_SIZE \
+    --output_dir $output_dir \
+    $args \
+    2>&1 | tee $log_file

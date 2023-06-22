@@ -1,0 +1,2 @@
+google/vit-base-patch16-224-in21k 128
+#### end list ####

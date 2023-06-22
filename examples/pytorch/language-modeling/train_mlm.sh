@@ -7,6 +7,8 @@ do
     esac
 done
 
+LOG_DIR="./logs"
+OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 
@@ -21,6 +23,7 @@ args="
 --dataset_config_name wikitext-2-raw-v1 \
 --do_train \
 --do_eval \
+--overwrite_output_dir \
 "
 
 ## Using moreh device

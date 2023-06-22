@@ -42,5 +42,5 @@ python run_translation.py \
   --per_device_eval_batch_size=$batch_size \
   --source_prefix "translate English to Romanian: " \
   --output_dir $output_dir \
-  $args 
+  $args \
   2>&1 | tee $log_file

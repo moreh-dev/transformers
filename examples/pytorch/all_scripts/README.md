@@ -1,24 +1,20 @@
-# Using master script
-The master script will call the train script in each task with the arguments taking from the file model_batchsize.txt.
-The model_batchsize.txt contain: model_name batch_size device_id and other args if needed.
-For examble: bert-base-uncased 64 1 mrpc
-When run the master script, you can add one of these flag:
--s or --show: To show all task available
--h ir --help: To show what other flags mean
--t or --task <task-name>: To run train script for one specific task
--a or --all: To run the train script for all the tasks
+# Using the Master Script
+The Master Script will call the train script for each task, with the arguments taken from the file `model_batchsize.txt`. This file contains the model name, batch size, device ID, and any other required arguments. For example: `bert-base-uncased 64 1 mrpc`
 
-Some task has more than one train script. Therefore, the task shown when using -s and when run in -t must be specific.
-For example, inside text-classifcation task has 2 train script for glue and xnli. In the master script will have 2 task for those script *text-classification-glue* and *text-classification-xlni*
+When running the Master Script, you can add one of the following flags:
+- `-s` or `--show`: to show all available tasks.
+- `-h` or `--help`: to show the meaning of other flags.
+- `-t` or `--task <task-name>`: to run the train script for one specific task.
+- `-a` or `--all`: to run the train script for all tasks.
 
-**Note 1**: The model names inside the model_batchsize.txt will be use to run by all the script in that task so make sure the model all the script can run this model. Some models require special args or train script should be run manually. 
+Note that some tasks have more than one train script. Therefore, the task shown when using the `-s` flag and when running with the `-t` flag must be specific. For example, the `text-classification` task has two train scripts for `glue` and `xlni`. In the Master Script, these will be represented as `text-classification-glue` and `text-classification-xlni`.
 
-**Note 2**: Currently this script can only run the train script with 3 args: <model_names> <batch_size>, and <device_id> other args must be set a default value in their train script, otherwise this script will rise an errors.
-I will find a way to fix this in the futures.
+**Note 1**: The model names inside the `model_batchsize.txt` file will be used to run all the scripts in that task, so it's important to ensure that the model can be run by all the scripts for that task. Some models require special arguments or the train script may need to be run manually.
 
-## Train one task
-Run the master script with the option -t and task name.
-For example: `bash master.sh -t text-cls-glue`
-## Train all the tasks
-Run the master script with the option -a.
-For example: `bash master.sh -a`
+**Note 2**: Currently, this script can only run train scripts with three arguments: `model_name`, `batch_size`, and `device_id`. Any additional arguments must have a default value set in the train script, otherwise, the script will raise an error.
+
+## Train One Task
+To run the Master Script for one task, use the `-t` option followed by the task name. For example: `bash master.sh -t text-classification-glue`
+
+## Train All Tasks
+To run the Master Script for all tasks, use the `-a` option. For example: `bash master.sh -a`

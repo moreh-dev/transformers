@@ -1,4 +1,7 @@
-#!/bin/bash
+model=Helsinki-NLP/opus-mt-en-ro
+batch_size=32
+device_id=0
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -7,6 +10,8 @@ do
         g) device_id=${OPTARG};;
     esac
 done
+
+echo Running $model with batch size $batch_size on device $device_id
 
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"

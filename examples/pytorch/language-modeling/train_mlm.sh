@@ -7,6 +7,8 @@ do
     esac
 done
 
+echo Running $model with batch size $batch_size on device $device_id
+
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log

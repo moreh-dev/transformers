@@ -1,4 +1,8 @@
-#!/bin/bash
+model=facebook/vit-mae-base
+batch_size=128
+device_id=0
+
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -7,6 +11,9 @@ do
         g) device_id=${OPTARG};;
     esac
 done
+
+echo Running $model with batch size $batch_size on device $device_id
+
 
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"
@@ -19,10 +26,6 @@ mkdir -p "$(dirname $output_dir)"
 ## Using moreh device
 export MOREH_VISIBLE_DEVICE=$device_id
 
-## END OF SETTINGS ##
-
-export TRANSFORMERS_CACHE=/nas/huggingface_pretrained_models
-export HF_DATASETS_CACHE=/nas/common_data/huggingface
 
 args="
 --do_train \

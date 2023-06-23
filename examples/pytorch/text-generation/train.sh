@@ -1,6 +1,8 @@
 #!/bin/bash
+model=openai-gpt
+model_type=openai-gpt
+device_id=0
 
-$model_type=openai-gpt
 # Model type
 model_type_lst=(
     "gpt2"
@@ -19,6 +21,8 @@ do
         t) model_type=${OPTARG};;
     esac
 done
+
+echo Running $model of type $model_type on device $device_id
 
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"

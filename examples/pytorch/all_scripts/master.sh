@@ -218,7 +218,7 @@ do
                     echo -ne "Invalid task\n"
                     exit 0;;
             esac ;;
-        -a | --all)
+        -a | --all  | *)
             for item in "${task_task_folder_lst[@]}"; do
                 IFS='#' read -ra split_item <<< "$item"
                 task=${split_item[0]} # First part before #
@@ -231,9 +231,9 @@ do
                 export PATH=$PATH:../${folder_name}
                 log_folder=../$folder_name/logs
 
-                [[ ! -f "../$folder_name/$model_batchsize_file" ]] && echo "$folder_name/$model_batchsize_file not exist" && exit 1
+                [[ ! -f "../$folder_name/$model_batchsize_file" ]] && echo "$folder_name/$model_batchsize_file not exist" && continue 
 
-                # [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && continue 
 
                 while read -r model batch_size device_id task_type; do
                     echo "=============================================================="

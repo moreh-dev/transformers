@@ -1,4 +1,9 @@
 #!/bin/bash
+# Defaul values
+model=bert-base-uncased
+batch_size=64
+device_id=1
+
 while getopts m:b:g: flag
 do
     case "${flag}" in

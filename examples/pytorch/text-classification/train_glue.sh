@@ -1,4 +1,10 @@
 #!/bin/bash
+
+# Defaul values:
+model=bert-base-uncased
+batch_size=64
+device_id=1
+task_name=mrpc
 while getopts m:b:g:t: flag
 do
     case "${flag}" in

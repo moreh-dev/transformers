@@ -7,6 +7,10 @@ do
     esac
 done
 
+echo Running $model with batch size $batch_size on device $device_id
+
+LOG_DIR="./logs"
+OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 
@@ -21,6 +25,7 @@ args="
 --dataset_config_name wikitext-2-raw-v1 \
 --do_train \
 --do_eval \
+--overwrite_output_dir \
 "
 
 ## Using moreh device

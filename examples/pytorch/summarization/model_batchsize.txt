@@ -1,3 +1,2 @@
 google/pegasus-xsum 4
-google/pegasus-x-large 4
 t5-small 16

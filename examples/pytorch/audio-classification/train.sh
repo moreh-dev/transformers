@@ -1,3 +1,7 @@
+model="facebook/wav2vec2-base"
+batch_size=2048
+device_id=0
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -9,8 +13,8 @@ done
 
 echo Running $model with batch size $batch_size on device $device_id
 
-LOG_DIR="./logs"
-OUTPUT_DIR="./outputs"
+LOG_DIR=./logs
+OUTPUT_DIR=./outputs
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 
@@ -21,13 +25,29 @@ mkdir -p "$(dirname $output_dir)"
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="
---train_file path_to_train_file \
---validation_file path_to_validation_file \
 --do_train \
 --do_eval \
+--dataset_name superb \
+--dataset_config_name ks \
+--remove_unused_columns False \
+--max_length_seconds 1 \
+--learning_rate 3e-5 \
+--attention_mask False \
+--warmup_ratio 0.1 \
+--num_train_epochs 3 \
+--logging_strategy steps \
+--gradient_accumulation_steps 4 \
+--dataloader_num_workers 4 \
+--logging_steps 10 \
+--evaluation_strategy epoch \
+--overwrite_output \
+--load_best_model_at_end True \
+--save_total_limit 2 \
+--save_strategy epoch \
+--seed 0 \
 "
 
-python3 run_plm.py \
+python3 run_audio_classification.py \
     --model_name_or_path $model \
     --per_device_eval_batch_size $batch_size \
     --per_device_train_batch_size $batch_size \

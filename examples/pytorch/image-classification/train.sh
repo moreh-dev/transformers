@@ -1,3 +1,7 @@
+model=microsoft/beit-base-patch16-224-pt22k
+batch_size=512
+device_id=0
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -21,13 +25,23 @@ mkdir -p "$(dirname $output_dir)"
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="
---train_file path_to_train_file \
---validation_file path_to_validation_file \
 --do_train \
 --do_eval \
+--dataset_name beans \
+--remove_unused_columns False \
+--learning_rate 2e-5 \
+--num_train_epochs 3 \
+--logging_strategy steps \
+--logging_steps 10 \
+--evaluation_strategy epoch \
+--overwrite_output \
+--load_best_model_at_end True \
+--save_total_limit 3 \
+--save_strategy epoch \
+--seed 1337 \
 "
 
-python3 run_plm.py \
+python3 run_image_classification.py \
     --model_name_or_path $model \
     --per_device_eval_batch_size $batch_size \
     --per_device_train_batch_size $batch_size \

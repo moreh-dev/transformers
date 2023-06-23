@@ -5,6 +5,11 @@ model=bert-base-uncased
 batch_size=64
 device_id=1
 task_name=mrpc
+model=facebook/mbart-large-cc25
+batch_size=8
+device_id=0
+task_name=cola
+
 while getopts m:b:g:t: flag
 do
     case "${flag}" in
@@ -14,6 +19,8 @@ do
         t) task_name=${OPTARG};;
     esac
 done
+
+echo Running $model with batch size $batch_size on device $device_id
 
 task_list=(
     "mrpc"

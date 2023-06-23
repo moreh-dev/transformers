@@ -1,5 +1,5 @@
-model=openai/whisper-small
-batch_size=64
+model=facebook/wav2vec2-large-xlsr-53
+batch_size=56
 device_id=0
 
 while getopts m:b:g: flag
@@ -25,21 +25,19 @@ mkdir -p "$(dirname $output_dir)"
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="
-	--dataset_name="mozilla-foundation/common_voice_11_0" \
-	--dataset_config_name="hi" \
-	--language="hindi" \
+	--dataset_name="common_voice" \
+	--dataset_config_name="tr" \
 	--train_split_name="train+validation" \
 	--eval_split_name="test" \
 	--max_steps="5000" \
 	--gradient_accumulation_steps="2" \
 	--logging_steps="25" \
-	--learning_rate="1e-5" \
+	--learning_rate="3e-4" \
 	--warmup_steps="500" \
 	--evaluation_strategy="steps" \
-	--eval_steps="1000" \
+	--eval_steps="100" \
 	--save_strategy="steps" \
-	--save_steps="1000" \
-	--generation_max_length="225" \
+	--save_steps="400" \
 	--preprocessing_num_workers="16" \
 	--length_column_name="input_length" \
 	--max_duration_in_seconds="30" \
@@ -47,15 +45,15 @@ args="
 	--freeze_feature_encoder="False" \
 	--gradient_checkpointing \
 	--group_by_length \
-	--fp16 \
 	--overwrite_output_dir \
 	--do_train \
 	--do_eval \
-	--predict_with_generate \
+    --chars_to_ignore , ? . ! - \; \: \" “ % ‘ ” � \
 	--save_total_limit 2 \
+    --num_train_epochs="3" \
 "
 
-python3 run_speech_recognition_seq2seq.py \
+python3 run_speech_recognition_ctc.py \
     --model_name_or_path $model \
     --per_device_eval_batch_size $batch_size \
     --per_device_train_batch_size $batch_size \

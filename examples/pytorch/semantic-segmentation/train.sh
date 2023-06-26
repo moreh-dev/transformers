@@ -1,3 +1,4 @@
+#!/bin/bash
 model=openmmlab/upernet-convnext-base
 batch_size=16
 device_id=0

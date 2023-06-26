@@ -1,12 +1,11 @@
 task_list=(
-    "text-gen"
-    "text-cls-glue"
-    "text-cls-xnli"
-    "mul-choice"
-    "qa"
-    "qa-beam"
-    "qa-seq2seq"
-    "translation"
+    "text-classification-glue"
+    "text-classification-xnli"
+    "question-answering"
+    "question-answering-beam"
+    "question-answering-seq2seq"
+    "semantic-segmentation"
+    "multiple-choice"
 )
 
 task_task_folder_lst=(
@@ -123,8 +122,8 @@ do
                         bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
 
                         # train in model
-                        /bin/chmod a+x ../text-classification/train_xnli.sh
-                        cd ../text-classification/
+                        /bin/chmod a+x ../$task/train_xnli.sh
+                        cd ../$task/
                         bash  train_xnli.sh -m $model -b $batch_size -g $device_id
                         cd ../all_scripts/
                         kill -9 $daemon_pid
@@ -159,8 +158,8 @@ do
                         bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
 
                         # train in model
-                        /bin/chmod a+x ../question-answering/train_qa.sh
-                        cd ../question-answering/
+                        /bin/chmod a+x ../$task/train_qa.sh
+                        cd ../$task/
                         bash  train_qa.sh -m $model -b $batch_size -g $device_id
                         cd ../all_scripts/
                         kill -9 $daemon_pid
@@ -195,8 +194,8 @@ do
                         bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
 
                         # train in model
-                        /bin/chmod a+x ../question-answering/train_qa_beam.sh
-                        cd ../question-answering/
+                        /bin/chmod a+x ../$task/train_qa_beam.sh
+                        cd ../$task/
                         bash  train_qa_beam.sh -m $model -b $batch_size -g $device_id
                         cd ../all_scripts/
                         kill -9 $daemon_pid
@@ -230,8 +229,8 @@ do
                         bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
 
                         # train in model
-                        /bin/chmod a+x ../question-answering/train_seq2seq.sh
-                        cd ../question-answering/
+                        /bin/chmod a+x ../$task/train_seq2seq.sh
+                        cd ../$task/
                         bash  train_seq2seq.sh -m $model -b $batch_size -g $device_id
                         cd ../all_scripts/
                         kill -9 $daemon_pid
@@ -265,8 +264,8 @@ do
                         bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
 
                         # train in model
-                        /bin/chmod a+x ../multiple-choice/train.sh
-                        cd ../multiple-choice/
+                        /bin/chmod a+x ../$task/train.sh
+                        cd ../$task/
                         bash  train.sh -m $model -b $batch_size -g $device_id
 
                         kill -9 $daemon_pid
@@ -274,6 +273,41 @@ do
                         echo "++++++++++++++++++++ Done ++++++++++++++++++++"
                     done < "../$task/$model_batchsize_file"
   
+                    ;;
+
+                "segmentation" | "semantic-segmentation")
+                    task=semantic-segmentation
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file" ]] && echo "$task/$model_batchsize_file not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    while read -r model batch_size device_id ;do
+                        echo "=============================================================="
+                        echo Model: $model Batch_size: $batch_size Device_id: $device_id
+                        echo "=============================================================="
+                        
+                        # record memory in background
+                        memory_log_file=$log_folder/${model#*/}-$batch_size.memory
+                        if [ ! -d $log_folder ]; then
+                            # If the folder does not exist, create it
+                            mkdir -p "${log_folder}"
+                            echo "Created 'logs' folder inside $task directory."
+                        fi
+                        touch $memory_log_file
+                        bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
+
+                        # train in model
+                        /bin/chmod a+x ../$task/train.sh
+                        cd ../$task/
+                        bash  train.sh -m $model -b $batch_size -g $device_id
+
+                        kill -9 $daemon_pid
+                        cd ../all_scripts/  
+                        echo "++++++++++++++++++++ Done ++++++++++++++++++++"
+                    done < "../$task/$model_batchsize_file"
                     ;;
 
                 *)

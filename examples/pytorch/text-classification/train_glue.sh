@@ -5,18 +5,13 @@ model=bert-base-uncased
 batch_size=64
 device_id=1
 task_name=mrpc
-model=facebook/mbart-large-cc25
-batch_size=8
-device_id=0
-task_name=cola
 
-while getopts m:b:g:t: flag
+while getopts m:b:g: flag
 do
     case "${flag}" in
         m) model=${OPTARG};;
         b) batch_size=${OPTARG};;
         g) device_id=${OPTARG};;
-        t) task_name=${OPTARG};;
     esac
 done
 

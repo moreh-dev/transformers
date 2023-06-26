@@ -6,6 +6,9 @@ task_list=(
     "question-answering-seq2seq"
     "semantic-segmentation"
     "multiple-choice"
+    "language-modeling-clm"
+    "language-modeling-mlm"
+    "language-modeling-plm"
 )
 
 task_task_folder_lst=(
@@ -14,6 +17,8 @@ task_task_folder_lst=(
     "qa#question-answering#train_qa.sh"
     "qa-beam#question-answering#train_qa_beam.sh"
     "qa-seq2seq#question-answering#train_seq2seq.sh"
+    "semantic-segmentation#semantic-segmentation#train.sh"
+    "multiple-choice#multiple-choice#train.sh"
 )
 # Global vars
 model_batchsize_file="model_batchsize.txt"
@@ -310,6 +315,111 @@ do
                     done < "../$task/$model_batchsize_file"
                     ;;
 
+                "lang-modeling-clm" | "language-modeling-clm" )
+                    task=language-modeling
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file" ]] && echo "$task/$model_batchsize_file not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    while read -r model batch_size device_id ;do
+                        echo "=============================================================="
+                        echo Model: $model Batch_size: $batch_size Device_id: $device_id
+                        echo "=============================================================="
+                        
+                        # record memory in background
+                        memory_log_file=$log_folder/${model#*/}-$batch_size.memory
+                        if [ ! -d $log_folder ]; then
+                            # If the folder does not exist, create it
+                            mkdir -p "${log_folder}"
+                            echo "Created 'logs' folder inside $task directory."
+                        fi
+                        touch $memory_log_file
+                        bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
+
+                        # train in model
+                        /bin/chmod a+x ../$task/train.sh
+                        cd ../$task/
+                        bash  train_clm.sh -m $model -b $batch_size -g $device_id
+
+                        kill -9 $daemon_pid
+                        cd ../all_scripts/  
+                        echo "++++++++++++++++++++ Done ++++++++++++++++++++"
+                    done < "../$task/$model_batchsize_file"
+                    ;;
+
+                "lang-modeling-mlm" | "language-modeling-mlm" )
+                    task=language-modeling
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file" ]] && echo "$task/$model_batchsize_file not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    while read -r model batch_size device_id ;do
+                        echo "=============================================================="
+                        echo Model: $model Batch_size: $batch_size Device_id: $device_id
+                        echo "=============================================================="
+                        
+                        # record memory in background
+                        memory_log_file=$log_folder/${model#*/}-$batch_size.memory
+                        if [ ! -d $log_folder ]; then
+                            # If the folder does not exist, create it
+                            mkdir -p "${log_folder}"
+                            echo "Created 'logs' folder inside $task directory."
+                        fi
+                        touch $memory_log_file
+                        bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
+
+                        # train in model
+                        /bin/chmod a+x ../$task/train.sh
+                        cd ../$task/
+                        bash  train_mlm.sh -m $model -b $batch_size -g $device_id
+
+                        kill -9 $daemon_pid
+                        cd ../all_scripts/  
+                        echo "++++++++++++++++++++ Done ++++++++++++++++++++"
+                    done < "../$task/$model_batchsize_file"
+                    ;;
+
+                "lang-modeling-plm" | "language-modeling-plm" )
+                    task=language-modeling
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file" ]] && echo "$task/$model_batchsize_file not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    while read -r model batch_size device_id ;do
+                        echo "=============================================================="
+                        echo Model: $model Batch_size: $batch_size Device_id: $device_id
+                        echo "=============================================================="
+                        
+                        # record memory in background
+                        memory_log_file=$log_folder/${model#*/}-$batch_size.memory
+                        if [ ! -d $log_folder ]; then
+                            # If the folder does not exist, create it
+                            mkdir -p "${log_folder}"
+                            echo "Created 'logs' folder inside $task directory."
+                        fi
+                        touch $memory_log_file
+                        bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
+
+                        # train in model
+                        /bin/chmod a+x ../$task/train.sh
+                        cd ../$task/
+                        bash  train_mlm.sh -m $model -b $batch_size -g $device_id
+
+                        kill -9 $daemon_pid
+                        cd ../all_scripts/  
+                        echo "++++++++++++++++++++ Done ++++++++++++++++++++"
+                    done < "../$task/$model_batchsize_file"
+                    ;;
+                    
                 *)
                     echo -ne "Invalid task\n"
                     exit 0;;

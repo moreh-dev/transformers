@@ -1,3 +1,3 @@
-bert-base-uncased
-distilbert-base-uncased
-albert-base-v2
+bert-base-uncased 64
+distilbert-base-uncased 64
+albert-base-v2 64

@@ -1,6 +1,7 @@
 task_list=(
     "text-classification-glue"
     "text-classification-xnli"
+    "token-classification"
     "question-answering"
     "question-answering-beam"
     "question-answering-seq2seq"
@@ -9,6 +10,7 @@ task_list=(
     "language-modeling-clm"
     "language-modeling-mlm"
     "language-modeling-plm"
+    "image-classification"
 )
 
 task_task_folder_lst=(
@@ -19,6 +21,8 @@ task_task_folder_lst=(
     "qa-seq2seq#question-answering#train_seq2seq.sh"
     "semantic-segmentation#semantic-segmentation#train.sh"
     "multiple-choice#multiple-choice#train.sh"
+    "token-classification#token-classification#train.sh"
+    "image-classification#image-classification#train.sh"
 )
 # Global vars
 model_batchsize_file="model_batchsize.txt"
@@ -256,7 +260,21 @@ do
                     train_script=train.sh
                     run_task $task $model_batchsize_file $memory_record_script $train_script
                     ;;
-                   
+
+                "token-cls" | "token-classification" )
+                    task=token-classification
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file" ]] && echo "$task/$model_batchsize_file not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    
+                    train_script=train.sh
+                    run_task $task $model_batchsize_file $memory_record_script $train_script
+                    ;;
+
                 *)
                     echo -ne "Invalid task\n"
                     exit 0;;

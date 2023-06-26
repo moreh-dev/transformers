@@ -1,10 +1,11 @@
 model=bert-base-uncased
 device_id=0
 
-while getopts m:g: flag
+while getopts m:b:g: flag
 do
     case "${flag}" in
         m) model=${OPTARG};;
+        b) batch_size=${OPTARG};;
         g) device_id=${OPTARG};;
     esac
 done

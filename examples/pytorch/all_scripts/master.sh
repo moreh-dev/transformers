@@ -17,7 +17,6 @@ task_list=(
     "speech-recognition-ctc"
     "speech-recognition-seq2seq"
     "summarization"
-    "text-generation"
     "translation"
 )
 
@@ -40,7 +39,6 @@ task_task_folder_lst=(
     "speech-recognition-ctc#speech-recognition#train_ctc.sh"
     "speech-recognition-seq2seq#speech-recognition#train_seq2seq.sh"
     "summarization#summarization#train.sh"
-    "text-generation#text-generation#train.sh"
     "translation#translation#train.sh"
 )
 # Global vars

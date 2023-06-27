@@ -11,6 +11,14 @@ task_list=(
     "language-modeling-mlm"
     "language-modeling-plm"
     "image-classification"
+    "image-pretraining-mae"
+    "image-pretraining-mim"
+    "audio-classification"
+    "speech-recognition-ctc"
+    "speech-recognition-seq2seq"
+    "summarization"
+    "text-generation"
+    "translation"
 )
 
 task_task_folder_lst=(
@@ -263,6 +271,108 @@ do
 
                 "token-cls" | "token-classification" )
                     task=token-classification
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file" ]] && echo "$task/$model_batchsize_file not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    
+                    train_script=train.sh
+                    run_task $task $model_batchsize_file $memory_record_script $train_script
+                    ;;
+
+                "audio-cls" | "audio-classification" )
+                    task=audio-classification
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file" ]] && echo "$task/$model_batchsize_file not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    
+                    train_script=train.sh
+                    run_task $task $model_batchsize_file $memory_record_script $train_script
+                    ;;
+
+                "img-pretrain-mae"|"image-pretraining-mae" )
+                    task=image-pretraining
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    model_batchsize_file_mae=model_batchsize_mae.txt
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file_mae" ]] && echo "$task/$model_batchsize_file_mae not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    
+                    train_script=train_mae.sh
+                    run_task $task $model_batchsize_file_mae $memory_record_script $train_script
+                    ;;
+
+                "img-pretrain-mim"||"image-pretraining-mim" )
+                    task=image-pretraining
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    model_batchsize_file_mim=model_batchsize_mim.txt
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file_mim" ]] && echo "$task/$model_batchsize_file_mim not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    
+                    train_script=train_mim.sh
+                    run_task $task $model_batchsize_file_mim $memory_record_script $train_script
+                    ;;
+
+                "speech-rec-ctc"| "speech-recognition-ctc" )
+                    task=speech-recognition
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    model_batchsize_file_ctc=model_batchsize_ctc.txt
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file_ctc" ]] && echo "$task/$model_batchsize_file_ctc not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    
+                    train_script=train_seq2seq.sh
+                    run_task $task $model_batchsize_file_ctc $memory_record_script $train_script
+                    ;;
+
+                "speech-rec-seq2seq"| "speech-recognition-seq2seq" )
+                    task=speech-recognition
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    model_batchsize_file_seq2seq=model_batchsize_seq2seq.txt
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file_seq2seq" ]] && echo "$task/$model_batchsize_file_seq2seq not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    
+                    train_script=train_seq2seq.sh
+                    run_task $task $model_batchsize_file_seq2seq $memory_record_script $train_script
+                    ;;
+
+                "summarization" )
+                    task=summarization
+                    export PATH=$PATH:../${task}
+                    log_folder=../$task/logs
+                    echo -ne "your task is ${task}\n"
+
+                    [[ ! -f "../$task/$model_batchsize_file" ]] && echo "$task/$model_batchsize_file not exist" && exit 1
+
+                    [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && exit 1
+                    
+                    train_script=train.sh
+                    run_task $task $model_batchsize_file $memory_record_script $train_script
+                    ;;
+
+                "translation" )
+                    task=translation
                     export PATH=$PATH:../${task}
                     log_folder=../$task/logs
                     echo -ne "your task is ${task}\n"

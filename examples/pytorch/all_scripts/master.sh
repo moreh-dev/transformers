@@ -64,7 +64,7 @@ Example: master -t qa
 
 Avaiable options:
 -a, --all            Run all task
--t, --target         Run the task you want
+-t, --task         Run the task you want
 -h, --help           Print this help and exit
 -s, --show           Print availavle task list
 EOF

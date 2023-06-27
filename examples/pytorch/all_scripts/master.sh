@@ -31,6 +31,17 @@ task_task_folder_lst=(
     "multiple-choice#multiple-choice#train.sh"
     "token-classification#token-classification#train.sh"
     "image-classification#image-classification#train.sh"
+    "language-modeling-clm#language-modeling#train_clm.sh"
+    "language-modeling-mlm#language-modeling#train_mlm.sh"
+    "language-modeling-plm#language-modeling#train_plm.sh"
+    "image-pretraining-mae#image-pretraining#train_mae.sh"
+    "image-pretraining-mim#image-pretraining#train_min.sh"
+    "audio-classification#audio-classification#train.sh"
+    "speech-recognition-ctc#speech-recognition#train_ctc.sh"
+    "speech-recognition-seq2seq#speech-recognition#train_seq2seq.sh"
+    "summarization#summarization#train.sh"
+    "text-generation#text-generation#train.sh"
+    "translation#translation#train.sh"
 )
 # Global vars
 model_batchsize_file="model_batchsize.txt"

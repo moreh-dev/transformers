@@ -1,19 +1,29 @@
 #!/bin/bash
+model=openmmlab/upernet-convnext-base
+batch_size=16
+device_id=0
+
+while getopts m:b:g: flag
+do
+    case "${flag}" in
+        m) model=${OPTARG};;
+        b) batch_size=${OPTARG};;
+        g) device_id=${OPTARG};;
+    esac
+done
+
+echo Running $model with batch size $batch_size on device $device_id
+
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"
-mkdir -p $LOG_DIR
-mkdir -p $OUTPUT_DIR
-##    SETTINGS     ## 
-MODEL=$1
-BATCH_SIZE=$2
-device_id=$3
-log_file="${LOG_DIR}/${model_name}.log"
-output_dir="$OUTPUT_DIR/$model_name"
+log_file=$LOG_DIR/$model.log
+output_dir=$OUTPUT_DIR/$model
 
-## END OF SETTINGS ##
+mkdir -p "$(dirname $log_file)"
+mkdir -p "$(dirname $output_dir)"
 
-export TRANSFORMERS_CACHE=/nas/huggingface_pretrained_models
-export HF_DATASETS_CACHE=/nas/common_data/huggingface
+## Using moreh device
+export MOREH_VISIBLE_DEVICE=$device_id
 
 args="
 --do_train \
@@ -37,13 +47,10 @@ args="
 --evaluation_strategy epoch \
 "
 
-## Using moreh device
-export MOREH_VISIBLE_DEVICE=$device_id
-
 python3 run_semantic_segmentation.py \
-    --model_name_or_path $MODEL \
-    --per_device_eval_batch_size $BATCH_SIZE \
-    --per_device_train_batch_size $BATCH_SIZE \
+    --model_name_or_path $model \
+    --per_device_eval_batch_size $batch_size \
+    --per_device_train_batch_size $batch_size \
     --output_dir $output_dir \
     $args \
     2>&1 | tee $log_file

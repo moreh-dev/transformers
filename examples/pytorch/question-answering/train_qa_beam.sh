@@ -1,3 +1,8 @@
+#!/bin/bash
+model=facebook/bart-base
+batch_size=64
+device_id=0
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -7,12 +12,17 @@ do
     esac
 done
 
+LOG_DIR="./logs"
+OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
+
+echo Running $model with batch size $batch_size on device $device_id
 
 mkdir -p "$(dirname $log_file)"
 mkdir -p "$(dirname $output_dir)"
 
+## Using moreh devic
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="

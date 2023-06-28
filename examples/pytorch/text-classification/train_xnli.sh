@@ -1,3 +1,9 @@
+#!/bin/bash
+# Defaul values
+model=bert-base-uncased
+batch_size=64
+device_id=1
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -24,7 +30,6 @@ args="
 --logging_strategy steps \
 --logging_steps 100 \
 --max_seq_length 384 \
---doc_stride 128 \
 --overwrite_output_dir \
 --save_strategy epoch \
 --save_total_limit 2 \

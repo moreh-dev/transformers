@@ -173,3 +173,4 @@ outputs-no-trainer/
 logs/
 logs-no-trainer/
 OUTPUT_DIR/
+test*.*

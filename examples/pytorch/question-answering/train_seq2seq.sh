@@ -1,6 +1,7 @@
-#!/bin/bash
-##    SETTINGS     ## 
-#Get the input arg
+model=facebook/bart-base
+batch_size=64
+device_id=0
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -9,6 +10,8 @@ do
         g) device_id=${OPTARG};;
     esac
 done
+
+echo Running $model with batch size $batch_size on device $device_id
 
 ## END OF SETTINGS ## 
 
@@ -23,9 +26,6 @@ mkdir -p "$(dirname $output_dir)"
 args="
 --do_train \
 --do_eval \
---context_column context \
---question_column question \
---answer_column answers \
 --learning_rate 3e-5 \
 --num_train_epochs 2 \
 --logging_strategy steps \
@@ -41,7 +41,7 @@ args="
 ## Using moreh device
 export MOREH_VISIBLE_DEVICE=$device_id
 
-python run_qa_beam_search.py \
+python run_seq2seq_qa.py \
   --model_name_or_path $model \
   --dataset_name squad_v2 \
   --version_2_with_negative \

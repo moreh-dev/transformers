@@ -1,4 +1,6 @@
-#!/bin/bash
+model=google/pegasus-xsum
+batch_size=4
+device_id=0
 
 while getopts m:b:g: flag
 do
@@ -8,6 +10,8 @@ do
         g) device_id=${OPTARG};;
     esac
 done
+
+echo Running $model with batch size $batch_size on device $device_id
 
 LOG_DIR="./logs"
 OUTPUT_DIR="./outputs"

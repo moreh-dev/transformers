@@ -1,12 +1,21 @@
-while getopts m:b:g:t: flag
+#!/bin/bash
+
+# Defaul values:
+model=bert-base-uncased
+batch_size=64
+device_id=1
+task_name=mrpc
+
+while getopts m:b:g: flag
 do
     case "${flag}" in
         m) model=${OPTARG};;
         b) batch_size=${OPTARG};;
         g) device_id=${OPTARG};;
-        t) task_name=${OPTARG};;
     esac
 done
+
+echo Running $model with batch size $batch_size on device $device_id
 
 task_list=(
     "mrpc"
@@ -20,6 +29,8 @@ task_list=(
     "wnli"
 )
 
+LOG_DIR="./logs"
+OUTPUT_DIR="./outputs"
 log_file=$LOG_DIR/$model.log
 output_dir=$OUTPUT_DIR/$model
 

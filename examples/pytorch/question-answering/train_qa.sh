@@ -1,3 +1,9 @@
+#!/bin/bash
+
+model=facebook/bart-base
+batch_size=64
+device_id=0
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -31,7 +37,7 @@ args="
 --seed 42
 "
 
-python run_qa.py \
+python train_qa.sh \
   --model_name_or_path $model \
   --dataset_name squad_v2 \
   --version_2_with_negative \

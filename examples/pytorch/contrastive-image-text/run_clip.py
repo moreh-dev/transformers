@@ -50,6 +50,9 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
+# Initialize MLFlow
+import mlflow
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
 
 logger = logging.getLogger(__name__)
 
@@ -500,6 +503,10 @@ def main():
         eval_dataset=eval_dataset if training_args.do_eval else None,
         data_collator=collate_fn,
     )
+    # mlflow initial
+    experiment_id = mlflow.create_experiment('contrastive_image_text-{}'.format(model_args.model_name_or_path))
+    experiment = mlflow.get_experiment(experiment_id)
+    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment.experiment_id)
 
     # 9. Training
     if training_args.do_train:
@@ -508,13 +515,19 @@ def main():
             checkpoint = training_args.resume_from_checkpoint
         elif last_checkpoint is not None:
             checkpoint = last_checkpoint
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        trainer.save_model()
-        tokenizer.save_pretrained(training_args.output_dir)
-        image_processor.save_pretrained(training_args.output_dir)
-        trainer.log_metrics("train", train_result.metrics)
-        trainer.save_metrics("train", train_result.metrics)
-        trainer.save_state()
+        with mlflow_runner:
+            train_result = trainer.train(resume_from_checkpoint=checkpoint)
+            trainer.save_model()
+            tokenizer.save_pretrained(training_args.output_dir)
+            image_processor.save_pretrained(training_args.output_dir)
+            trainer.log_metrics("train", train_result.metrics)
+            trainer.save_metrics("train", train_result.metrics)
+            trainer.save_state()
+            mlflow.log_metric('loss', train_result.metrics["train_loss"])
+            mlflow.log_metric('runtime', train_result.metrics["train_runtime"])
+            mlflow.log_metric('samples_per_second', train_result.metrics["train_samples_per_second"])
+            mlflow.log_metric('steps_per_second', train_result.metrics["train_steps_per_second"])
+            mlflow.end_run()
 
     # 10. Evaluation
     if training_args.do_eval:

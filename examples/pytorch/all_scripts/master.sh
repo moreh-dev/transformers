@@ -321,7 +321,7 @@ do
                     run_task $task $model_batchsize_file_mae $memory_record_script $train_script
                     ;;
 
-                "img-pretrain-mim"||"image-pretraining-mim" )
+                "img-pretrain-mim"|"image-pretraining-mim" )
                     task=image-pretraining
                     export PATH=$PATH:../${task}
                     log_folder=../$task/logs

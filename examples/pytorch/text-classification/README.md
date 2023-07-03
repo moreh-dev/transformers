@@ -191,7 +191,7 @@ python run_xnli.py \
   --per_device_train_batch_size 32 \
   --learning_rate 5e-5 \
   --num_train_epochs 2.0 \
-  --max_seq_length 128 \
+  -x_seq_length 128 \
   --output_dir /tmp/debug_xnli/ \
   --save_steps -1
 ```

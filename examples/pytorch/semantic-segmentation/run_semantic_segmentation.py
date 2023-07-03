@@ -45,6 +45,9 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
+# Initialize MLFlow
+import mlflow
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
 
 """ Finetuning any 🤗 Transformers model supported by AutoModelForSemanticSegmentation for semantic segmentation leveraging the Trainer API."""
 
@@ -53,7 +56,8 @@ logger = logging.getLogger(__name__)
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
 
-require_version("datasets>=2.0.0", "To fix: pip install -r examples/pytorch/semantic-segmentation/requirements.txt")
+require_version("datasets>=2.0.0",
+                "To fix: pip install -r examples/pytorch/semantic-segmentation/requirements.txt")
 
 
 def pad_if_smaller(img, size, fill=0):
@@ -89,7 +93,8 @@ class Resize:
 
     def __call__(self, image, target):
         image = functional.resize(image, self.size)
-        target = functional.resize(target, self.size, interpolation=transforms.InterpolationMode.NEAREST)
+        target = functional.resize(
+            target, self.size, interpolation=transforms.InterpolationMode.NEAREST)
         return image, target
 
 
@@ -103,7 +108,8 @@ class RandomResize:
     def __call__(self, image, target):
         size = random.randint(self.min_size, self.max_size)
         image = functional.resize(image, size)
-        target = functional.resize(target, size, interpolation=transforms.InterpolationMode.NEAREST)
+        target = functional.resize(
+            target, size, interpolation=transforms.InterpolationMode.NEAREST)
         return image, target
 
 
@@ -210,7 +216,8 @@ class DataTrainingArguments:
     )
     reduce_labels: Optional[bool] = field(
         default=False,
-        metadata={"help": "Whether or not to reduce all labels by 1 and replace background by 255."},
+        metadata={
+            "help": "Whether or not to reduce all labels by 1 and replace background by 255."},
     )
 
     def __post_init__(self):
@@ -228,7 +235,8 @@ class ModelArguments:
 
     model_name_or_path: str = field(
         default="nvidia/mit-b0",
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"},
+        metadata={
+            "help": "Path to pretrained model or model identifier from huggingface.co/models"},
     )
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
@@ -238,9 +246,11 @@ class ModelArguments:
     )
     model_revision: str = field(
         default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+        metadata={
+            "help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    image_processor_name: str = field(default=None, metadata={"help": "Name or path of preprocessor config."})
+    image_processor_name: str = field(
+        default=None, metadata={"help": "Name or path of preprocessor config."})
     use_auth_token: bool = field(
         default=False,
         metadata={
@@ -257,11 +267,13 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        model_args, data_args, training_args = parser.parse_json_file(
+            json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
@@ -312,7 +324,8 @@ def main():
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
     # TODO support datasets from local folders
-    dataset = load_dataset(data_args.dataset_name, cache_dir=model_args.cache_dir)
+    dataset = load_dataset(data_args.dataset_name,
+                           cache_dir=model_args.cache_dir)
 
     # Rename column names to standardized names (only "image" and "label" need to be present)
     if "pixel_values" in dataset["train"].column_names:
@@ -321,7 +334,8 @@ def main():
         dataset = dataset.rename_columns({"annotation": "label"})
 
     # If we don't have a validation split, split off a percentage of train as validation.
-    data_args.train_val_split = None if "validation" in dataset.keys() else data_args.train_val_split
+    data_args.train_val_split = None if "validation" in dataset.keys(
+    ) else data_args.train_val_split
     if isinstance(data_args.train_val_split, float) and data_args.train_val_split > 0.0:
         split = dataset["train"].train_test_split(data_args.train_val_split)
         dataset["train"] = split["train"]
@@ -335,7 +349,8 @@ def main():
     else:
         repo_id = data_args.dataset_name
         filename = "id2label.json"
-    id2label = json.load(open(hf_hub_download(repo_id, filename, repo_type="dataset"), "r"))
+    id2label = json.load(open(hf_hub_download(
+        repo_id, filename, repo_type="dataset"), "r"))
     id2label = {int(k): v for k, v in id2label.items()}
     label2id = {v: str(k) for k, v in id2label.items()}
 
@@ -368,8 +383,10 @@ def main():
         per_category_accuracy = metrics.pop("per_category_accuracy").tolist()
         per_category_iou = metrics.pop("per_category_iou").tolist()
 
-        metrics.update({f"accuracy_{id2label[i]}": v for i, v in enumerate(per_category_accuracy)})
-        metrics.update({f"iou_{id2label[i]}": v for i, v in enumerate(per_category_iou)})
+        metrics.update(
+            {f"accuracy_{id2label[i]}": v for i, v in enumerate(per_category_accuracy)})
+        metrics.update(
+            {f"iou_{id2label[i]}": v for i, v in enumerate(per_category_iou)})
 
         return metrics
 
@@ -402,7 +419,8 @@ def main():
     # Currently based on official torchvision references: https://github.com/pytorch/vision/blob/main/references/segmentation/transforms.py
     if "shortest_edge" in image_processor.size:
         # We instead set the target size as (shortest_edge, shortest_edge) to here to ensure all images are batchable.
-        size = (image_processor.size["shortest_edge"], image_processor.size["shortest_edge"])
+        size = (image_processor.size["shortest_edge"],
+                image_processor.size["shortest_edge"])
     else:
         size = (image_processor.size["height"], image_processor.size["width"])
     train_transforms = Compose(
@@ -412,7 +430,8 @@ def main():
             RandomHorizontalFlip(flip_prob=0.5),
             PILToTensor(),
             ConvertImageDtype(torch.float),
-            Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
+            Normalize(mean=image_processor.image_mean,
+                      std=image_processor.image_std),
         ]
     )
     # Define torchvision transform to be applied to each image.
@@ -423,7 +442,8 @@ def main():
             Resize(size=size),
             PILToTensor(),
             ConvertImageDtype(torch.float),
-            Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
+            Normalize(mean=image_processor.image_mean,
+                      std=image_processor.image_std),
         ]
     )
 
@@ -460,7 +480,8 @@ def main():
             raise ValueError("--do_train requires a train dataset")
         if data_args.max_train_samples is not None:
             dataset["train"] = (
-                dataset["train"].shuffle(seed=training_args.seed).select(range(data_args.max_train_samples))
+                dataset["train"].shuffle(seed=training_args.seed).select(
+                    range(data_args.max_train_samples))
             )
         # Set the training transforms
         dataset["train"].set_transform(preprocess_train)
@@ -470,7 +491,8 @@ def main():
             raise ValueError("--do_eval requires a validation dataset")
         if data_args.max_eval_samples is not None:
             dataset["validation"] = (
-                dataset["validation"].shuffle(seed=training_args.seed).select(range(data_args.max_eval_samples))
+                dataset["validation"].shuffle(seed=training_args.seed).select(
+                    range(data_args.max_eval_samples))
             )
         # Set the validation transforms
         dataset["validation"].set_transform(preprocess_val)
@@ -486,6 +508,13 @@ def main():
         data_collator=default_data_collator,
     )
 
+    # mlflow initial
+    experiment_id = mlflow.create_experiment(
+        'semantic_segmentation-{}'.format(model_args.model_name_or_path))
+    experiment = mlflow.get_experiment(experiment_id)
+    mlflow_runner = mlflow.start_run(
+        run_name=model_args.model_name_or_path, experiment_id=experiment.experiment_id)
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -493,11 +522,20 @@ def main():
             checkpoint = training_args.resume_from_checkpoint
         elif last_checkpoint is not None:
             checkpoint = last_checkpoint
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        trainer.save_model()
-        trainer.log_metrics("train", train_result.metrics)
-        trainer.save_metrics("train", train_result.metrics)
-        trainer.save_state()
+
+        with mlflow_runner:
+            train_result = trainer.train(resume_from_checkpoint=checkpoint)
+            trainer.save_model()
+            trainer.log_metrics("train", train_result.metrics)
+            trainer.save_metrics("train", train_result.metrics)
+            trainer.save_state()
+            mlflow.log_metric('loss', metrics["train_loss"])
+            mlflow.log_metric('runtime', metrics["train_runtime"])
+            mlflow.log_metric('samples_per_second',
+                              metrics["train_samples_per_second"])
+            mlflow.log_metric('steps_per_second',
+                              metrics["train_steps_per_second"])
+            mlflow.end_run()
 
     # Evaluation
     if training_args.do_eval:

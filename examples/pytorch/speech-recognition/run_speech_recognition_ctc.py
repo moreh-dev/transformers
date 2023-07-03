@@ -49,6 +49,9 @@ from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
+# Initialize MLFlow
+import mlflow
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
@@ -707,6 +710,10 @@ def main():
         eval_dataset=vectorized_datasets["eval"] if training_args.do_eval else None,
         tokenizer=feature_extractor,
     )
+    # mlflow initial
+    experiment_id = mlflow.create_experiment('speech-reg-ctc-{}'.format(model_args.model_name_or_path))
+    experiment = mlflow.get_experiment(experiment_id)
+    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment.experiment_id)
 
     # 8. Finally, we can start training
 
@@ -720,20 +727,25 @@ def main():
         else:
             checkpoint = None
 
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        trainer.save_model()
+        with mlflow_runner:
+            train_result = trainer.train(resume_from_checkpoint=checkpoint)
+            trainer.save_model()
 
-        metrics = train_result.metrics
-        max_train_samples = (
-            data_args.max_train_samples
-            if data_args.max_train_samples is not None
-            else len(vectorized_datasets["train"])
-        )
-        metrics["train_samples"] = min(max_train_samples, len(vectorized_datasets["train"]))
-
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
-        trainer.save_state()
+            metrics = train_result.metrics
+            max_train_samples = (
+                data_args.max_train_samples
+                if data_args.max_train_samples is not None
+                else len(vectorized_datasets["train"])
+            )
+            metrics["train_samples"] = min(max_train_samples, len(vectorized_datasets["train"]))
+            trainer.log_metrics("train", metrics)
+            trainer.save_metrics("train", metrics)
+            trainer.save_state()
+            mlflow.log_metric('loss', metrics["train_loss"])
+            mlflow.log_metric('runtime', metrics["train_runtime"])
+            mlflow.log_metric('samples_per_second', metrics["train_samples_per_second"])
+            mlflow.log_metric('steps_per_second', metrics["train_steps_per_second"])
+            mlflow.end_run()
 
     # Evaluation
     results = {}

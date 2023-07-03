@@ -41,6 +41,9 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
+# Initialize MLFlow
+import mlflow
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
 
 logger = logging.getLogger(__name__)
 
@@ -382,6 +385,11 @@ def main():
         tokenizer=feature_extractor,
     )
 
+    # mlflow initial
+    experiment_id = mlflow.create_experiment('translateion-{}'.format(model_args.model_name_or_path))
+    experiment = mlflow.get_experiment(experiment_id)
+    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment.experiment_id)
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -389,11 +397,19 @@ def main():
             checkpoint = training_args.resume_from_checkpoint
         elif last_checkpoint is not None:
             checkpoint = last_checkpoint
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        trainer.save_model()
-        trainer.log_metrics("train", train_result.metrics)
-        trainer.save_metrics("train", train_result.metrics)
-        trainer.save_state()
+        
+        with mlflow_runner:
+            train_result = trainer.train(resume_from_checkpoint=checkpoint)
+            trainer.save_model()
+            trainer.log_metrics("train", train_result.metrics)
+            trainer.save_metrics("train", train_result.metrics)
+            trainer.save_state()
+            
+            mlflow.log_metric('loss', metrics["train_loss"])
+            mlflow.log_metric('runtime', metrics["train_runtime"])
+            mlflow.log_metric('samples_per_second', metrics["train_samples_per_second"])
+            mlflow.log_metric('steps_per_second', metrics["train_steps_per_second"])
+            mlflow.end_run()
 
     # Evaluation
     if training_args.do_eval:

@@ -1,0 +1,5 @@
+bigscience/bloom-560m 16 1
+microsoft/deberta-base 32 1
+google/canine-s 16 1
+vinai/bertweet-base 32 1
+##end of line##

@@ -578,9 +578,10 @@ def main():
     )
 
     # mlflow initial
-    experiment_id = mlflow.create_experiment('language_modeling_clm-{}'.format(model_args.model_name_or_path))
-    experiment = mlflow.get_experiment(experiment_id)
-    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment.experiment_id)
+    experiment_name = 'language_modeling_clm-{}'.format(model_args.model_name_or_path)
+    current_experiment = mlflow.set_experiment(experiment_name)
+    experiment_id=current_experiment.experiment_id
+    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment_id)
 
     # Training
     if training_args.do_train:
@@ -608,6 +609,7 @@ def main():
             mlflow.log_metric('runtime', metrics["train_runtime"])
             mlflow.log_metric('samples_per_second', metrics["train_samples_per_second"])
             mlflow.log_metric('steps_per_second', metrics["train_steps_per_second"])
+            mlflow.log_params({"model_obj_name" : type(model)})
             mlflow.end_run()
 
     # Evaluation

@@ -386,9 +386,10 @@ def main():
     )
 
     # mlflow initial
-    experiment_id = mlflow.create_experiment('translateion-{}'.format(model_args.model_name_or_path))
-    experiment = mlflow.get_experiment(experiment_id)
-    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment.experiment_id)
+    experiment_name ='translateion-{}'.format(model_args.model_name_or_path)
+    current_experiment = mlflow.set_experiment(experiment_name)
+    experiment_id=current_experiment.experiment_id
+    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment_id)
 
     # Training
     if training_args.do_train:

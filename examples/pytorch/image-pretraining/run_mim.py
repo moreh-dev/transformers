@@ -437,9 +437,10 @@ def main():
         data_collator=collate_fn,
     )
     # mlflow initial
-    experiment_id = mlflow.create_experiment('img_pretraining_mim-{}'.format(model_args.model_name_or_path))
-    experiment = mlflow.get_experiment(experiment_id)
-    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment.experiment_id)
+    experiment_name = 'img_pretraining_mim-{}'.format(model_args.model_name_or_path)
+    current_experiment = mlflow.set_experiment(experiment_name)
+    experiment_id=current_experiment.experiment_id
+    mlflow_runner = mlflow.start_run(run_name=model_args.model_name_or_path, experiment_id=experiment_id)
 
     # Training
     if training_args.do_train:

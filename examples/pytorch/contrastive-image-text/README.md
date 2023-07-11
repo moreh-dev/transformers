@@ -1,3 +1,5 @@
+    bash train.sh -m BAAI/AltCLIP -b 64 -g 0
+
 <!---
 Copyright 2022 The HuggingFace Team. All rights reserved.
 

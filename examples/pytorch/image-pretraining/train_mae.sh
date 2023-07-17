@@ -1,4 +1,4 @@
-model=facebook/vit-mae-base
+model=Salesforce/blip-image-captioning-base
 batch_size=128
 device_id=0
 

@@ -21,7 +21,7 @@ from typing import Optional
 
 import torch
 from datasets import load_dataset
-from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
+from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor, Resize
 from torchvision.transforms.functional import InterpolationMode
 
 import transformers
@@ -303,7 +303,7 @@ def main():
     # transformations as done in original MAE paper
     # source: https://github.com/facebookresearch/mae/blob/main/main_pretrain.py
     if "shortest_edge" in image_processor.size:
-        size = image_processor.size["shortest_edge"]
+           = image_processor.size["shortest_edge"]
     else:
         size = (image_processor.size["height"], image_processor.size["width"])
     transforms = Compose(
@@ -313,6 +313,7 @@ def main():
             RandomHorizontalFlip(),
             ToTensor(),
             Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
+            Resize((224,224)),
         ]
     )
 

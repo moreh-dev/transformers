@@ -303,7 +303,7 @@ def main():
     # transformations as done in original MAE paper
     # source: https://github.com/facebookresearch/mae/blob/main/main_pretrain.py
     if "shortest_edge" in image_processor.size:
-           = image_processor.size["shortest_edge"]
+        size = image_processor.size["shortest_edge"]
     else:
         size = (image_processor.size["height"], image_processor.size["width"])
     transforms = Compose(

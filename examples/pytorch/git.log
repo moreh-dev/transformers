@@ -3,3 +3,107 @@
 [2023-07-17 17:46:07.980] [info] [1/1] Connecting to resources on the server (192.168.110.1:24156)...
 [2023-07-17 17:46:07.994] [info] Establishing links to the resources...
 [2023-07-17 17:46:08.099] [info] KT AI Accelerator is ready to use.
+  0%|                                                                                                                          | 0/600 [00:00<?, ?it/s]╭─────────────────────────────── Traceback (most recent call last) ────────────────────────────────╮
+│ /nas/huong/projects/moreh/transformers/examples/pytorch/image-captioning/train.py:76 in <module> │
+│                                                                                                  │
+│   73 │   compute_metrics=compute_metrics,                                                        │
+│   74 )                                                                                           │
+│   75                                                                                             │
+│ ❱ 76 trainer.train()                                                                             │
+│   77                                                                                             │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/transformers/trainer.py:1664 in train            │
+│                                                                                                  │
+│   1661 │   │   inner_training_loop = find_executable_batch_size(                                 │
+│   1662 │   │   │   self._inner_training_loop, self._train_batch_size, args.auto_find_batch_size  │
+│   1663 │   │   )                                                                                 │
+│ ❱ 1664 │   │   return inner_training_loop(                                                       │
+│   1665 │   │   │   args=args,                                                                    │
+│   1666 │   │   │   resume_from_checkpoint=resume_from_checkpoint,                                │
+│   1667 │   │   │   trial=trial,                                                                  │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/transformers/trainer.py:1940 in                  │
+│ _inner_training_loop                                                                             │
+│                                                                                                  │
+│   1937 │   │   │   │   │   with model.no_sync():                                                 │
+│   1938 │   │   │   │   │   │   tr_loss_step = self.training_step(model, inputs)                  │
+│   1939 │   │   │   │   else:                                                                     │
+│ ❱ 1940 │   │   │   │   │   tr_loss_step = self.training_step(model, inputs)                      │
+│   1941 │   │   │   │                                                                             │
+│   1942 │   │   │   │   if (                                                                      │
+│   1943 │   │   │   │   │   args.logging_nan_inf_filter                                           │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/transformers/trainer.py:2735 in training_step    │
+│                                                                                                  │
+│   2732 │   │   │   return loss_mb.reduce_mean().detach().to(self.args.device)                    │
+│   2733 │   │                                                                                     │
+│   2734 │   │   with self.compute_loss_context_manager():                                         │
+│ ❱ 2735 │   │   │   loss = self.compute_loss(model, inputs)                                       │
+│   2736 │   │                                                                                     │
+│   2737 │   │   if self.args.n_gpu > 1:                                                           │
+│   2738 │   │   │   loss = loss.mean()  # mean() to average on multi-gpu parallel training        │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/transformers/trainer.py:2767 in compute_loss     │
+│                                                                                                  │
+│   2764 │   │   │   labels = inputs.pop("labels")                                                 │
+│   2765 │   │   else:                                                                             │
+│   2766 │   │   │   labels = None                                                                 │
+│ ❱ 2767 │   │   outputs = model(**inputs)                                                         │
+│   2768 │   │   # Save past state if it exists                                                    │
+│   2769 │   │   # TODO: this needs to be fixed and made cleaner later.                            │
+│   2770 │   │   if self.args.past_index >= 0:                                                     │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/torch/nn/modules/module.py:1194 in _call_impl    │
+│                                                                                                  │
+│   1191 │   │   # this function, and just call forward.                                           │
+│   1192 │   │   if not (self._backward_hooks or self._forward_hooks or self._forward_pre_hooks o  │
+│   1193 │   │   │   │   or _global_forward_hooks or _global_forward_pre_hooks):                   │
+│ ❱ 1194 │   │   │   return forward_call(*input, **kwargs)                                         │
+│   1195 │   │   # Do not call functions when jit is used                                          │
+│   1196 │   │   full_backward_hooks, non_full_backward_hooks = [], []                             │
+│   1197 │   │   if self._backward_hooks or _global_backward_hooks:                                │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/transformers/models/git/modeling_git.py:1496 in  │
+│ forward                                                                                          │
+│                                                                                                  │
+│   1493 │   │   if labels is not None:                                                            │
+│   1494 │   │   │   use_cache = False                                                             │
+│   1495 │   │                                                                                     │
+│ ❱ 1496 │   │   outputs = self.git(                                                               │
+│   1497 │   │   │   input_ids,                                                                    │
+│   1498 │   │   │   attention_mask=attention_mask,                                                │
+│   1499 │   │   │   position_ids=position_ids,                                                    │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/torch/nn/modules/module.py:1194 in _call_impl    │
+│                                                                                                  │
+│   1191 │   │   # this function, and just call forward.                                           │
+│   1192 │   │   if not (self._backward_hooks or self._forward_hooks or self._forward_pre_hooks o  │
+│   1193 │   │   │   │   or _global_forward_hooks or _global_forward_pre_hooks):                   │
+│ ❱ 1194 │   │   │   return forward_call(*input, **kwargs)                                         │
+│   1195 │   │   # Do not call functions when jit is used                                          │
+│   1196 │   │   full_backward_hooks, non_full_backward_hooks = [], []                             │
+│   1197 │   │   if self._backward_hooks or _global_backward_hooks:                                │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/transformers/models/git/modeling_git.py:1281 in  │
+│ forward                                                                                          │
+│                                                                                                  │
+│   1278 │   │   tgt_mask = self._generate_future_mask(seq_length, embedding_output.dtype, embedd  │
+│   1279 │   │                                                                                     │
+│   1280 │   │   # Create an attention mask of shape (batch_size, 1, tgt_seq_len, src_seq_len)     │
+│ ❱ 1281 │   │   combined_attention_mask = self.create_attention_mask(                             │
+│   1282 │   │   │   tgt=embedding_output,                                                         │
+│   1283 │   │   │   memory=projected_visual_features,                                             │
+│   1284 │   │   │   tgt_mask=tgt_mask,                                                            │
+│                                                                                                  │
+│ /nas/.conda/envs/hf/lib/python3.8/site-packages/transformers/models/git/modeling_git.py:1139 in  │
+│ create_attention_mask                                                                            │
+│                                                                                                  │
+│   1136 │   │   │   memory_key_padding_mask = torch.full((memory.shape[0], memory.shape[1]), fil  │
+│   1137 │   │   # if it is False, it means valid. That is, it is not a padding                    │
+│   1138 │   │   if memory_key_padding_mask.dtype != torch.bool:                                   │
+│ ❱ 1139 │   │   │   raise ValueError("Memory key padding mask must be a boolean tensor.")         │
+│   1140 │   │   zero_negative_infinity = torch.zeros_like(memory_key_padding_mask, dtype=tgt.dty  │
+│   1141 │   │   zero_negative_infinity[memory_key_padding_mask] = float("-inf")                   │
+│   1142 │   │   full_attention_mask = full_attention_mask.expand(                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ValueError: Memory key padding mask must be a boolean tensor.

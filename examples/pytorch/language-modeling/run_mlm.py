@@ -50,7 +50,10 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-
+# Initialize MLFlow
+# Initialize MLFlow
+import mlflow
+mlflow.set_tracking_uri(str(os.environ.get("TRACKING_URI")))
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
@@ -598,6 +601,14 @@ def main():
         else None,
     )
 
+    # Mlflow initial
+    experiment_name =f'language-modeling-mlm-{model_args.model_name_or_path}'
+    #set the os enviroment for MLflowCallback
+    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
+    os.environ["MLFLOW_EXPERIMENT_NAME"]=experiment_name
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="True"
+    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -643,7 +654,7 @@ def main():
             kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
         else:
             kwargs["dataset"] = data_args.dataset_name
-
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

@@ -80,7 +80,7 @@ run_task() {
     echo "Log folder: $log_folder"
     echo "Model batch size file: $model_batchsize_file"
     echo "Memory record script: $memory_record_script"
-
+    echo "Train file: $train_script"
     while read -r model batch_size device_id ; do
         echo "=============================================================="
         echo "Model: $model Batch_size: $batch_size Device_id: $device_id"
@@ -93,16 +93,15 @@ run_task() {
             mkdir -p "$log_folder"
             echo "Created 'logs' folder inside $task directory."
         fi
-        touch "$memory_log_file"
-        bash "$memory_record_script" "$device_id" 2>&1 >> "$memory_log_file" & daemon_pid=$!
-
+        model_log_folder=$log_folder/${model#*/}/
         # Train model
         chmod a+x "../$task/$train_script"
         cd "../$task/"
-        bash $train_script -m "$model" -b "$batch_size" -g "$device_id"
-
-        kill -9 "$daemon_pid"
+        bash $train_script -m "$model" -b "$batch_size" -g "$device_id" &
+        pid=$!
         cd ../all_scripts/
+        bash "$memory_record_script" $pid $task $model $batch_size $model_log_folder
+        
         echo "++++++++++++++++++++ Done ++++++++++++++++++++"
     done < "../$task/$model_batchsize_file"
 }
@@ -421,21 +420,21 @@ do
                     echo Model: $model Batch_size: $batch_size Device_id: $device_id Other args: $task_type
                     echo "=============================================================="
                     
-                    # record memory in background
-                    memory_log_file=$log_folder/${model#*/}-$batch_size.memory
-                    touch $memory_log_file
-                    bash $memory_record_script $device_id 2>&1 >> $memory_log_file &daemon_pid=$!
+
+                    model_log_folder=$log_folder/${model#*/}/
 
                     # train in model
                     /bin/chmod a+x ../${folder_name}/${train_file}
                     cd ../${folder_name}/
-                    bash  $train_file -m $model -b $batch_size -g $device_id
-
-                    kill -9 $daemon_pid
+                    bash  $train_file -m $model -b $batch_size -g $device_id &
+                    pid=$!
+                    # record memory in background
+                    bash "$memory_record_script" $pid $task $model $batch_size $model_log_folder
                     echo "++++++++++++++++++++ Done ++++++++++++++++++++"
                 done < "../$folder_name/$model_batchsize_file"
                 cd ../all_scripts/
             done
+            exit 0
             ;;
     esac
     shift

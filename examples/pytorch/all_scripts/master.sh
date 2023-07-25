@@ -61,10 +61,10 @@ Usage: master [-h|--help] [-a|--all] [-t|--task] [-s|--show]
 Example: master -t qa
 
 Avaiable options:
--a, --all            Run all task
+-a, --all          Run all task
 -t, --task         Run the task you want
--h, --help           Print this help and exit
--s, --show           Print availavle task list
+-h, --help         Print this help and exit
+-s, --show         Print availavle task list
 EOF
   exit
 }
@@ -411,9 +411,9 @@ do
                 export PATH=$PATH:../${folder_name}
                 log_folder=../$folder_name/logs
 
-                [[ ! -f "../$folder_name/$model_batchsize_file" ]] && echo "$folder_name/$model_batchsize_file not exist" && continue 
+                [[ ! -f "../$folder_name/$model_batchsize_file" ]] && echo "$folder_name/$model_batchsize_file not exist" && break
 
-                [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && continue 
+                [[ ! -f "./$memory_record_script" ]] && echo "$memory_record_script not exist" && break
 
                 while read -r model batch_size device_id task_type; do
                     echo "=============================================================="
@@ -429,10 +429,11 @@ do
                     bash  $train_file -m $model -b $batch_size -g $device_id &
                     pid=$!
                     # record memory in background
+                    cd ../all_scripts/
                     bash "$memory_record_script" $pid $task $model $batch_size $model_log_folder
                     echo "++++++++++++++++++++ Done ++++++++++++++++++++"
                 done < "../$folder_name/$model_batchsize_file"
-                cd ../all_scripts/
+                
             done
             exit 0
             ;;

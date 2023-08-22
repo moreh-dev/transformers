@@ -377,13 +377,18 @@ def main():
             checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()
-        trainer.log_metrics("train", train_result.metrics)
-        trainer.save_metrics("train", train_result.metrics)
+        metrics = train_result.metrics
+        metrics['throughput'] = metrics['train_samples_per_second']
+        metrics['loss']= metrics['train_loss']
+        metrics['lr'] = training_args.learning_rate
+        trainer.log_metrics("train", metrics)
+        trainer.save_metrics("train", metrics)
         trainer.save_state()
 
     # Evaluation
     if training_args.do_eval:
         metrics = trainer.evaluate()
+        metrics['throughput'] = metrics['eval_samples_per_second']
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
 

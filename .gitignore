@@ -173,4 +173,10 @@ outputs-no-trainer/
 logs/
 logs-no-trainer/
 OUTPUT_DIR/
+mlruns/
+None/
 test*.*
+.nfs*
+model_*.txt
+model_batchsize.txt
+dummy*

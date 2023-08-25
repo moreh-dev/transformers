@@ -730,7 +730,9 @@ def main():
             else len(vectorized_datasets["train"])
         )
         metrics["train_samples"] = min(max_train_samples, len(vectorized_datasets["train"]))
-
+        metrics['throughput'] = metrics['train_samples_per_second']
+        metrics['loss']= metrics['train_loss']
+        metrics['lr'] = training_args.learning_rate
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()

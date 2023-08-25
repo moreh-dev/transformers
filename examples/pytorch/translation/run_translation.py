@@ -605,7 +605,9 @@ def main():
         metrics = trainer.evaluate(max_length=max_length, num_beams=num_beams, metric_key_prefix="eval")
         max_eval_samples = data_args.max_eval_samples if data_args.max_eval_samples is not None else len(eval_dataset)
         metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
-
+        metrics['throughput'] = metrics['train_samples_per_second']
+        metrics['loss']= metrics['train_loss']
+        metrics['lr'] = training_args.learning_rate
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
 

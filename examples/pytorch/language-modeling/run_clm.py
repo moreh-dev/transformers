@@ -52,8 +52,6 @@ from transformers.testing_utils import CaptureLogger
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-# Initialize MLFlow
-import mlflow
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
@@ -572,14 +570,6 @@ def main():
         if training_args.do_eval and not is_torch_tpu_available()
         else None,
     )
-    # Mlflow initial
-    experiment_name =f'language-modeling-clm-{model_args.model_name_or_path}'
-    #set the os enviroment for MLflowCallback
-    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
-    os.environ["MLFLOW_EXPERIMENT_NAME"]=experiment_name
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="True"
-    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
-    os.environ["MLFLOW_TRACKING_URI"]=str(os.environ.get("TRACKING_URI"))
 
     # Training
     if training_args.do_train:

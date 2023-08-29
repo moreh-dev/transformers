@@ -271,6 +271,11 @@ def main():
         image_processor = ViTImageProcessor.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         image_processor = ViTImageProcessor()
+    config.update(
+        {
+            "image_size":image_processor.size["height"],
+        }
+    )
     # create model
     if model_args.model_name_or_path:
         model = ViTMAEForPreTraining.from_pretrained(

@@ -33,6 +33,9 @@ args="
 --block_size 256 \
 --overwrite_cache True \
 --overwrite_output_dir \
+--logging_strategy epoch \
+--save_total_limit 2 \
+--num_train_epochs 3 \
 "
 
 python3 run_clm.py \

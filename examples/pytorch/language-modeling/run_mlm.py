@@ -51,6 +51,7 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
+
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
 
@@ -597,6 +598,7 @@ def main():
         else None,
     )
 
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -644,7 +646,7 @@ def main():
             kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
         else:
             kwargs["dataset"] = data_args.dataset_name
-
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

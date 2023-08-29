@@ -30,7 +30,7 @@ args="
 --do_train \
 --do_eval \
 --torch_dtype float32 \
---block_size 1024 \
+--block_size 256 \
 --overwrite_cache True \
 --overwrite_output_dir \
 --logging_strategy epoch \

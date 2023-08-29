@@ -52,7 +52,9 @@ from transformers.testing_utils import CaptureLogger
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-
+# Initialize MLFlow
+import mlflow
+mlflow.set_tracking_uri(str(os.environ.get("TRACKING_URI")))
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
@@ -73,7 +75,7 @@ class ModelArguments:
     """
 
     model_name_or_path: Optional[str] = field(
-        default=None,
+        default='microsoft/prophetnet-large-uncased',
         metadata={
             "help": (
                 "The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
@@ -154,10 +156,10 @@ class DataTrainingArguments:
     """
 
     dataset_name: Optional[str] = field(
-        default=None, metadata={"help": "The name of the dataset to use (via the datasets library)."}
+        default="wikitext", metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
     dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+        default="wikitext-2-raw-v1", metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
     )
     train_file: Optional[str] = field(default=None, metadata={"help": "The input training data file (a text file)."})
     validation_file: Optional[str] = field(
@@ -184,7 +186,7 @@ class DataTrainingArguments:
     )
     streaming: bool = field(default=False, metadata={"help": "Enable streaming mode"})
     block_size: Optional[int] = field(
-        default=None,
+        default=1024,
         metadata={
             "help": (
                 "Optional input sequence length after tokenization. "
@@ -223,7 +225,6 @@ class DataTrainingArguments:
             if self.validation_file is not None:
                 extension = self.validation_file.split(".")[-1]
                 assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
-
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -572,6 +573,13 @@ def main():
         if training_args.do_eval and not is_torch_tpu_available()
         else None,
     )
+    # Mlflow initial
+    experiment_name =f'language-modeling-clm-{model_args.model_name_or_path}'
+    #set the os enviroment for MLflowCallback
+    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
+    os.environ["MLFLOW_EXPERIMENT_NAME"]=experiment_name
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="True"
+    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
 
     # Training
     if training_args.do_train:
@@ -589,7 +597,9 @@ def main():
             data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
         )
         metrics["train_samples"] = min(max_train_samples, len(train_dataset))
-
+        metrics['throughput'] = metrics['train_samples_per_second']
+        metrics['loss']= metrics['train_loss']
+        metrics['lr'] = training_args.learning_rate
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
@@ -619,7 +629,7 @@ def main():
             kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
         else:
             kwargs["dataset"] = data_args.dataset_name
-
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

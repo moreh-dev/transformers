@@ -29,6 +29,13 @@ args="
 --dataset_config_name wikitext-2-raw-v1 \
 --do_train \
 --do_eval \
+--torch_dtype float32 \
+--block_size 1024 \
+--overwrite_cache True \
+--overwrite_output_dir \
+--logging_strategy epoch \
+--save_total_limit 2 \
+--num_train_epochs 3 \
 "
 
 python3 run_clm.py \

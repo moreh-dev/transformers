@@ -1,3 +1,7 @@
+model=google/pegasus-xsum
+batch_size=4
+device_id=0
+
 while getopts m:b:g: flag
 do
     case "${flag}" in
@@ -20,23 +24,20 @@ mkdir -p "$(dirname $output_dir)"
 ## Using moreh device
 export MOREH_VISIBLE_DEVICE=$device_id
 
+
 args="
---dataset_name wikitext \
---dataset_config_name wikitext-2-raw-v1 \
---do_train \
---do_eval \
+--learning_rate 3e-5 \
+--num_train_epochs 2 \
 --overwrite_output_dir \
---logging_strategy epoch \
---save_total_limit 2 \
---num_train_epochs 3 \
+--seed 42 \
 "
 
-## Using moreh device
-
-python3 run_mlm.py \
-    --model_name_or_path $model \
-    --per_device_eval_batch_size $batch_size \
-    --per_device_train_batch_size $batch_size \
-    --output_dir $output_dir \
-    $args \
-    2>&1 | tee $log_file
+accelerate launch run_summarization_no_trainer.py \
+  --model_name_or_path $model \
+  --dataset_name xsum \
+  --source_prefix "summarize: " \
+  --per_device_train_batch_size $batch_size \
+  --per_device_eval_batch_size $batch_size \
+  --output_dir $output_dir \
+  $args \
+  2>&1 | tee $log_file

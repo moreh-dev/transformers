@@ -26,6 +26,9 @@ args="
 --do_train \
 --do_eval \
 --overwrite_output_dir \
+--logging_strategy epoch \
+--save_total_limit 2 \
+--num_train_epochs 3 \
 "
 
 ## Using moreh device

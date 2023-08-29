@@ -653,6 +653,7 @@ def main():
         post_process_function=post_processing_function,
     )
 
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -705,7 +706,7 @@ def main():
 
         trainer.log_metrics("predict", metrics)
         trainer.save_metrics("predict", metrics)
-
+        
     if training_args.push_to_hub:
         kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "question-answering"}
         if data_args.dataset_name is not None:

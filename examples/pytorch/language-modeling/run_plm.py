@@ -218,6 +218,14 @@ class DataTrainingArguments:
                 assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
 
 
+def get_num_parameters(model):
+  num_params = 0
+  for param in model.parameters():
+    num_params += param.numel()
+  # in million
+  num_params /= 10**6
+  return num_params
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -392,6 +400,9 @@ def main():
         logger.info("Training new model from scratch")
         model = XLNetLMHeadModel(config)
 
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
+
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
     embedding_size = model.get_input_embeddings().weight.shape[0]
@@ -519,6 +530,7 @@ def main():
     os.environ["MLFLOW_EXPERIMENT_NAME"]=experiment_name
     os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="True"
     os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
+
 
     # Training
     if training_args.do_train:

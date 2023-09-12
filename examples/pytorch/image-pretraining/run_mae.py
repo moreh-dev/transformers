@@ -36,7 +36,7 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-
+import mlflow
 
 """ Pre-training a 🤗 ViT model as an MAE (masked autoencoder), as proposed in https://arxiv.org/abs/2111.06377."""
 
@@ -161,6 +161,14 @@ def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
     return {"pixel_values": pixel_values}
 
+# Log number of parameters function
+def get_num_parameters(model):
+    num_params = 0
+    for param in model.parameters():
+        num_params += param.numel()
+    # in million
+    num_params /= 10**6
+    return num_params
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -290,6 +298,10 @@ def main():
         logger.info("Training new model from scratch")
         model = ViTMAEForPreTraining(config)
 
+    # Log number of parameters
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
+
     if training_args.do_train:
         column_names = ds["train"].column_names
     else:
@@ -361,6 +373,12 @@ def main():
         data_collator=collate_fn,
     )
 
+    # Mlflow initial
+    #set the os enviroment for MLflowCallback
+    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -390,6 +408,7 @@ def main():
         "dataset": data_args.dataset_name,
         "tags": ["masked-auto-encoding"],
     }
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

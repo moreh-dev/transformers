@@ -44,7 +44,7 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-
+import mlflow
 
 """ Finetuning any 🤗 Transformers model supported by AutoModelForSemanticSegmentation for semantic segmentation leveraging the Trainer API."""
 
@@ -251,6 +251,14 @@ class ModelArguments:
         },
     )
 
+# Log number of parameters function
+def get_num_parameters(model):
+    num_params = 0
+    for param in model.parameters():
+        num_params += param.numel()
+    # in million
+    num_params /= 10**6
+    return num_params
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -390,6 +398,10 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
         ignore_mismatched_sizes=True,
     )
+    # Log number of parameters
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
+    
     image_processor = AutoImageProcessor.from_pretrained(
         model_args.image_processor_name or model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -486,6 +498,12 @@ def main():
         data_collator=default_data_collator,
     )
 
+    # Mlflow initial
+    #set the os enviroment for MLflowCallback
+    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -514,6 +532,7 @@ def main():
         "dataset": data_args.dataset_name,
         "tags": ["image-segmentation", "vision"],
     }
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

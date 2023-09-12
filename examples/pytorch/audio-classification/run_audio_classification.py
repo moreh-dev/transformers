@@ -40,7 +40,7 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-
+import mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +184,14 @@ class ModelArguments:
                 "Only make use of `--freeze_feature_encoder`."
             )
 
+# Log number of parameters function
+def get_num_parameters(model):
+    num_params = 0
+    for param in model.parameters():
+        num_params += param.numel()
+    # in million
+    num_params /= 10**6
+    return num_params
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -351,6 +359,9 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
         ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
     )
+    # Log number of parameters
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
 
     # freeze the convolutional waveform encoder
     if model_args.freeze_feature_encoder:
@@ -382,6 +393,12 @@ def main():
         tokenizer=feature_extractor,
     )
 
+    # Mlflow initial
+    #set the os enviroment for MLflowCallback
+    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"    
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -391,6 +408,9 @@ def main():
             checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()
+        metrics['throughput'] = metrics['train_samples_per_second']
+        metrics['loss']= metrics['train_loss']
+        metrics['lr'] = training_args.learning_rate
         trainer.log_metrics("train", train_result.metrics)
         trainer.save_metrics("train", train_result.metrics)
         trainer.save_state()
@@ -408,6 +428,7 @@ def main():
         "dataset": data_args.dataset_name,
         "tags": ["audio-classification"],
     }
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

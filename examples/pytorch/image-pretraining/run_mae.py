@@ -156,6 +156,25 @@ class CustomTrainingArguments(TrainingArguments):
         default=1e-3, metadata={"help": "Base learning rate: absolute_lr = base_lr * total_batch_size / 256."}
     )
 
+class TBTrainerCallback(TrainerCallback):
+    "A callback log loss, learning rate, and throughput each logging step"
+    start_time = time.time()
+
+    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        # count the time after the logging step
+        if state.global_step == 0 or state.global_step % args.logging_steps == 1:
+            self.start_time = time.time()
+        
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
+        if args.logging_strategy == 'steps':
+            logging_step_runtime = time.time() - self.start_time
+            num_samples = args.per_device_train_batch_size * args.logging_steps
+            throughput = num_samples / logging_step_runtime
+            state.log_history[-1]["throughput"] = throughput
+            state.log_history[-1]["step"] = state.global_step
+            if 'loss' in state.log_history[-1]:
+                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')
+
 
 def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
@@ -372,7 +391,7 @@ def main():
         tokenizer=image_processor,
         data_collator=collate_fn,
     )
-
+    trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
     #set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
@@ -389,9 +408,11 @@ def main():
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()
         metrics = train_result.metrics
-        metrics['throughput'] = metrics['train_samples_per_second']
-        metrics['loss']= metrics['train_loss']
-        metrics['lr'] = training_args.learning_rate
+        for metric_dict in trainer.state.log_history:
+            if 'loss' in metric_dict:
+                mlflow.log_metric('loss', metric_dict['loss'], step=metric_dict['step'])
+                mlflow.log_metric('lr', metric_dict['learning_rate'], step=metric_dict['step'])
+                mlflow.log_metric('throughput', metric_dict['throughput'], step=metric_dict['step'])
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()

@@ -209,7 +209,7 @@ class DataTrainingArguments:
                 assert extension in ["csv", "json"], "`validation_file` should be a csv or a json file."
         self.task_name = self.task_name.lower()
 
-class MyCallback(TrainerCallback):
+class TBTrainerCallback(TrainerCallback):
     "A callback log loss, learning rate, and throughput each logging step"
     start_time = time.time()
 
@@ -224,6 +224,10 @@ class MyCallback(TrainerCallback):
             num_samples = args.per_device_train_batch_size * args.logging_steps
             throughput = num_samples / logging_step_runtime
             state.log_history[-1]["throughput"] = throughput
+            state.log_history[-1]["step"] = state.global_step
+            if 'loss' in state.log_history[-1]:
+                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')
+            
         
 # Log number of parameters function
 def get_num_parameters(model):
@@ -587,7 +591,7 @@ def main():
         data_collator=data_collator,
         compute_metrics=compute_metrics,
     )
-    trainer.add_callback(MyCallback)
+    trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
     #set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
@@ -609,9 +613,11 @@ def main():
             data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
         )
         metrics["train_samples"] = min(max_train_samples, len(train_dataset))
-        metrics['throughput'] = metrics['train_samples_per_second']
-        metrics['loss']= metrics['train_loss']
-        metrics['lr'] = training_args.learning_rate
+        for metric_dict in trainer.state.log_history:
+            if 'loss' in metric_dict:
+                mlflow.log_metric('loss', metric_dict['loss'], step=metric_dict['step'])
+                mlflow.log_metric('lr', metric_dict['learning_rate'], step=metric_dict['step'])
+                mlflow.log_metric('throughput', metric_dict['throughput'], step=metric_dict['step'])
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()

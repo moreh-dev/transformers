@@ -35,6 +35,9 @@ from transformers import (
     HfArgumentParser,
     Trainer,
     TrainingArguments,
+    TrainerCallback,
+    TrainerState,
+    TrainerControl,
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint

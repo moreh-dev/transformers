@@ -32,6 +32,9 @@ from transformers import (
     ViTImageProcessor,
     ViTMAEConfig,
     ViTMAEForPreTraining,
+    TrainerCallback,
+    TrainerState,
+    TrainerControl,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry

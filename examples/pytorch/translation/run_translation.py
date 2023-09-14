@@ -23,6 +23,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+import time
 
 import datasets
 import evaluate
@@ -43,12 +44,16 @@ from transformers import (
     MBartTokenizerFast,
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
+    TrainerCallback,
+    TrainerState,
+    TrainerControl,
     default_data_collator,
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
+import mlflow
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
@@ -246,6 +251,36 @@ class DataTrainingArguments:
         if self.val_max_target_length is None:
             self.val_max_target_length = self.max_target_length
 
+class TBTrainerCallback(TrainerCallback):
+    "A callback log loss, learning rate, and throughput each logging step"
+    start_time = time.time()
+
+    def on_step_begin(self, args: Seq2SeqTrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        # count the time after the logging step
+        if state.global_step == 0 or state.global_step % args.logging_steps == 1:
+            self.start_time = time.time()
+        
+    def on_log(self, args: Seq2SeqTrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
+        if args.logging_strategy == 'steps':
+            logging_step_runtime = time.time() - self.start_time
+            num_samples = args.per_device_train_batch_size * args.logging_steps
+            throughput = num_samples / logging_step_runtime
+            if 'loss' in state.log_history[-1]:
+                state.log_history[-1]["throughput"] = throughput
+                state.log_history[-1]["step"] = state.global_step
+
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
+                mlflow.log_metric("throughput", throughput , step=state.global_step)
+                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
+
+# Log number of parameters function
+def get_num_parameters(model):
+    num_params = 0
+    for param in model.parameters():
+        num_params += param.numel()
+    # in million
+    num_params /= 10**6
+    return num_params
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -382,6 +417,9 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
+    # Log number of parameters
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -569,7 +607,12 @@ def main():
         data_collator=data_collator,
         compute_metrics=compute_metrics if training_args.predict_with_generate else None,
     )
-
+    trainer.add_callback(TBTrainerCallback)
+    # Mlflow initial
+    #set the os enviroment for MLflowCallback
+    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
 
     # Training
     if training_args.do_train:
@@ -605,9 +648,6 @@ def main():
         metrics = trainer.evaluate(max_length=max_length, num_beams=num_beams, metric_key_prefix="eval")
         max_eval_samples = data_args.max_eval_samples if data_args.max_eval_samples is not None else len(eval_dataset)
         metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
-        metrics['throughput'] = metrics['train_samples_per_second']
-        metrics['loss']= metrics['train_loss']
-        metrics['lr'] = training_args.learning_rate
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
 
@@ -650,7 +690,7 @@ def main():
     languages = [l for l in [data_args.source_lang, data_args.target_lang] if l is not None]
     if len(languages) > 0:
         kwargs["language"] = languages
-
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

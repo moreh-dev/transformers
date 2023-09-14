@@ -417,7 +417,7 @@ def main():
         compute_metrics=compute_metrics,
         tokenizer=feature_extractor,
     )
-    trainer.add_callback(TBTrainerCallBack)
+    trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
     #set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"

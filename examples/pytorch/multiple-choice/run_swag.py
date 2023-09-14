@@ -24,6 +24,7 @@ import sys
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Optional, Union
+import time
 
 import datasets
 import numpy as np
@@ -38,6 +39,9 @@ from transformers import (
     HfArgumentParser,
     Trainer,
     TrainingArguments,
+    TrainerCallback,
+    TrainerState,
+    TrainerControl,
     default_data_collator,
     set_seed,
 )
@@ -210,6 +214,28 @@ class DataCollatorForMultipleChoice:
         # Add back labels
         batch["labels"] = torch.tensor(labels, dtype=torch.int64)
         return batch
+
+class TBTrainerCallback(TrainerCallback):
+    "A callback log loss, learning rate, and throughput each logging step"
+    start_time = time.time()
+
+    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        # count the time after the logging step
+        if state.global_step == 0 or state.global_step % args.logging_steps == 1:
+            self.start_time = time.time()
+        
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
+        if args.logging_strategy == 'steps':
+            logging_step_runtime = time.time() - self.start_time
+            num_samples = args.per_device_train_batch_size * args.logging_steps
+            throughput = num_samples / logging_step_runtime
+            if 'loss' in state.log_history[-1]:
+                state.log_history[-1]["throughput"] = throughput
+                state.log_history[-1]["step"] = state.global_step
+
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
+                mlflow.log_metric("throughput", throughput , step=state.global_step)
+                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
 
 # Log number of parameters function
 def get_num_parameters(model):
@@ -441,7 +467,7 @@ def main():
         data_collator=data_collator,
         compute_metrics=compute_metrics,
     )
-
+    trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
     #set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
@@ -463,9 +489,7 @@ def main():
             data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
         )
         metrics["train_samples"] = min(max_train_samples, len(train_dataset))
-        metrics['throughput'] = metrics['train_samples_per_second']
-        metrics['loss']= metrics['train_loss']
-        metrics['lr'] = training_args.learning_rate
+
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()

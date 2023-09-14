@@ -18,6 +18,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+import time
 
 import torch
 from datasets import load_dataset
@@ -173,11 +174,13 @@ class TBTrainerCallback(TrainerCallback):
             logging_step_runtime = time.time() - self.start_time
             num_samples = args.per_device_train_batch_size * args.logging_steps
             throughput = num_samples / logging_step_runtime
-            state.log_history[-1]["throughput"] = throughput
-            state.log_history[-1]["step"] = state.global_step
             if 'loss' in state.log_history[-1]:
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')
+                state.log_history[-1]["throughput"] = throughput
+                state.log_history[-1]["step"] = state.global_step
 
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
+                mlflow.log_metric("throughput", throughput , step=state.global_step)
+                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
 
 def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
@@ -411,11 +414,7 @@ def main():
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()
         metrics = train_result.metrics
-        for metric_dict in trainer.state.log_history:
-            if 'loss' in metric_dict:
-                mlflow.log_metric('loss', metric_dict['loss'], step=metric_dict['step'])
-                mlflow.log_metric('lr', metric_dict['learning_rate'], step=metric_dict['step'])
-                mlflow.log_metric('throughput', metric_dict['throughput'], step=metric_dict['step'])
+
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()

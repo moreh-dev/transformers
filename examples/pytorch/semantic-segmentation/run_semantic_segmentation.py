@@ -523,7 +523,7 @@ def main():
         tokenizer=image_processor,
         data_collator=default_data_collator,
     )
-    trainer.add_callback(TBTrainerCallBack)
+    trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
     #set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"

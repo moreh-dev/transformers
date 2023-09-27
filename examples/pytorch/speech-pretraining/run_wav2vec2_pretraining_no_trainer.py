@@ -21,6 +21,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Union
+import time
+from datetime import datetime
 
 import datasets
 import torch
@@ -44,10 +46,17 @@ from transformers import (
 )
 from transformers.models.wav2vec2.modeling_wav2vec2 import _compute_mask_indices, _sample_negative_indices
 from transformers.utils import get_full_repo_name, send_example_telemetry
-
+import mlflow
 
 logger = get_logger(__name__)
 
+try:
+    import mlflow
+    if not mlflow.is_tracking_uri_set():
+        mlflow.set_tracking_uri("http://127.0.0.1:5000")
+    has_mlflow = True
+except ImportError:
+    has_mlflow = False
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Finetune a transformers model on a text classification task")
@@ -384,6 +393,14 @@ def get_grad_norm(params, scale=1):
     total_norm = total_norm**0.5
     return total_norm
 
+# Log number of parameters function
+def get_num_parameters(model):
+    num_params = 0
+    for param in model.parameters():
+        num_params += param.numel()
+    # in million
+    num_params /= 10**6
+    return num_params
 
 def main():
     # See all possible arguments in src/transformers/args.py
@@ -538,7 +555,10 @@ def main():
 
     # initialize random model
     model = Wav2Vec2ForPreTraining(config)
-
+    # Log number of parameters
+    mlflow.start_run()
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
     # Activate gradient checkpointing if needed
     if args.gradient_checkpointing:
         model.gradient_checkpointing_enable()
@@ -607,11 +627,28 @@ def main():
     completed_steps = 0
     starting_epoch = 0
 
+    if has_mlflow:
+        experiment_id = None
+        run_name = None
+        if not os.environ.get("MLFLOW_RUN_ID"):
+            experiment_name = args.model
+            run_name = f'{experiment_name}_{datetime.today().strftime("%y/%m/%d-%H:%M:%S")}'
+            experiment = mlflow.get_experiment_by_name(experiment_name)
+            if experiment:
+                experiment_id = experiment.experiment_id
+            else:
+                experiment_id = mlflow.create_experiment(experiment_name)
+        mlflow.start_run(experiment_id=experiment_id, run_name=run_name)
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
     starting_epoch = 0
+    num_samples = args.per_device_train_batch_size * args.logging_steps
+    total_train_time=0
+    train_time_start = time.time()
+    has_max_step = False
     for epoch in range(starting_epoch, args.num_train_epochs):
+        time_epoch_start=time.time()
         model.train()
         for step, batch in enumerate(train_dataloader):
             # compute num of losses
@@ -676,6 +713,7 @@ def main():
                 progress_bar.update(1)
                 completed_steps += 1
 
+            start_time = time.time()
             # 6. Log all results
             if (step + 1) % (args.gradient_accumulation_steps * args.logging_steps) == 0:
                 loss.detach()
@@ -701,7 +739,13 @@ def main():
                 log_str = ""
                 for k, v in train_logs.items():
                     log_str += "| {}: {:.3e}".format(k, v.item())
-
+                logging_step_runtime = time.time() - start_time    
+                throughput = num_samples / logging_step_runtime
+                # log with mlflow
+                mlflow.log_metrics("loss",train_logs["loss"], step=step + 1)
+                mlflow.log_metrics("lr",train_logs["lr"], step=step + 1)
+                mlflow.log_metrics("throughput", throughput , step=step + 1)
+                start_time = time.time() # reset the start time
                 if accelerator.is_local_main_process:
                     progress_bar.write(log_str)
                     if is_wandb_available():
@@ -725,8 +769,14 @@ def main():
 
             # if completed steps > `args.max_train_steps` stop
             if completed_steps >= args.max_train_steps:
+                train_time = time.time() - train_time_start
+                total_epoch = completed_steps / (len(train_dataloader)/args.per_device_train_batch_size)
+                mlflow.log_metric("total_epoch", total_epoch)
+                mlflow.log_metric("train_time", train_time)
+                mlflow.log_metric("train_time_per_epoch", train_time/total_epoch)
+                has_max_step=True
                 break
-
+        total_train_time+= time.time()-time_epoch_start 
         # 7. Validate!
         model.eval()
 
@@ -746,7 +796,10 @@ def main():
             val_logs["val_contrastive_loss"] += outputs.contrastive_loss
             val_logs["val_diversity_loss"] += outputs.diversity_loss
             val_logs["val_num_losses"] += batch["mask_time_indices"].sum()
-
+        mlflow.log_metric("val_loss",val_logs["val_loss"])
+        mlflow.log_metric("val_contrastive_loss",val_logs["val_contrastive_loss"])
+        mlflow.log_metric("val_diversity_loss",val_logs["val_diversity_loss"])
+        mlflow.log_metric("val_num_losses",val_logs["val_num_losses"])
         # sum over devices in multi-processing
         if accelerator.num_processes > 1:
             val_logs = {k: accelerator.gather_for_metrics(v).sum() for k, v in val_logs.items()}
@@ -771,6 +824,12 @@ def main():
             if accelerator.is_main_process:
                 if args.push_to_hub:
                     repo.push_to_hub(commit_message="End of training", auto_lfs_prune=True)
+    if not has_max_step:
+        mlflow.log_metric("total_epoch", args.num_train_epochs)
+        mlflow.log_metrics("train_time", total_train_time)
+        mlflow.log_metric("train_time_per_epoch", total_train_time/args.num_train_epochs)
+    if has_mlflow:
+        mlflow.end_run()
 
 
 if __name__ == "__main__":

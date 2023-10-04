@@ -28,6 +28,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+import time
 
 import torch
 from datasets import load_dataset
@@ -44,12 +45,15 @@ from transformers import (
     HfArgumentParser,
     Trainer,
     TrainingArguments,
+    TrainerCallback,
+    TrainerState,
+    TrainerControl,
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-
+import mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +212,27 @@ class Transform(torch.nn.Module):
             x = self.transforms(x)
         return x
 
+class TBTrainerCallback(TrainerCallback):
+    "A callback log loss, learning rate, and throughput each logging step"
+    start_time = time.time()
+
+    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        # count the time after the logging step
+        if state.global_step == 0 or state.global_step % args.logging_steps == 1:
+            self.start_time = time.time()
+        
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
+        if args.logging_strategy == 'steps':
+            logging_step_runtime = time.time() - self.start_time
+            num_samples = args.per_device_train_batch_size * args.logging_steps
+            throughput = num_samples / logging_step_runtime
+            if 'loss' in state.log_history[-1]:
+                state.log_history[-1]["throughput"] = throughput
+                state.log_history[-1]["step"] = state.global_step
+
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
+                mlflow.log_metric("throughput", throughput , step=state.global_step)
+                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
 
 def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
@@ -220,6 +245,14 @@ def collate_fn(examples):
         "return_loss": True,
     }
 
+# Log number of parameters function
+def get_num_parameters(model):
+    num_params = 0
+    for param in model.parameters():
+        num_params += param.numel()
+    # in million
+    num_params /= 10**6
+    return num_params
 
 def main():
     # 1. Parse input arguments
@@ -346,6 +379,10 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
     )
     config = model.config
+    
+    # Log number of parameters
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
 
     def _freeze_params(module):
         for param in module.parameters():
@@ -500,6 +537,12 @@ def main():
         eval_dataset=eval_dataset if training_args.do_eval else None,
         data_collator=collate_fn,
     )
+    trainer.add_callback(TBTrainerCallback)
+    # Mlflow initial
+    #set the os enviroment for MLflowCallback
+    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
 
     # 9. Training
     if training_args.do_train:
@@ -531,7 +574,7 @@ def main():
             kwargs["dataset"] = f"{data_args.dataset_name} {data_args.dataset_config_name}"
         else:
             kwargs["dataset"] = data_args.dataset_name
-
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

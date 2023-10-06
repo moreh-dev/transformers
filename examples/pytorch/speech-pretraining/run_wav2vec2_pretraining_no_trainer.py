@@ -631,14 +631,14 @@ def main():
         experiment_id = None
         run_name = None
         if not os.environ.get("MLFLOW_RUN_ID"):
-            experiment_name = args.model
+            experiment_name = args.model_name_or_path
             run_name = f'{experiment_name}_{datetime.today().strftime("%y/%m/%d-%H:%M:%S")}'
             experiment = mlflow.get_experiment_by_name(experiment_name)
             if experiment:
                 experiment_id = experiment.experiment_id
             else:
                 experiment_id = mlflow.create_experiment(experiment_name)
-        mlflow.start_run(experiment_id=experiment_id, run_name=run_name)
+            mlflow.start_run(experiment_id=experiment_id, run_name=run_name)
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0

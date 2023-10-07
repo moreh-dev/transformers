@@ -22,6 +22,7 @@ import random
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+import time
 
 import datasets
 import evaluate
@@ -39,13 +40,16 @@ from transformers import (
     PretrainedConfig,
     Trainer,
     TrainingArguments,
+    TrainerCallback,
+    TrainerState,
+    TrainerControl,
     default_data_collator,
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-
+import mlflow
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
@@ -202,6 +206,35 @@ class ModelArguments:
         metadata={"help": "Will enable to load a pretrained model whose head dimensions are different."},
     )
 
+class TBTrainerCallback(TrainerCallback):
+    "A callback log loss, learning rate, and throughput each logging step"
+    start_time = time.time()
+    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        # count the time after the logging step
+        if state.global_step == 0 or state.global_step % args.logging_steps == 1:
+            self.start_time = time.time()
+        
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
+        if args.logging_strategy == 'steps':
+            logging_step_runtime = time.time() - self.start_time
+            num_samples = args.per_device_train_batch_size * args.logging_steps
+            throughput = num_samples / logging_step_runtime
+            if 'loss' in state.log_history[-1]:
+                state.log_history[-1]["throughput"] = throughput
+                state.log_history[-1]["step"] = state.global_step
+
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
+                mlflow.log_metric("throughput", throughput , step=state.global_step)
+                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
+
+# Log number of parameters function
+def get_num_parameters(model):
+    num_params = 0
+    for param in model.parameters():
+        num_params += param.numel()
+    # in million
+    num_params /= 10**6
+    return num_params
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -379,6 +412,9 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
         ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
     )
+    # Log number of parameters
+    num_params = get_num_parameters(model)
+    mlflow.log_param('num_params', num_params)
 
     # Preprocessing the raw_datasets
     if data_args.task_name is not None:
@@ -521,6 +557,13 @@ def main():
         data_collator=data_collator,
     )
 
+    trainer.add_callback(TBTrainerCallback)
+    # Mlflow initial
+    #set the os enviroment for MLflowCallback
+    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
+
     # Training
     if training_args.do_train:
         checkpoint = None
@@ -536,7 +579,6 @@ def main():
         metrics["train_samples"] = min(max_train_samples, len(train_dataset))
 
         trainer.save_model()  # Saves the tokenizer too for easy upload
-
         trainer.log_metrics("train", metrics)
         trainer.save_metrics("train", metrics)
         trainer.save_state()
@@ -607,7 +649,7 @@ def main():
         kwargs["dataset_tags"] = "glue"
         kwargs["dataset_args"] = data_args.task_name
         kwargs["dataset"] = f"GLUE {data_args.task_name.upper()}"
-
+    mlflow.end_run()
     if training_args.push_to_hub:
         trainer.push_to_hub(**kwargs)
     else:

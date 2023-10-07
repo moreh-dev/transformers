@@ -1,5 +1,5 @@
-model=gpt2
-batch_size=8
+model=Helsinki-NLP/opus-mt-en-ro
+batch_size=32
 device_id=0
 
 while getopts m:b:g: flag
@@ -10,7 +10,6 @@ do
         g) device_id=${OPTARG};;
     esac
 done
-
 echo Running $model with batch size $batch_size on device $device_id
 
 LOG_DIR="./logs"
@@ -25,23 +24,17 @@ mkdir -p "$(dirname $output_dir)"
 export MOREH_VISIBLE_DEVICE=$device_id
 
 args="
---dataset_name wikitext \
---dataset_config_name wikitext-2-raw-v1 \
---do_train \
---do_eval \
---torch_dtype float32 \
---block_size 256 \
---overwrite_cache True \
---overwrite_output_dir \
---logging_strategy epoch \
---save_total_limit 2 \
---num_train_epochs 3 \
+    --preprocessing_num_workers \
+    --overwrite_output_dir \
 "
 
-python3 run_clm.py \
+accelerate launch run_translation_no_trainer.py \
     --model_name_or_path $model \
-    --per_device_eval_batch_size $batch_size \
+    --source_lang en \
+    --target_lang ro \
+    --dataset_name wmt16 \
+    --dataset_config_name ro-en \
     --per_device_train_batch_size $batch_size \
-    --output_dir $output_dir \
-    $args \
+    --per_device_eval_batch_size $batch_size \
+    --output_dir $output_dir
     2>&1 | tee $log_file

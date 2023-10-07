@@ -25,6 +25,10 @@ args="
 --validation_file path_to_validation_file \
 --do_train \
 --do_eval \
+--overwrite_output_dir \
+--logging_strategy epoch \
+--save_total_limit 2 \
+--num_train_epochs 3 \
 "
 
 python3 run_plm.py \

@@ -49,11 +49,11 @@ from transformers.utils import get_full_repo_name, send_example_telemetry
 import mlflow
 
 logger = get_logger(__name__)
-
+tracking_uri = "http://127.0.0.1:5000"
 try:
     import mlflow
     if not mlflow.is_tracking_uri_set():
-        mlflow.set_tracking_uri("http://127.0.0.1:5000")
+        mlflow.set_tracking_uri(tracking_uri)
     has_mlflow = True
 except ImportError:
     has_mlflow = False
@@ -555,8 +555,22 @@ def main():
 
     # initialize random model
     model = Wav2Vec2ForPreTraining(config)
+    if has_mlflow:
+        curr_tracking_uri = mlflow.get_tracking_uri()
+        if curr_tracking_uri != tracking_uri:
+            print(f"Change tracking URI: {curr_tracking_uri} -> {tracking_uri}")
+            mlflow.set_tracking_uri(tracking_uri)
+        experiment_id = None
+        run_name = None
+        experiment_name = args.model_name_or_path
+        run_name = f'{experiment_name}_{datetime.today().strftime("%y/%m/%d-%H:%M:%S")}'
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+        if experiment:
+            experiment_id = experiment.experiment_id
+        else:
+            experiment_id = mlflow.create_experiment(experiment_name)
     # Log number of parameters
-    mlflow.start_run()
+    mlflow.start_run(experiment_id=experiment_id, run_name=run_name)
     num_params = get_num_parameters(model)
     mlflow.log_param('num_params', num_params)
     # Activate gradient checkpointing if needed
@@ -626,19 +640,6 @@ def main():
     logger.info(f"  Total optimization steps = {args.max_train_steps}")
     completed_steps = 0
     starting_epoch = 0
-
-    if has_mlflow:
-        experiment_id = None
-        run_name = None
-        if not os.environ.get("MLFLOW_RUN_ID"):
-            experiment_name = args.model
-            run_name = f'{experiment_name}_{datetime.today().strftime("%y/%m/%d-%H:%M:%S")}'
-            experiment = mlflow.get_experiment_by_name(experiment_name)
-            if experiment:
-                experiment_id = experiment.experiment_id
-            else:
-                experiment_id = mlflow.create_experiment(experiment_name)
-        mlflow.start_run(experiment_id=experiment_id, run_name=run_name)
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0

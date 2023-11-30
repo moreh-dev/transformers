@@ -232,12 +232,18 @@ class TBTrainerCallback(TrainerCallback):
             throughput = num_samples / logging_step_runtime
             if 'loss' in state.log_history[-1]:
                 state.log_history[-1]["throughput"] = throughput
-                state.log_history[-1]["step"] = state.global_step
-
+                state.log_history[-1]["step"] = state.global_step              
                 mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
                 mlflow.log_metric("throughput", throughput , step=state.global_step)
                 print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
-
+    
+    def on_evaluate(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        # breakpoint()
+        eval_exact_match = 0. if state.log_history[-1]["eval_exact_match"] is None else state.log_history[-1]["eval_exact_match"]
+        eval_f1 = 0. if state.log_history[-1]["eval_f1"] is None else state.log_history[-1]["eval_f1"]
+        mlflow.log_metric("eval_exact_match",eval_exact_match)
+        mlflow.log_metric("eval_f1",eval_f1)
+        return super().on_evaluate(args, state, control, **kwargs)
 # Log number of parameters function
 def get_num_parameters(model):
     num_params = 0

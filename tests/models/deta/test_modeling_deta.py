@@ -19,7 +19,7 @@ import inspect
 import math
 import unittest
 
-from transformers import DetaConfig, is_torch_available, is_torchvision_available, is_vision_available
+from transformers import DetaConfig, ResNetConfig, is_torch_available, is_torchvision_available, is_vision_available
 from transformers.file_utils import cached_property
 from transformers.testing_utils import require_torchvision, require_vision, slow, torch_device
 
@@ -49,7 +49,7 @@ class DetaModelTester:
         batch_size=8,
         is_training=True,
         use_labels=True,
-        hidden_size=256,
+        hidden_size=32,
         num_hidden_layers=2,
         num_attention_heads=8,
         intermediate_size=4,
@@ -118,6 +118,16 @@ class DetaModelTester:
         return config, pixel_values, pixel_mask, labels
 
     def get_config(self):
+        resnet_config = ResNetConfig(
+            num_channels=3,
+            embeddings_size=10,
+            hidden_sizes=[10, 20, 30, 40],
+            depths=[1, 1, 2, 1],
+            hidden_act="relu",
+            num_labels=3,
+            out_features=["stage2", "stage3", "stage4"],
+            out_indices=[2, 3, 4],
+        )
         return DetaConfig(
             d_model=self.hidden_size,
             encoder_layers=self.num_hidden_layers,
@@ -134,6 +144,7 @@ class DetaModelTester:
             encoder_n_points=self.encoder_n_points,
             decoder_n_points=self.decoder_n_points,
             two_stage=self.two_stage,
+            backbone_config=resnet_config,
         )
 
     def prepare_config_and_inputs_for_common(self):
@@ -150,6 +161,26 @@ class DetaModelTester:
         result = model(pixel_values)
 
         self.parent.assertEqual(result.last_hidden_state.shape, (self.batch_size, self.num_queries, self.hidden_size))
+
+    def create_and_check_deta_freeze_backbone(self, config, pixel_values, pixel_mask, labels):
+        model = DetaModel(config=config)
+        model.to(torch_device)
+        model.eval()
+
+        model.freeze_backbone()
+
+        for _, param in model.backbone.model.named_parameters():
+            self.parent.assertEqual(False, param.requires_grad)
+
+    def create_and_check_deta_unfreeze_backbone(self, config, pixel_values, pixel_mask, labels):
+        model = DetaModel(config=config)
+        model.to(torch_device)
+        model.eval()
+
+        model.unfreeze_backbone()
+
+        for _, param in model.backbone.model.named_parameters():
+            self.parent.assertEqual(True, param.requires_grad)
 
     def create_and_check_deta_object_detection_head_model(self, config, pixel_values, pixel_mask, labels):
         model = DetaForObjectDetection(config=config)
@@ -238,6 +269,14 @@ class DetaModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
     def test_deta_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_deta_model(*config_and_inputs)
+
+    def test_deta_freeze_backbone(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.create_and_check_deta_freeze_backbone(*config_and_inputs)
+
+    def test_deta_unfreeze_backbone(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.create_and_check_deta_unfreeze_backbone(*config_and_inputs)
 
     def test_deta_object_detection_head_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()

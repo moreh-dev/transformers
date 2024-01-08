@@ -31,6 +31,7 @@ from ...utils import (
     add_code_sample_docstrings,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
+    is_bitsandbytes_available,
     is_ninja_available,
     is_torch_cuda_available,
     logging,
@@ -159,7 +160,7 @@ class RwkvLinearAttention(torch.autograd.Function):
 
     @staticmethod
     # g stands for grad
-    def backward(ctx, g_output):
+    def backward(ctx, g_output, g_state=None):
         input_dtype = ctx.input_dtype
 
         time_decay, time_first, key, value, output = ctx.saved_tensors
@@ -188,17 +189,14 @@ class RwkvLinearAttention(torch.autograd.Function):
             g_key,
             g_value,
         )
-        g_time_decay = torch.sum(g_time_decay, dim=0)
-        g_time_first = torch.sum(g_time_first, dim=0)
 
         return (
-            None,
-            None,
-            None,
             g_time_decay.to(input_dtype),
             g_time_first.to(input_dtype),
             g_key.to(input_dtype),
             g_value.to(input_dtype),
+            None,
+            None,
         )
 
 
@@ -409,6 +407,7 @@ class RwkvPreTrainedModel(PreTrainedModel):
     base_model_prefix = "rwkv"
     _no_split_modules = ["RwkvBlock"]
     _keep_in_fp32_modules = ["time_decay", "time_first"]
+    supports_gradient_checkpointing = True
 
     def _init_weights(self, module):
         """Initialize the weights."""
@@ -466,10 +465,6 @@ class RwkvPreTrainedModel(PreTrainedModel):
             with torch.no_grad():
                 module.time_mix_key.data = torch.pow(time_weight, ratio_1_to_almost0)
                 module.time_mix_receptance.data = torch.pow(time_weight, ratio_1_to_almost0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, RwkvModel):
-            module.gradient_checkpointing = value
 
 
 @dataclass
@@ -565,6 +560,15 @@ RWKV_INPUTS_DOCSTRING = r"""
             [`PreTrainedTokenizer.__call__`] for details.
 
             [What are input IDs?](../glossary#input-ids)
+        attention_mask (`torch.LongTensor` of shape `(batch_size, input_ids_length)`, *optional*):
+            Mask to avoid performing attention on padding token indices. Mask values selected in `[0, 1]`:
+
+            - 1 for tokens that are **not masked**,
+            - 0 for tokens that are **masked**.
+
+            This is currently not used by `RwkvModel`, but will be supported in the future.
+
+            [What are attention masks?](../glossary#attention-mask)
         inputs_embeds (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
             Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation. This
             is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
@@ -599,6 +603,8 @@ class RwkvModel(RwkvPreTrainedModel):
 
         self.layers_are_rescaled = False
 
+        self.gradient_checkpointing = False
+
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -617,6 +623,7 @@ class RwkvModel(RwkvPreTrainedModel):
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,  # noqa
         inputs_embeds: Optional[torch.FloatTensor] = None,
         state: Optional[List[torch.FloatTensor]] = None,
         use_cache: Optional[bool] = None,
@@ -652,14 +659,27 @@ class RwkvModel(RwkvPreTrainedModel):
             ]
             state[4] -= 1e30
 
+        if self.gradient_checkpointing and self.training:
+            if use_cache:
+                logger.warning_once(
+                    "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
+                )
+                use_cache = False
+
         hidden_states = inputs_embeds
 
         all_self_attentions = () if output_attentions else None
         all_hidden_states = () if output_hidden_states else None
         for idx, block in enumerate(self.blocks):
-            hidden_states, state, attentions = block(
-                hidden_states, state=state, use_cache=use_cache, output_attentions=output_attentions
-            )
+            if self.gradient_checkpointing and self.training:
+                hidden_states, state, attentions = self._gradient_checkpointing_func(
+                    block.__call__, hidden_states, state, use_cache, output_attentions
+                )
+            else:
+                hidden_states, state, attentions = block(
+                    hidden_states, state=state, use_cache=use_cache, output_attentions=output_attentions
+                )
+
             if (
                 self.layers_are_rescaled
                 and self.config.rescale_every > 0
@@ -679,7 +699,7 @@ class RwkvModel(RwkvPreTrainedModel):
             all_hidden_states = all_hidden_states + (hidden_states,)
 
         if not return_dict:
-            return (hidden_states, state, all_hidden_states, all_self_attentions)
+            return tuple(x for x in [hidden_states, state, all_hidden_states, all_self_attentions] if x is not None)
 
         return RwkvOutput(
             last_hidden_state=hidden_states,
@@ -699,10 +719,39 @@ class RwkvModel(RwkvPreTrainedModel):
                         block.attention.output.weight.mul_(2 ** int(block_id // self.config.rescale_every))
                         block.feed_forward.value.weight.mul_(2 ** int(block_id // self.config.rescale_every))
                     else:
-                        block.attention.output.weight.div_(2 ** int(block_id // self.config.rescale_every))
-                        block.feed_forward.value.weight.div_(2 ** int(block_id // self.config.rescale_every))
+                        # Deal with quantization statistics
+                        if hasattr(block.attention.output.weight, "SCB"):
+                            block.attention.output.weight.SCB.div_(2 ** int(block_id // self.config.rescale_every))
+                            block.feed_forward.value.weight.SCB.div_(2 ** int(block_id // self.config.rescale_every))
+                        elif hasattr(block.attention.output.weight, "quant_state"):
+                            self._bnb_4bit_dequantize_and_rescale(block.attention.output, block_id)
+                            self._bnb_4bit_dequantize_and_rescale(block.feed_forward.value, block_id)
+                        else:
+                            block.attention.output.weight.div_(2 ** int(block_id // self.config.rescale_every))
+                            block.feed_forward.value.weight.div_(2 ** int(block_id // self.config.rescale_every))
 
         self.layers_are_rescaled = not self.training
+
+    def _bnb_4bit_dequantize_and_rescale(self, target_layer, block_id):
+        r"""
+        Perform the dequantization and rescaling of the weights of a given layer. After that operation the layer will
+        be quantized again.
+        """
+        if not is_bitsandbytes_available():
+            raise ImportError("Please install bitsandbytes to use this method.")
+        import bitsandbytes as bnb
+
+        dequant_weights = bnb.functional.dequantize_4bit(target_layer.weight.data, target_layer.weight.quant_state)
+
+        dequant_weights.div_(2 ** int(block_id // self.config.rescale_every))
+
+        # re-quantize the model:
+        # we need to put it first on CPU then back to the device
+        # this will create an overhead :/
+        # We set requires_grad=False as we cannot compute gradients on top of 4bit parameters anyway and to avoid
+        # bugs with bnb
+        quant_weight = bnb.nn.Params4bit(dequant_weights.to("cpu"), requires_grad=False).to(dequant_weights.device)
+        setattr(target_layer, "weight", quant_weight)
 
 
 @add_start_docstrings(
@@ -713,6 +762,8 @@ class RwkvModel(RwkvPreTrainedModel):
     RWKV_START_DOCSTRING,
 )
 class RwkvForCausalLM(RwkvPreTrainedModel):
+    _tied_weights_keys = ["head.weight"]
+
     def __init__(self, config):
         super().__init__(config)
         self.rwkv = RwkvModel(config)
@@ -750,7 +801,7 @@ class RwkvForCausalLM(RwkvPreTrainedModel):
     def forward(
         self,
         input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.LongTensor] = None,  # noqa
         inputs_embeds: Optional[torch.FloatTensor] = None,
         state: Optional[List[torch.FloatTensor]] = None,
         labels: Optional[torch.LongTensor] = None,

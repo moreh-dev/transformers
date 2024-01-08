@@ -15,7 +15,6 @@
 """ Testing suite for the PyTorch FocalNet model. """
 
 import collections
-import inspect
 import unittest
 
 from transformers import FocalNetConfig
@@ -25,6 +24,7 @@ from transformers.utils import cached_property, is_torch_available, is_vision_av
 from ...test_backbone_common import BackboneTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, _config_zero_init, floats_tensor, ids_tensor
+from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
@@ -226,7 +226,7 @@ class FocalNetModelTester:
 
 
 @require_torch
-class FocalNetModelTest(ModelTesterMixin, unittest.TestCase):
+class FocalNetModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (
         (
             FocalNetModel,
@@ -236,6 +236,11 @@ class FocalNetModelTest(ModelTesterMixin, unittest.TestCase):
         )
         if is_torch_available()
         else ()
+    )
+    pipeline_model_mapping = (
+        {"feature-extraction": FocalNetModel, "image-classification": FocalNetForImageClassification}
+        if is_torch_available()
+        else {}
     )
     fx_compatible = False
 
@@ -292,18 +297,6 @@ class FocalNetModelTest(ModelTesterMixin, unittest.TestCase):
             self.assertIsInstance(model.get_input_embeddings(), (nn.Module))
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
-
-    def test_forward_signature(self):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes[:-1]:
-            model = model_class(config)
-            signature = inspect.signature(model.forward)
-            # signature.parameters is an OrderedDict => so arg_names order is deterministic
-            arg_names = [*signature.parameters.keys()]
-
-            expected_arg_names = ["pixel_values"]
-            self.assertListEqual(arg_names[:1], expected_arg_names)
 
     def check_hidden_states_output(self, inputs_dict, config, model_class, image_size):
         model = model_class(config)

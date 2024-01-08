@@ -54,8 +54,8 @@ class GPTNeoModelTester:
         use_mc_token_ids=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=4,
-        attention_types=[[["global", "local"], 2]],
+        num_hidden_layers=2,
+        attention_types=[[["global", "local"], 1]],
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -413,8 +413,8 @@ class GPTNeoModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
             "feature-extraction": GPTNeoModel,
             "question-answering": GPTNeoForQuestionAnswering,
             "text-classification": GPTNeoForSequenceClassification,
-            "token-classification": GPTNeoForTokenClassification,
             "text-generation": GPTNeoForCausalLM,
+            "token-classification": GPTNeoForTokenClassification,
             "zero-shot": GPTNeoForSequenceClassification,
         }
         if is_torch_available()
@@ -537,10 +537,8 @@ class GPTNeoModelLanguageGenerationTest(unittest.TestCase):
             else:
                 model.gradient_checkpointing_disable()
             input_ids = torch.tensor([[464, 3290]], dtype=torch.long, device=torch_device)  # The dog
-            # fmt: off
             # The dog-eared copy of the book, which is a collection of essays by the late author,
-            expected_output_ids = [464, 3290, 12, 3380, 4866, 286, 262, 1492, 11, 543, 318, 257, 4947, 286, 27126, 416, 262, 2739, 1772, 11]
-            # fmt: on
+            expected_output_ids = [464, 3290, 12, 3380, 4866, 286, 262, 1492, 11, 543, 318, 257, 4947, 286, 27126, 416, 262, 2739, 1772, 11]  # fmt: skip
             output_ids = model.generate(input_ids, do_sample=False)
             self.assertListEqual(output_ids[0].tolist(), expected_output_ids)
 

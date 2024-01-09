@@ -296,7 +296,7 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
-            task="image-classification",
+            # task="image-classification",
             token=model_args.token,
         )
     else:
@@ -309,7 +309,7 @@ def main():
             "imagefolder",
             data_files=data_files,
             cache_dir=model_args.cache_dir,
-            task="image-classification",
+            # task="image-classification",
         )
 
     # If we don't have a validation split, split off a percentage of train as validation.

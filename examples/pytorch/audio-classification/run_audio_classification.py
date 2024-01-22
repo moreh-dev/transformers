@@ -332,7 +332,7 @@ def main():
                 audio["array"], max_length=data_args.max_length_seconds, sample_rate=feature_extractor.sampling_rate
             )
             subsampled_wavs.append(wav)
-        inputs = feature_extractor(subsampled_wavs, sampling_rate=feature_extractor.sampling_rate)
+        inputs = feature_extractor(subsampled_wavs, sampling_rate=feature_extractor.sampling_rate, max_length=16000, truncation=True, padding=True)
         output_batch = {model_input_name: inputs.get(model_input_name)}
         output_batch["labels"] = list(batch[data_args.label_column_name])
 
@@ -341,7 +341,7 @@ def main():
     def val_transforms(batch):
         """Apply val_transforms across a batch."""
         wavs = [audio["array"] for audio in batch[data_args.audio_column_name]]
-        inputs = feature_extractor(wavs, sampling_rate=feature_extractor.sampling_rate)
+        inputs = feature_extractor(wavs, sampling_rate=feature_extractor.sampling_rate, max_length=16000, truncation=True, padding=True)
         output_batch = {model_input_name: inputs.get(model_input_name)}
         output_batch["labels"] = list(batch[data_args.label_column_name])
 

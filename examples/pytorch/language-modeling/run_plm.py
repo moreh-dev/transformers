@@ -242,6 +242,13 @@ class TBTrainerCallback(TrainerCallback):
                 mlflow.log_metric("throughput", throughput , step=state.global_step)
                 print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
 
+    def on_evaluate(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        try:
+            perplexity = math.exp(state.log_history[-1]["eval_loss"])
+        except OverflowError:
+            perplexity = float("inf")
+        mlflow.log_metric("perplexity",perplexity)
+
 # Log number of parameters function
 def get_num_parameters(model):
     num_params = 0

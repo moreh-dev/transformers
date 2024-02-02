@@ -17,12 +17,16 @@ import collections
 import json
 import os
 import re
-from typing import Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import numpy as np
 
 from ...tokenization_utils_fast import PreTrainedTokenizer
 from ...utils import logging
+
+
+if TYPE_CHECKING:
+    from transformers.pipelines.conversational import Conversation
 
 
 logger = logging.get_logger(__name__)
@@ -127,6 +131,14 @@ class GPTNeoXJapaneseTokenizer(PreTrainedTokenizer):
         do_clean_text=False,
         **kwargs,
     ):
+        super().__init__(
+            unk_token=unk_token,
+            pad_token=pad_token,
+            bos_token=bos_token,
+            eos_token=eos_token,
+            do_clean_text=do_clean_text,
+            **kwargs,
+        )
         if not os.path.isfile(vocab_file):
             raise ValueError(
                 f"Can't find a vocabulary file at path '{vocab_file}'. To load the vocabulary from a Google pretrained"
@@ -141,14 +153,6 @@ class GPTNeoXJapaneseTokenizer(PreTrainedTokenizer):
         self.vocab, self.raw_vocab, self.ids_to_tokens, self.emoji = load_vocab_and_emoji(vocab_file, emoji_file)
         self.subword_tokenizer = SubWordJapaneseTokenizer(
             vocab=self.vocab, ids_to_tokens=self.ids_to_tokens, emoji=self.emoji
-        )
-        super().__init__(
-            unk_token=unk_token,
-            pad_token=pad_token,
-            bos_token=bos_token,
-            eos_token=eos_token,
-            do_clean_text=do_clean_text,
-            **kwargs,
         )
 
     @property
@@ -175,23 +179,15 @@ class GPTNeoXJapaneseTokenizer(PreTrainedTokenizer):
         out_string = "".join(tokens).strip()
         return out_string
 
-    @property
-    def default_chat_template(self):
-        """
-        A simple chat template that just adds BOS/EOS tokens around messages while discarding role information.
-        """
-        logger.warning_once(
-            "\nNo chat template is defined for this tokenizer - using the default template "
-            f"for the {self.__class__.__name__} class. If the default is not appropriate for "
-            "your model, please set `tokenizer.chat_template` to an appropriate template. "
-            "See https://huggingface.co/docs/transformers/main/chat_templating for more information.\n"
-        )
-        return (
-            "{% for message in messages %}"
-            "{{ bos_token + eos_token + message.content + eos_token }}"
-            "{% endfor %}"
-            "{% if add_generation_prompt %} {{ bos_token + eos_token }} {% endif %}"
-        )
+    def _build_conversation_input_ids(self, conversation: "Conversation") -> List[int]:
+        """This corresponds to DialoGPT variants of models."""
+        input_ids = []
+        for is_user, text in conversation.iter_texts():
+            input_ids.extend(self.encode(text, add_special_tokens=False) + [self.eos_token_id])
+
+        if len(input_ids) > self.model_max_length:
+            input_ids = input_ids[-self.model_max_length :]
+        return input_ids
 
     def save_vocabulary(self, save_directory: str, filename_prefix: Optional[str] = None) -> Tuple[str]:
         index = 0

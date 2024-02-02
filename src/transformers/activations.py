@@ -137,6 +137,19 @@ class AccurateGELUActivation(nn.Module):
         return 0.5 * input * (1 + torch.tanh(self.precomputed_constant * (input + 0.044715 * torch.pow(input, 3))))
 
 
+class SiLUActivation(nn.Module):
+    """
+    See Gaussian Error Linear Units (Hendrycks et al., https://arxiv.org/abs/1606.08415) where the SiLU (Sigmoid Linear
+    Unit) was originally introduced and coined, and see Sigmoid-Weighted Linear Units for Neural Network Function
+    Approximation in Reinforcement Learning (Elfwing et al., https://arxiv.org/abs/1702.03118) and Swish: a Self-Gated
+    Activation Function (Ramachandran et al., https://arxiv.org/abs/1710.05941v1) where the SiLU was experimented with
+    later.
+    """
+
+    def forward(self, input: Tensor) -> Tensor:
+        return nn.functional.silu(input)
+
+
 class MishActivation(nn.Module):
     """
     See Mish: A Self-Regularized Non-Monotonic Activation Function (Misra., https://arxiv.org/abs/1908.08681). Also
@@ -206,7 +219,6 @@ ACT2CLS = {
     "gelu_pytorch_tanh": PytorchGELUTanh,
     "gelu_accurate": AccurateGELUActivation,
     "laplace": LaplaceActivation,
-    "leaky_relu": nn.LeakyReLU,
     "linear": LinearActivation,
     "mish": MishActivation,
     "quick_gelu": QuickGELUActivation,
@@ -214,8 +226,8 @@ ACT2CLS = {
     "relu2": ReLUSquaredActivation,
     "relu6": nn.ReLU6,
     "sigmoid": nn.Sigmoid,
-    "silu": nn.SiLU,
-    "swish": nn.SiLU,
+    "silu": SiLUActivation,
+    "swish": SiLUActivation,
     "tanh": nn.Tanh,
 }
 ACT2FN = ClassInstantier(ACT2CLS)

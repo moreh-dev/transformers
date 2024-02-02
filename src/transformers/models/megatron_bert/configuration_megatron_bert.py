@@ -90,7 +90,6 @@ class MegatronBertConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "megatron-bert"
 
     def __init__(

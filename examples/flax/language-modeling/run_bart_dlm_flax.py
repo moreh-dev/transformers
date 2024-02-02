@@ -26,7 +26,6 @@ import math
 import os
 import sys
 import time
-import warnings
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from itertools import chain
@@ -60,7 +59,7 @@ from transformers import (
     set_seed,
 )
 from transformers.models.bart.modeling_flax_bart import shift_tokens_right
-from transformers.utils import send_example_telemetry
+from transformers.utils import get_full_repo_name, send_example_telemetry
 
 
 MODEL_CONFIG_CLASSES = list(FLAX_MODEL_FOR_MASKED_LM_MAPPING.keys())
@@ -139,7 +138,7 @@ class ModelArguments:
         default=None,
         metadata={
             "help": (
-                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
+                "The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
             )
         },
     )
@@ -169,19 +168,13 @@ class ModelArguments:
             )
         },
     )
-    token: str = field(
-        default=None,
+    use_auth_token: bool = field(
+        default=False,
         metadata={
             "help": (
-                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
-                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
+                "with private models)."
             )
-        },
-    )
-    use_auth_token: bool = field(
-        default=None,
-        metadata={
-            "help": "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead."
         },
     )
 
@@ -249,12 +242,10 @@ class DataTrainingArguments:
         else:
             if self.train_file is not None:
                 extension = self.train_file.split(".")[-1]
-                if extension not in ["csv", "json", "txt"]:
-                    raise ValueError("train_file` should be a csv, json or text file.")
+                assert extension in ["csv", "json", "txt"], "`train_file` should be a csv, a json or a txt file."
             if self.validation_file is not None:
                 extension = self.validation_file.split(".")[-1]
-                if extension not in ["csv", "json", "txt"]:
-                    raise ValueError("`validation_file` should be a csv, json or text file.")
+                assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
 
 
 @flax.struct.dataclass
@@ -470,15 +461,6 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if model_args.use_auth_token is not None:
-        warnings.warn(
-            "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead.",
-            FutureWarning,
-        )
-        if model_args.token is not None:
-            raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
-        model_args.token = model_args.use_auth_token
-
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
     send_example_telemetry("run_bart_dlm", model_args, data_args, framework="flax")
@@ -490,7 +472,7 @@ def main():
         and not training_args.overwrite_output_dir
     ):
         raise ValueError(
-            f"Output directory ({training_args.output_dir}) already exists and is not empty. "
+            f"Output directory ({training_args.output_dir}) already exists and is not empty."
             "Use --overwrite_output_dir to overcome."
         )
 
@@ -512,14 +494,14 @@ def main():
 
     # Handle the repository creation
     if training_args.push_to_hub:
-        # Retrieve of infer repo_name
-        repo_name = training_args.hub_model_id
-        if repo_name is None:
-            repo_name = Path(training_args.output_dir).absolute().name
-        # Create repo and retrieve repo_id
-        repo_id = create_repo(repo_name, exist_ok=True, token=training_args.hub_token).repo_id
-        # Clone repo locally
-        repo = Repository(training_args.output_dir, clone_from=repo_id, token=training_args.hub_token)
+        if training_args.hub_model_id is None:
+            repo_name = get_full_repo_name(
+                Path(training_args.output_dir).absolute().name, token=training_args.hub_token
+            )
+        else:
+            repo_name = training_args.hub_model_id
+        create_repo(repo_name, exist_ok=True, token=training_args.hub_token)
+        repo = Repository(training_args.output_dir, clone_from=repo_name, token=training_args.hub_token)
 
     # Get the datasets: you can either provide your own CSV/JSON/TXT training and evaluation files (see below)
     # or just provide the name of one of the public datasets available on the hub at https://huggingface.co/datasets/
@@ -533,8 +515,7 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
-            token=model_args.token,
-            num_proc=data_args.preprocessing_num_workers,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
 
         if "validation" not in datasets.keys():
@@ -543,16 +524,14 @@ def main():
                 data_args.dataset_config_name,
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
-                token=model_args.token,
-                num_proc=data_args.preprocessing_num_workers,
+                use_auth_token=True if model_args.use_auth_token else None,
             )
             datasets["train"] = load_dataset(
                 data_args.dataset_name,
                 data_args.dataset_config_name,
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
-                token=model_args.token,
-                num_proc=data_args.preprocessing_num_workers,
+                use_auth_token=True if model_args.use_auth_token else None,
             )
     else:
         data_files = {}
@@ -567,8 +546,7 @@ def main():
             extension,
             data_files=data_files,
             cache_dir=model_args.cache_dir,
-            token=model_args.token,
-            num_proc=data_args.preprocessing_num_workers,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
 
         if "validation" not in datasets.keys():
@@ -577,19 +555,17 @@ def main():
                 data_files=data_files,
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
-                token=model_args.token,
-                num_proc=data_args.preprocessing_num_workers,
+                use_auth_token=True if model_args.use_auth_token else None,
             )
             datasets["train"] = load_dataset(
                 extension,
                 data_files=data_files,
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
-                token=model_args.token,
-                num_proc=data_args.preprocessing_num_workers,
+                use_auth_token=True if model_args.use_auth_token else None,
             )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.
+    # https://huggingface.co/docs/datasets/loading_datasets.html.
 
     # Load pretrained model and tokenizer
 
@@ -598,18 +574,18 @@ def main():
             model_args.tokenizer_name,
             cache_dir=model_args.cache_dir,
             use_fast=model_args.use_fast_tokenizer,
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
     elif model_args.model_name_or_path:
         tokenizer = AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=model_args.cache_dir,
             use_fast=model_args.use_fast_tokenizer,
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
     else:
         raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script. "
+            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
 
@@ -618,13 +594,13 @@ def main():
             model_args.config_name,
             cache_dir=model_args.cache_dir,
             vocab_size=len(tokenizer),
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
     elif model_args.model_name_or_path:
         config = BartConfig.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=model_args.cache_dir,
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
@@ -693,7 +669,7 @@ def main():
     # might be slower to preprocess.
     #
     # To speed up this part, we use multiprocessing. See the documentation of the map method for more information:
-    # https://huggingface.co/docs/datasets/process#map
+    # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.map
     tokenized_datasets = tokenized_datasets.map(
         group_texts,
         batched=True,
@@ -729,7 +705,7 @@ def main():
             config=config,
             seed=training_args.seed,
             dtype=getattr(jnp, model_args.dtype),
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
     else:
         config.vocab_size = len(tokenizer)

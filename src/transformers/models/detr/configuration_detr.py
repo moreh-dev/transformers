@@ -14,8 +14,9 @@
 # limitations under the License.
 """ DETR model configuration"""
 
+import copy
 from collections import OrderedDict
-from typing import Mapping
+from typing import Dict, Mapping
 
 from packaging import version
 
@@ -132,7 +133,6 @@ class DetrConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "detr"
     keys_to_ignore_at_inference = ["past_key_values"]
     attribute_map = {
@@ -247,6 +247,17 @@ class DetrConfig(PretrainedConfig):
             [`DetrConfig`]: An instance of a configuration object
         """
         return cls(backbone_config=backbone_config, **kwargs)
+
+    def to_dict(self) -> Dict[str, any]:
+        """
+        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`]. Returns:
+            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
+        """
+        output = copy.deepcopy(self.__dict__)
+        if output["backbone_config"] is not None:
+            output["backbone_config"] = self.backbone_config.to_dict()
+        output["model_type"] = self.__class__.model_type
+        return output
 
 
 class DetrOnnxConfig(OnnxConfig):

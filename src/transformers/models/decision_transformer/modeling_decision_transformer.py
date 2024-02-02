@@ -96,9 +96,10 @@ def load_tf_weights_in_gpt2(model, config, gpt2_checkpoint_path):
                 num = int(scope_names[1])
                 pointer = pointer[num]
         try:
-            if pointer.shape != array.shape:
-                raise ValueError(f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched")
-        except ValueError as e:
+            assert (
+                pointer.shape == array.shape
+            ), f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched"
+        except AssertionError as e:
             e.args += (pointer.shape, array.shape)
             raise
         logger.info(f"Initialize PyTorch weight {name}")
@@ -117,9 +118,8 @@ class DecisionTransformerGPT2Attention(nn.Module):
             torch.tril(torch.ones((max_positions, max_positions), dtype=torch.bool)).view(
                 1, 1, max_positions, max_positions
             ),
-            persistent=False,
         )
-        self.register_buffer("masked_bias", torch.tensor(-1e4), persistent=False)
+        self.register_buffer("masked_bias", torch.tensor(-1e4))
 
         self.embed_dim = config.hidden_size
         self.num_heads = config.num_attention_heads
@@ -469,8 +469,14 @@ class DecisionTransformerGPT2PreTrainedModel(PreTrainedModel):
                 # Special Scaled Initialization --> There are 2 Layer Norms per Transformer Block
                 p.data.normal_(mean=0.0, std=(self.config.initializer_range / math.sqrt(2 * self.config.n_layer)))
 
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, DecisionTransformerGPT2Model):
+            module.gradient_checkpointing = value
+
 
 class DecisionTransformerGPT2Model(DecisionTransformerGPT2PreTrainedModel):
+    _keys_to_ignore_on_load_missing = ["attn.masked_bias"]
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -526,7 +532,6 @@ class DecisionTransformerGPT2Model(DecisionTransformerGPT2PreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
-            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
             input_ids = input_ids.view(-1, input_shape[-1])
             batch_size = input_ids.shape[0]
@@ -540,6 +545,8 @@ class DecisionTransformerGPT2Model(DecisionTransformerGPT2PreTrainedModel):
 
         if token_type_ids is not None:
             token_type_ids = token_type_ids.view(-1, input_shape[-1])
+        if position_ids is not None:
+            position_ids = position_ids.view(-1, input_shape[-1])
 
         if past_key_values is None:
             past_length = 0
@@ -548,7 +555,7 @@ class DecisionTransformerGPT2Model(DecisionTransformerGPT2PreTrainedModel):
             past_length = past_key_values[0][0].size(-2)
         if position_ids is None:
             position_ids = torch.arange(past_length, input_shape[-1] + past_length, dtype=torch.long, device=device)
-            position_ids = position_ids.unsqueeze(0)
+            position_ids = position_ids.unsqueeze(0).view(-1, input_shape[-1])
 
         # GPT2Attention mask.
         if attention_mask is not None:
@@ -598,7 +605,7 @@ class DecisionTransformerGPT2Model(DecisionTransformerGPT2PreTrainedModel):
 
         hidden_states = self.drop(hidden_states)
 
-        output_shape = (-1,) + input_shape[1:] + (hidden_states.size(-1),)
+        output_shape = input_shape + (hidden_states.size(-1),)
 
         if self.gradient_checkpointing and self.training:
             if use_cache:
@@ -627,16 +634,22 @@ class DecisionTransformerGPT2Model(DecisionTransformerGPT2PreTrainedModel):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             if self.gradient_checkpointing and self.training:
-                outputs = self._gradient_checkpointing_func(
-                    block.__call__,
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        # None for past_key_value
+                        return module(*inputs, use_cache, output_attentions)
+
+                    return custom_forward
+
+                outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(block),
                     hidden_states,
                     None,
                     attention_mask,
                     head_mask[i],
                     encoder_hidden_states,
                     encoder_attention_mask,
-                    use_cache,
-                    output_attentions,
                 )
             else:
                 outputs = block(
@@ -733,6 +746,7 @@ class DecisionTransformerPreTrainedModel(PreTrainedModel):
     base_model_prefix = "decision_transformer"
     main_input_name = "states"
     supports_gradient_checkpointing = False
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -775,7 +789,7 @@ DECISION_TRANSFORMER_INPUTS_DOCSTRING = r"""
             The returns for each state in the trajectory
         timesteps (`torch.LongTensor` of shape `(batch_size, episode_length)`):
             The timestep for each step in the trajectory
-        attention_mask (`torch.FloatTensor` of shape `(batch_size, episode_length)`):
+        attention_mask (`torch.LongTensor` of shape `(batch_size, episode_length)`):
             Masking, used to mask the actions when performing autoregressive prediction
 """
 
@@ -818,16 +832,16 @@ class DecisionTransformerModel(DecisionTransformerPreTrainedModel):
     @replace_return_docstrings(output_type=DecisionTransformerOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
-        states: Optional[torch.FloatTensor] = None,
-        actions: Optional[torch.FloatTensor] = None,
-        rewards: Optional[torch.FloatTensor] = None,
-        returns_to_go: Optional[torch.FloatTensor] = None,
-        timesteps: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        output_hidden_states: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.FloatTensor], DecisionTransformerOutput]:
+        states=None,
+        actions=None,
+        rewards=None,
+        returns_to_go=None,
+        timesteps=None,
+        attention_mask=None,
+        output_hidden_states=None,
+        output_attentions=None,
+        return_dict=None,
+    ) -> Union[Tuple, DecisionTransformerOutput]:
         r"""
         Returns:
 

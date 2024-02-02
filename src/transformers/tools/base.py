@@ -23,8 +23,8 @@ import os
 import tempfile
 from typing import Any, Dict, List, Optional, Union
 
-from huggingface_hub import create_repo, hf_hub_download, metadata_update, upload_folder
-from huggingface_hub.utils import RepositoryNotFoundError, build_hf_headers, get_session
+from huggingface_hub import CommitOperationAdd, HfFolder, create_commit, create_repo, hf_hub_download, metadata_update
+from huggingface_hub.utils import RepositoryNotFoundError, get_session
 
 from ..dynamic_module_utils import custom_object_save, get_class_from_dynamic_module, get_imports
 from ..image_utils import is_pil_image
@@ -37,7 +37,6 @@ from ..utils import (
     is_vision_available,
     logging,
 )
-from .agent_types import handle_agent_inputs, handle_agent_outputs
 
 
 logger = logging.get_logger(__name__)
@@ -174,14 +173,7 @@ class Tool:
             f.write("\n".join(imports) + "\n")
 
     @classmethod
-    def from_hub(
-        cls,
-        repo_id: str,
-        model_repo_id: Optional[str] = None,
-        token: Optional[str] = None,
-        remote: bool = False,
-        **kwargs,
-    ):
+    def from_hub(cls, repo_id, model_repo_id=None, token=None, remote=False, **kwargs):
         """
         Loads a tool defined on the Hub.
 
@@ -196,7 +188,7 @@ class Tool:
                 `huggingface-cli login` (stored in `~/.huggingface`).
             remote (`bool`, *optional*, defaults to `False`):
                 Whether to use your tool by downloading the model or (if it is available) with an inference endpoint.
-            kwargs (additional keyword arguments, *optional*):
+            kwargs:
                 Additional keyword arguments that will be split in two: all arguments relevant to the Hub (such as
                 `cache_dir`, `revision`, `subfolder`) will be used when downloading the files for your tool, and the
                 others will be passed along to its init.
@@ -226,7 +218,7 @@ class Tool:
         resolved_config_file = cached_file(
             repo_id,
             TOOL_CONFIG_FILE,
-            token=token,
+            use_auth_token=token,
             **hub_kwargs,
             _raise_exceptions_for_missing_entries=False,
             _raise_exceptions_for_connection_errors=False,
@@ -236,7 +228,7 @@ class Tool:
             resolved_config_file = cached_file(
                 repo_id,
                 CONFIG_NAME,
-                token=token,
+                use_auth_token=token,
                 **hub_kwargs,
                 _raise_exceptions_for_missing_entries=False,
                 _raise_exceptions_for_connection_errors=False,
@@ -259,25 +251,7 @@ class Tool:
             custom_tool = config
 
         tool_class = custom_tool["tool_class"]
-        tool_class = get_class_from_dynamic_module(tool_class, repo_id, token=token, **hub_kwargs)
-
-        if len(tool_class.name) == 0:
-            tool_class.name = custom_tool["name"]
-        if tool_class.name != custom_tool["name"]:
-            logger.warning(
-                f"{tool_class.__name__} implements a different name in its configuration and class. Using the tool "
-                "configuration name."
-            )
-            tool_class.name = custom_tool["name"]
-
-        if len(tool_class.description) == 0:
-            tool_class.description = custom_tool["description"]
-        if tool_class.description != custom_tool["description"]:
-            logger.warning(
-                f"{tool_class.__name__} implements a different description in its configuration and class. Using the "
-                "tool configuration description."
-            )
-            tool_class.description = custom_tool["description"]
+        tool_class = get_class_from_dynamic_module(tool_class, repo_id, use_auth_token=token, **hub_kwargs)
 
         if remote:
             return RemoteTool(model_repo_id, token=token, tool_class=tool_class)
@@ -311,17 +285,22 @@ class Tool:
         repo_url = create_repo(
             repo_id=repo_id, token=token, private=private, exist_ok=True, repo_type="space", space_sdk="gradio"
         )
-        repo_id = repo_url.repo_id
         metadata_update(repo_id, {"tags": ["tool"]}, repo_type="space")
+        repo_id = repo_url.repo_id
 
         with tempfile.TemporaryDirectory() as work_dir:
             # Save all files.
             self.save(work_dir)
+            os.listdir(work_dir)
+            operations = [
+                CommitOperationAdd(path_or_fileobj=os.path.join(work_dir, f), path_in_repo=f)
+                for f in os.listdir(work_dir)
+            ]
             logger.info(f"Uploading the following files to {repo_id}: {','.join(os.listdir(work_dir))}")
-            return upload_folder(
+            return create_commit(
                 repo_id=repo_id,
+                operations=operations,
                 commit_message=commit_message,
-                folder_path=work_dir,
                 token=token,
                 create_pr=create_pr,
                 repo_type="space",
@@ -348,7 +327,7 @@ class RemoteTool(Tool):
     A [`Tool`] that will make requests to an inference endpoint.
 
     Args:
-        endpoint_url (`str`, *optional*):
+        endpoint_url (`str`):
             The url of the endpoint to use.
         token (`str`, *optional*):
             The token to use as HTTP bearer authorization for remote files. If unset, will use the token generated when
@@ -414,8 +393,6 @@ class RemoteTool(Tool):
         return outputs
 
     def __call__(self, *args, **kwargs):
-        args, kwargs = handle_agent_inputs(*args, **kwargs)
-
         output_image = self.tool_class is not None and self.tool_class.outputs == ["image"]
         inputs = self.prepare_inputs(*args, **kwargs)
         if isinstance(inputs, dict):
@@ -424,9 +401,6 @@ class RemoteTool(Tool):
             outputs = self.client(inputs, output_image=output_image)
         if isinstance(outputs, list) and len(outputs) == 1 and isinstance(outputs[0], list):
             outputs = outputs[0]
-
-        outputs = handle_agent_outputs(outputs, self.tool_class.outputs if self.tool_class is not None else None)
-
         return self.extract_outputs(outputs)
 
 
@@ -464,7 +438,7 @@ class PipelineTool(Tool):
         token (`str`, *optional*):
             The token to use as HTTP bearer authorization for remote files. If unset, will use the token generated when
             running `huggingface-cli login` (stored in `~/.huggingface`).
-        hub_kwargs (additional keyword arguments, *optional*):
+        hub_kwargs:
             Any additional keyword argument to send to the methods that will load the data from the Hub.
     """
 
@@ -506,9 +480,9 @@ class PipelineTool(Tool):
         if device_map is not None:
             self.model_kwargs["device_map"] = device_map
         self.hub_kwargs = hub_kwargs
-        self.hub_kwargs["token"] = token
+        self.hub_kwargs["use_auth_token"] = token
 
-        super().__init__()
+        self.is_initialized = False
 
     def setup(self):
         """
@@ -534,8 +508,6 @@ class PipelineTool(Tool):
         if self.device_map is None:
             self.model.to(self.device)
 
-        super().setup()
-
     def encode(self, raw_inputs):
         """
         Uses the `pre_processor` to prepare the inputs for the `model`.
@@ -556,8 +528,6 @@ class PipelineTool(Tool):
         return self.post_processor(outputs)
 
     def __call__(self, *args, **kwargs):
-        args, kwargs = handle_agent_inputs(*args, **kwargs)
-
         if not self.is_initialized:
             self.setup()
 
@@ -565,9 +535,7 @@ class PipelineTool(Tool):
         encoded_inputs = send_to_device(encoded_inputs, self.device)
         outputs = self.forward(encoded_inputs)
         outputs = send_to_device(outputs, "cpu")
-        decoded_outputs = self.decode(outputs)
-
-        return handle_agent_outputs(decoded_outputs, self.outputs)
+        return self.decode(outputs)
 
 
 def launch_gradio_demo(tool_class: Tool):
@@ -599,10 +567,6 @@ def launch_gradio_demo(tool_class: Tool):
 
 # TODO: Migrate to Accelerate for this once `PartialState.default_device` makes its way into a release.
 def get_default_device():
-    logger.warning(
-        "`get_default_device` is deprecated and will be replaced with `accelerate`'s `PartialState().default_device` "
-        "in version 4.38 of 🤗 Transformers. "
-    )
     if not is_torch_available():
         raise ImportError("Please install torch in order to use this tool.")
 
@@ -667,7 +631,7 @@ def load_tool(task_or_repo_id, model_repo_id=None, remote=False, token=None, **k
         token (`str`, *optional*):
             The token to identify you on hf.co. If unset, will use the token generated when running `huggingface-cli
             login` (stored in `~/.huggingface`).
-        kwargs (additional keyword arguments, *optional*):
+        kwargs:
             Additional keyword arguments that will be split in two: all arguments relevant to the Hub (such as
             `cache_dir`, `revision`, `subfolder`) will be used when downloading the files for your tool, and the others
             will be passed along to its init.
@@ -710,7 +674,9 @@ def add_description(description):
 ## Will move to the Hub
 class EndpointClient:
     def __init__(self, endpoint_url: str, token: Optional[str] = None):
-        self.headers = {**build_hf_headers(token=token), "Content-Type": "application/json"}
+        if token is None:
+            token = HfFolder().get_token()
+        self.headers = {"authorization": f"Bearer {token}", "Content-Type": "application/json"}
         self.endpoint_url = endpoint_url
 
     @staticmethod

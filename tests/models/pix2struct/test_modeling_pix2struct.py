@@ -35,7 +35,6 @@ from ...test_modeling_common import (
     ids_tensor,
     random_attention_mask,
 )
-from ...test_pipeline_mixin import PipelineTesterMixin
 
 
 if is_torch_available():
@@ -49,9 +48,6 @@ if is_torch_available():
         Pix2StructVisionModel,
     )
     from transformers.models.pix2struct.modeling_pix2struct import PIX2STRUCT_PRETRAINED_MODEL_ARCHIVE_LIST
-    from transformers.pytorch_utils import is_torch_greater_or_equal_than_1_11
-else:
-    is_torch_greater_or_equal_than_1_11 = False
 
 
 if is_vision_available():
@@ -71,7 +67,7 @@ class Pix2StructVisionModelTester:
         patch_embed_hidden_size=12,
         projection_dim=32,
         max_patches=64,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,
@@ -199,18 +195,6 @@ class Pix2StructVisionModelTest(ModelTesterMixin, unittest.TestCase):
     def test_training_gradient_checkpointing(self):
         pass
 
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant_false(self):
-        pass
-
     @unittest.skip(reason="Training is tested directly on `Pix2StructTextImageModelTest`")
     def test_retain_grad_hidden_states_attentions(self):
         pass
@@ -242,7 +226,7 @@ class Pix2StructTextModelTester:
         vocab_size=99,
         hidden_size=12,
         projection_dim=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,
@@ -348,18 +332,6 @@ class Pix2StructTextModelTest(ModelTesterMixin, unittest.TestCase):
     def test_training_gradient_checkpointing(self):
         pass
 
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant_false(self):
-        pass
-
     @unittest.skip(reason="Pix2Struct does not use inputs_embeds")
     def test_inputs_embeds(self):
         pass
@@ -379,7 +351,7 @@ class Pix2StructTextModelTest(ModelTesterMixin, unittest.TestCase):
             self.assertIsNotNone(model)
 
 
-class Pix2StructModelTester:
+class Pix2StructTextImageModelsModelTester:
     def __init__(self, parent, text_kwargs=None, vision_kwargs=None, is_training=True):
         if text_kwargs is None:
             text_kwargs = {}
@@ -419,9 +391,8 @@ class Pix2StructModelTester:
 
 
 @require_torch
-class Pix2StructModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
+class Pix2StructTextImageModelTest(ModelTesterMixin, unittest.TestCase):
     all_model_classes = (Pix2StructForConditionalGeneration,) if is_torch_available() else ()
-    pipeline_model_mapping = {"image-to-text": Pix2StructForConditionalGeneration} if is_torch_available() else {}
     fx_compatible = False
     test_head_masking = False
     test_pruning = False
@@ -430,7 +401,7 @@ class Pix2StructModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
     test_torchscript = False
 
     def setUp(self):
-        self.model_tester = Pix2StructModelTester(self)
+        self.model_tester = Pix2StructTextImageModelsModelTester(self)
 
     def test_model(self):
         config, input_dict = self.model_tester.prepare_config_and_inputs_for_common()
@@ -693,27 +664,7 @@ class Pix2StructModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
             model_state_dict = model.state_dict()
             loaded_model_state_dict = loaded_model.state_dict()
 
-            non_persistent_buffers = {}
-            for key in loaded_model_state_dict.keys():
-                if key not in model_state_dict.keys():
-                    non_persistent_buffers[key] = loaded_model_state_dict[key]
-
-            loaded_model_state_dict = {
-                key: value for key, value in loaded_model_state_dict.items() if key not in non_persistent_buffers
-            }
-
             self.assertEqual(set(model_state_dict.keys()), set(loaded_model_state_dict.keys()))
-
-            model_buffers = list(model.buffers())
-            for non_persistent_buffer in non_persistent_buffers.values():
-                found_buffer = False
-                for i, model_buffer in enumerate(model_buffers):
-                    if torch.equal(non_persistent_buffer, model_buffer):
-                        found_buffer = True
-                        break
-
-                self.assertTrue(found_buffer)
-                model_buffers.pop(i)
 
             models_equal = True
             for layer_name, p1 in model_state_dict.items():
@@ -746,10 +697,6 @@ def prepare_img():
     return im
 
 
-@unittest.skipIf(
-    not is_torch_greater_or_equal_than_1_11,
-    reason="`Pix2StructImageProcessor` requires `torch>=1.11.0`.",
-)
 @require_vision
 @require_torch
 @slow
@@ -802,20 +749,17 @@ class Pix2StructIntegrationTest(unittest.TestCase):
         texts = ["A picture of", "An photography of"]
 
         # image only
-        inputs = processor(images=[image_1, image_2], text=texts, return_tensors="pt", add_special_tokens=False).to(
-            torch_device
-        )
+        inputs = processor(images=[image_1, image_2], text=texts, return_tensors="pt").to(torch_device)
 
         predictions = model.generate(**inputs)
 
         self.assertEqual(
-            processor.decode(predictions[0], skip_special_tokens=True),
-            "A picture of a stop sign with a red stop sign",
+            processor.decode(predictions[0], skip_special_tokens=True), "A picture of a stop sign that says yes."
         )
 
         self.assertEqual(
             processor.decode(predictions[1], skip_special_tokens=True),
-            "An photography of the Temple Bar and other places in the city.",
+            "An photography of the Temple Bar and a few other places.",
         )
 
     def test_vqa_model(self):

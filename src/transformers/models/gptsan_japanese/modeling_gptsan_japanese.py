@@ -188,8 +188,17 @@ class GPTSanJapaneseTop1Router(nn.Module):
         hidden_states = hidden_states.to(self.dtype)
 
         if self.jitter_noise > 0:
+            # Get the lower and upper bound of the uniform distribution
+            # Adapted from: https://stackoverflow.com/questions/44328530/how-to-get-a-uniform-distribution-in-a-range-r1-r2-in-pytorch
+            distrib_lower_bound = 1.0 - self.jitter_noise
+            distrib_upper_bound = 1.0 + self.jitter_noise
+
+            uniform_distrib = torch.rand(hidden_states.shape, device=hidden_states.device, dtype=self.dtype)
+            uniform_distrib = uniform_distrib * (distrib_lower_bound - distrib_upper_bound)
+
+            uniform_distrib = uniform_distrib + distrib_upper_bound
             # Multiply the token inputs by the uniform distribution - adding some noise
-            hidden_states *= torch.empty_like(hidden_states).uniform_(1.0 - self.jitter_noise, 1.0 + self.jitter_noise)
+            hidden_states *= uniform_distrib
 
         # Shape: [num_groups, tokens_per_group, num_experts]
         self._cast_classifier()
@@ -277,7 +286,7 @@ class GPTSanJapaneseSparseMLP(nn.Module):
         next_states = hidden_states.clone()
         for idx, expert in enumerate(self.experts.values()):
             token_indices = router_mask[:, :, idx].bool()
-            next_states[token_indices] = expert(hidden_states[token_indices]).to(next_states.dtype)
+            next_states[token_indices] = expert(hidden_states[token_indices])
 
         hidden_states = router_probs * next_states
         return hidden_states, (router_logits, expert_index)
@@ -361,15 +370,12 @@ class GPTSanJapaneseAttention(nn.Module):
         dropout: float = 0.0,
         is_decoder: bool = False,
         bias: bool = True,
-        is_causal: bool = False,
-        config: Optional[GPTSanJapaneseConfig] = None,
     ):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.dropout = dropout
         self.head_dim = embed_dim // num_heads
-        self.config = config
 
         if (self.head_dim * num_heads) != self.embed_dim:
             raise ValueError(
@@ -378,7 +384,6 @@ class GPTSanJapaneseAttention(nn.Module):
             )
         self.scaling = self.head_dim**-0.5
         self.is_decoder = is_decoder
-        self.is_causal = is_causal
 
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
@@ -687,7 +692,6 @@ class GPTSanJapanesePreTrainedModel(PreTrainedModel):
     base_model_prefix = "gptsan_japanese"
     supports_gradient_checkpointing = False
     _no_split_modules = ["GPTSanJapaneseBlock"]
-    _skip_keys_device_placement = "past_key_values"
 
     @property
     def dummy_inputs(self):
@@ -754,16 +758,19 @@ class GPTSanJapanesePreTrainedModel(PreTrainedModel):
                 module.experts[f"expert_{idx}"].wi.weight.data.normal_(mean=0.0, std=factor * (d_model**-0.5))
                 module.experts[f"expert_{idx}"].wo.weight.data.normal_(mean=0.0, std=factor * (d_model**-0.5))
 
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, (GPTSanJapaneseAttention,)):
+            module.gradient_checkpointing = value
+
     # Copied from transformers.models.t5.modeling_t5.T5PreTrainedModel._shift_right
     def _shift_right(self, input_ids):
         decoder_start_token_id = self.config.decoder_start_token_id
         pad_token_id = self.config.pad_token_id
 
-        if decoder_start_token_id is None:
-            raise ValueError(
-                "self.model.config.decoder_start_token_id has to be defined. In T5 it is usually set to the pad_token_id. "
-                "See T5 docs for more information."
-            )
+        assert decoder_start_token_id is not None, (
+            "self.model.config.decoder_start_token_id has to be defined. In T5 it is usually set to the pad_token_id."
+            " See T5 docs for more information"
+        )
 
         # shift inputs to the right
         if is_torch_fx_proxy(input_ids):
@@ -775,8 +782,7 @@ class GPTSanJapanesePreTrainedModel(PreTrainedModel):
             shifted_input_ids[..., 1:] = input_ids[..., :-1].clone()
             shifted_input_ids[..., 0] = decoder_start_token_id
 
-        if pad_token_id is None:
-            raise ValueError("self.model.config.pad_token_id has to be defined.")
+        assert pad_token_id is not None, "self.model.config.pad_token_id has to be defined."
         # replace possible -100 values in labels by `pad_token_id`
         shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
 
@@ -1102,7 +1108,7 @@ class GPTSanJapaneseModel(GPTSanJapanesePreTrainedModel):
     GPTSAN_JAPANESE_START_DOCSTRING,
 )
 class GPTSanJapaneseForConditionalGeneration(GPTSanJapanesePreTrainedModel):
-    _tied_weights_keys = ["lm_head.weight"]
+    _keys_to_ignore_on_load_missing = [r"lm_head.weight"]
 
     def __init__(self, config: GPTSanJapaneseConfig):
         super().__init__(config)
@@ -1279,7 +1285,7 @@ class GPTSanJapaneseForConditionalGeneration(GPTSanJapanesePreTrainedModel):
         past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         **kwargs,
     ):
-        if isinstance(spout, list):
+        if type(spout) is list:
             spout = torch.tensor(spout).float()
             if input_ids is not None:
                 spout = spout.to(input_ids.device)
@@ -1304,9 +1310,9 @@ class GPTSanJapaneseForConditionalGeneration(GPTSanJapanesePreTrainedModel):
         return self._shift_right(labels)
 
     # Copied from transformers.models.mbart.modeling_mbart.MBartForConditionalGeneration.resize_token_embeddings with MBart->GPTSanJapanese
-    def resize_token_embeddings(self, new_num_tokens: int, pad_to_multiple_of: Optional[int] = None) -> nn.Embedding:
-        new_embeddings = super().resize_token_embeddings(new_num_tokens, pad_to_multiple_of)
-        self._resize_final_logits_bias(new_embeddings.weight.shape[0])
+    def resize_token_embeddings(self, new_num_tokens: int) -> nn.Embedding:
+        new_embeddings = super().resize_token_embeddings(new_num_tokens)
+        self._resize_final_logits_bias(new_num_tokens)
         return new_embeddings
 
     # Copied from transformers.models.mbart.modeling_mbart.MBartForConditionalGeneration._resize_final_logits_bias with MBart->GPTSanJapanese
@@ -1338,7 +1344,7 @@ class GPTSanJapaneseForConditionalGeneration(GPTSanJapanesePreTrainedModel):
         total_router_logits = []
         total_expert_indexes = []
         for router_output in router_outputs:
-            if len(router_output[0].shape) > 1:
+            if router_output[0] is not None:
                 router_logits, expert_indexes = router_output
                 total_router_logits.append(router_logits)
                 total_expert_indexes.append(expert_indexes)

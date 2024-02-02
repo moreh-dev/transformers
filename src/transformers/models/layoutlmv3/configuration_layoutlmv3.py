@@ -119,7 +119,6 @@ class LayoutLMv3Config(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "layoutlmv3"
 
     def __init__(
@@ -261,7 +260,7 @@ class LayoutLMv3OnnxConfig(OnnxConfig):
         """
 
         # A dummy image is used so OCR should not be applied
-        setattr(processor.image_processor, "apply_ocr", False)
+        setattr(processor.feature_extractor, "apply_ocr", False)
 
         # If dynamic axis (-1) we forward with a fixed dimension of 2 samples to avoid optimizations made by ONNX
         batch_size = compute_effective_axis_dimension(

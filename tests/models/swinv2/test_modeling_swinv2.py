@@ -14,6 +14,7 @@
 # limitations under the License.
 """ Testing suite for the PyTorch Swinv2 model. """
 import collections
+import inspect
 import unittest
 
 from transformers import Swinv2Config
@@ -35,7 +36,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import AutoImageProcessor
+    from transformers import AutoFeatureExtractor
 
 
 class Swinv2ModelTester:
@@ -219,6 +220,18 @@ class Swinv2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
 
+    def test_forward_signature(self):
+        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
+
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            signature = inspect.signature(model.forward)
+            # signature.parameters is an OrderedDict => so arg_names order is deterministic
+            arg_names = [*signature.parameters.keys()]
+
+            expected_arg_names = ["pixel_values"]
+            self.assertListEqual(arg_names[:1], expected_arg_names)
+
     def test_attention_outputs(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
         config.return_dict = True
@@ -399,9 +412,9 @@ class Swinv2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 @require_torch
 class Swinv2ModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_image_processor(self):
+    def default_feature_extractor(self):
         return (
-            AutoImageProcessor.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256")
+            AutoFeatureExtractor.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256")
             if is_vision_available()
             else None
         )
@@ -411,10 +424,10 @@ class Swinv2ModelIntegrationTest(unittest.TestCase):
         model = Swinv2ForImageClassification.from_pretrained("microsoft/swinv2-tiny-patch4-window8-256").to(
             torch_device
         )
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
 
         image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")
-        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
+        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():

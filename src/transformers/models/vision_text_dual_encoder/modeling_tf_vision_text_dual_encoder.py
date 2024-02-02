@@ -15,8 +15,6 @@
 """TensorFlow VisionTextDualEncoder model."""
 
 
-from __future__ import annotations
-
 import re
 from typing import Optional, Tuple, Union
 
@@ -225,26 +223,33 @@ class TFVisionTextDualEncoderModel(TFPreTrainedModel):
         # Build in the build() method to make sure the names are right
         initializer = tf.keras.initializers.Constant(self.config.logit_scale_init_value)
         self.logit_scale = self.add_weight(shape=(1,), initializer=initializer, name="logit_scale")
-        super().build(input_shape)
 
-    def tf_to_pt_weight_rename(self, tf_weight):
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
         # Matt: The TF and PT weights don't align because our TF base classes have an extra layer compared to PT models
         # (the main model stem is in the MainLayer class). If we remove that layer, then weight names sync up as normal.
         # However, the name of that extra layer is the name of the MainLayer in the base model.
-        if "vision_model" in tf_weight:
-            if tf_weight.count("vision_model") == 1:
-                return re.sub(r"vision_model\..*?\.", "vision_model.", tf_weight)
-            elif tf_weight.count("vision_model") == 2:
-                return re.sub(r"vision_model\..*?\.vision_model", "vision_model.vision_model", tf_weight)
-            else:
-                raise ValueError(
-                    f"Unexpected weight name {tf_weight}. Please file an issue on the"
-                    " Transformers repo to let us know about this error!"
-                )
-        elif "text_model" in tf_weight:
-            return re.sub(r"text_model\..*?\.", "text_model.", tf_weight)
-        else:
-            return (tf_weight,)
+
+        if kwargs.get("from_pt", False):
+
+            def tf_to_pt_weight_rename(tf_weight):
+                if "vision_model" in tf_weight:
+                    if tf_weight.count("vision_model") == 1:
+                        return re.sub(r"vision_model\..*?\.", "vision_model.", tf_weight)
+                    elif tf_weight.count("vision_model") == 2:
+                        return re.sub(r"vision_model\..*?\.vision_model", "vision_model.vision_model", tf_weight)
+                    else:
+                        raise ValueError(
+                            f"Unexpected weight name {tf_weight}. Please file an issue on the"
+                            " Transformers repo to let us know about this error!"
+                        )
+                elif "text_model" in tf_weight:
+                    return re.sub(r"text_model\..*?\.", "text_model.", tf_weight)
+                else:
+                    return tf_weight
+
+            kwargs["tf_to_pt_weight_rename"] = tf_to_pt_weight_rename
+        return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
 
     @add_start_docstrings_to_model_forward(VISION_TEXT_DUAL_ENCODER_TEXT_INPUTS_DOCSTRING)
     def get_text_features(
@@ -335,12 +340,12 @@ class TFVisionTextDualEncoderModel(TFPreTrainedModel):
     @replace_return_docstrings(output_type=TFCLIPOutput, config_class=_CONFIG_FOR_DOC)
     def call(
         self,
-        input_ids: tf.Tensor | None = None,
-        pixel_values: tf.Tensor | None = None,
-        attention_mask: tf.Tensor | None = None,
-        position_ids: tf.Tensor | None = None,
+        input_ids: Optional[tf.Tensor] = None,
+        pixel_values: Optional[tf.Tensor] = None,
+        attention_mask: Optional[tf.Tensor] = None,
+        position_ids: Optional[tf.Tensor] = None,
         return_loss: Optional[bool] = None,
-        token_type_ids: tf.Tensor | None = None,
+        token_type_ids: Optional[tf.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -584,7 +589,7 @@ class TFVisionTextDualEncoderModel(TFPreTrainedModel):
         if text_model.name != "text_model":
             raise ValueError("text model must be created with the name `text_model`.")
 
-        model.build()  # Ensure model is fully built
+        model(model.dummy_inputs)  # Ensure model is fully built
 
         return model
 

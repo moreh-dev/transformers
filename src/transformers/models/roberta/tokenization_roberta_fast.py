@@ -177,11 +177,6 @@ class RobertaTokenizerFast(PreTrainedTokenizerFast):
         trim_offsets=True,
         **kwargs,
     ):
-        mask_token = (
-            AddedToken(mask_token, lstrip=True, rstrip=False, normalized=False)
-            if isinstance(mask_token, str)
-            else mask_token
-        )
         super().__init__(
             vocab_file,
             merges_file,

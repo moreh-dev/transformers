@@ -38,7 +38,7 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
-from ...utils.backbone_utils import BackboneMixin
+from ...utils.backbone_utils import BackboneMixin, get_aligned_output_features_output_indices
 from .configuration_swin import SwinConfig
 
 
@@ -380,7 +380,7 @@ class SwinPatchMerging(nn.Module):
 
 
 # Copied from transformers.models.beit.modeling_beit.drop_path
-def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = False) -> torch.Tensor:
+def drop_path(input, drop_prob=0.0, training=False, scale_by_keep=True):
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
@@ -825,8 +825,15 @@ class SwinEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
             if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__, hidden_states, input_dimensions, layer_head_mask, output_attentions
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(layer_module), hidden_states, input_dimensions, layer_head_mask
                 )
             else:
                 layer_outputs = layer_module(
@@ -894,6 +901,10 @@ class SwinPreTrainedModel(PreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, SwinEncoder):
+            module.gradient_checkpointing = value
+
 
 SWIN_START_DOCSTRING = r"""
     This model is a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) sub-class. Use
@@ -931,12 +942,6 @@ SWIN_INPUTS_DOCSTRING = r"""
 @add_start_docstrings(
     "The bare Swin Model transformer outputting raw hidden-states without any specific head on top.",
     SWIN_START_DOCSTRING,
-    """
-        add_pooling_layer (`bool`, *optional*, defaults to `True`):
-                Whether or not to apply pooling layer.
-        use_mask_token (`bool`, *optional*, defaults to `False`):
-                Whether or not to create and apply mask tokens in the embedding layer.
-    """,
 )
 class SwinModel(SwinPreTrainedModel):
     def __init__(self, config, add_pooling_layer=True, use_mask_token=False):
@@ -1254,11 +1259,16 @@ class SwinForImageClassification(SwinPreTrainedModel):
 class SwinBackbone(SwinPreTrainedModel, BackboneMixin):
     def __init__(self, config: SwinConfig):
         super().__init__(config)
-        super()._init_backbone(config)
 
-        self.num_features = [config.embed_dim] + [int(config.embed_dim * 2**i) for i in range(len(config.depths))]
+        self.stage_names = config.stage_names
+
         self.embeddings = SwinEmbeddings(config)
         self.encoder = SwinEncoder(config, self.embeddings.patch_grid)
+
+        self._out_features, self._out_indices = get_aligned_output_features_output_indices(
+            config.out_features, config.out_indices, self.stage_names
+        )
+        self.num_features = [config.embed_dim] + [int(config.embed_dim * 2**i) for i in range(len(config.depths))]
 
         # Add layer norms to hidden states of out_features
         hidden_states_norms = {}

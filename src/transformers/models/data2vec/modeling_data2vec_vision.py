@@ -150,26 +150,22 @@ class Data2VecVisionEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
     def forward(self, pixel_values: torch.Tensor, bool_masked_pos: Optional[torch.BoolTensor] = None) -> torch.Tensor:
-        embeddings, (patch_height, patch_width) = self.patch_embeddings(
-            pixel_values, self.position_embeddings[:, 1:, :] if self.position_embeddings is not None else None
-        )
+        embeddings = self.patch_embeddings(pixel_values)
         batch_size, seq_len, _ = embeddings.size()
 
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         if bool_masked_pos is not None:
             mask_tokens = self.mask_token.expand(batch_size, seq_len, -1)
             # replace the masked visual tokens by mask_tokens
             w = bool_masked_pos.unsqueeze(-1).type_as(mask_tokens)
             embeddings = embeddings * (1 - w) + mask_tokens * w
 
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        if self.position_embeddings is not None:
-            cls_tokens = cls_tokens + self.position_embeddings[:, :1, :]
-
         embeddings = torch.cat((cls_tokens, embeddings), dim=1)
-
+        if self.position_embeddings is not None:
+            embeddings = embeddings + self.position_embeddings
         embeddings = self.dropout(embeddings)
 
-        return embeddings, (patch_height, patch_width)
+        return embeddings
 
 
 # Copied from transformers.models.beit.modeling_beit.BeitPatchEmbeddings with Beit->Data2VecVision
@@ -197,29 +193,19 @@ class Data2VecVisionPatchEmbeddings(nn.Module):
 
         self.projection = nn.Conv2d(num_channels, hidden_size, kernel_size=patch_size, stride=patch_size)
 
-    def forward(self, pixel_values: torch.Tensor, position_embedding: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         batch_size, num_channels, height, width = pixel_values.shape
         if num_channels != self.num_channels:
             raise ValueError(
                 "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
             )
-
-        embeddings = self.projection(pixel_values)
-        patch_height, patch_width = embeddings.shape[2], embeddings.shape[3]
-
-        if position_embedding is not None:
-            # interpolate the position embedding to the corresponding size
-            position_embedding = position_embedding.view(1, self.patch_shape[0], self.patch_shape[1], -1).permute(
-                0, 3, 1, 2
+        if height != self.image_size[0] or width != self.image_size[1]:
+            raise ValueError(
+                f"Input image size ({height}*{width}) doesn't match model ({self.image_size[0]}*{self.image_size[1]})."
             )
-            position_embedding = nn.functional.interpolate(
-                position_embedding, size=(patch_height, patch_width), mode="bicubic"
-            )
-            embeddings = embeddings + position_embedding
+        embeddings = self.projection(pixel_values).flatten(2).transpose(1, 2)
 
-        embeddings = embeddings.flatten(2).transpose(1, 2)
-
-        return embeddings, (patch_height, patch_width)
+        return embeddings
 
 
 # Copied from transformers.models.beit.modeling_beit.BeitSelfAttention with Beit->Data2VecVision
@@ -303,8 +289,8 @@ class Data2VecVisionSelfAttention(nn.Module):
 # Copied from transformers.models.beit.modeling_beit.BeitSelfOutput with Beit->Data2VecVision
 class Data2VecVisionSelfOutput(nn.Module):
     """
-    The residual connection is defined in Data2VecVisionLayer instead of here (as is the case with other models), due to the
-    layernorm applied before each block.
+    The residual connection is defined in Data2VecVisionLayer instead of here (as is the case with other models), due
+    to the layernorm applied before each block.
     """
 
     def __init__(self, config: Data2VecVisionConfig) -> None:
@@ -484,7 +470,7 @@ class Data2VecVisionRelativePositionBias(nn.Module):
         relative_position_index[0:, 0] = self.num_relative_distance - 2
         relative_position_index[0, 0] = self.num_relative_distance - 1
 
-        self.register_buffer("relative_position_index", relative_position_index, persistent=False)
+        self.register_buffer("relative_position_index", relative_position_index)
 
     def forward(self) -> torch.Tensor:
         relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
@@ -536,11 +522,17 @@ class Data2VecVisionEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
             if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(layer_module),
                     hidden_states,
                     layer_head_mask,
-                    output_attentions,
                 )
             else:
                 relative_position_bias = (
@@ -592,6 +584,10 @@ class Data2VecVisionPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, Data2VecVisionEncoder):
+            module.gradient_checkpointing = value
 
 
 DATA2VEC_VISION_START_DOCSTRING = r"""
@@ -697,7 +693,7 @@ class Data2VecVisionModel(Data2VecVisionPreTrainedModel):
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
 
-        embedding_output, (patch_height, patch_width) = self.embeddings(pixel_values, bool_masked_pos)
+        embedding_output = self.embeddings(pixel_values, bool_masked_pos)
 
         encoder_outputs = self.encoder(
             embedding_output,
@@ -1093,12 +1089,6 @@ class Data2VecVisionForSemanticSegmentation(Data2VecVisionPreTrainedModel):
         self.data2vec_vision = Data2VecVisionModel(config, add_pooling_layer=False)
 
         # FPNs
-        if len(self.config.out_indices) != 4:
-            raise ValueError(
-                "Data2VecVisionForSemanticSegmentation requires config.out_indices to be a list of 4 integers, "
-                "specifying which features to use from the backbone. One can use [3, 5, 7, 11] in case of "
-                "a base-sized architecture."
-            )
         self.fpn1 = nn.Sequential(
             nn.ConvTranspose2d(config.hidden_size, config.hidden_size, kernel_size=2, stride=2),
             nn.BatchNorm2d(config.hidden_size),
@@ -1130,10 +1120,8 @@ class Data2VecVisionForSemanticSegmentation(Data2VecVisionPreTrainedModel):
         # compute weighted loss
         loss_fct = CrossEntropyLoss(ignore_index=self.config.semantic_loss_ignore_index)
         main_loss = loss_fct(upsampled_logits, labels)
-        loss = main_loss
-        if auxiliary_logits is not None:
-            auxiliary_loss = loss_fct(upsampled_auxiliary_logits, labels)
-            loss += self.config.auxiliary_loss_weight * auxiliary_loss
+        auxiliary_loss = loss_fct(upsampled_auxiliary_logits, labels)
+        loss = main_loss + self.config.auxiliary_loss_weight * auxiliary_loss
 
         return loss
 

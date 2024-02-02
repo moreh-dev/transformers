@@ -67,7 +67,7 @@ class ModelArguments:
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
-            "help": "The model checkpoint for weights initialization. "
+            "help": "The model checkpoint for weights initialization."
             "Don't set if you want to train a model from scratch."
         },
     )
@@ -115,23 +115,11 @@ class ModelArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    token: str = field(
-        default=None,
-        metadata={
-            "help": (
-                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
-                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
-            )
-        },
-    )
-    trust_remote_code: bool = field(
+    use_auth_token: bool = field(
         default=False,
         metadata={
-            "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option "
-                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
-                "execute code present on the Hub on your local machine."
-            )
+            "help": "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
+            "with private models)."
         },
     )
 {% endif %}
@@ -290,7 +278,7 @@ def main():
             extension = "text"
         raw_datasets = load_dataset(extension, data_files=data_files)
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.
+    # https://huggingface.co/docs/datasets/loading_datasets.html.
 
     # Load pretrained model and tokenizer
     #
@@ -301,8 +289,7 @@ def main():
     config_kwargs = {
         "cache_dir": model_args.cache_dir,
         "revision": model_args.model_revision,
-        "token": model_args.token,
-        "trust_remote_code": model_args.trust_remote_code,
+        "use_auth_token": True if model_args.use_auth_token else None,
     }
     if model_args.config_name:
         config = AutoConfig.from_pretrained(model_args.config_name, **config_kwargs)
@@ -316,8 +303,7 @@ def main():
         "cache_dir": model_args.cache_dir,
         "use_fast": model_args.use_fast_tokenizer,
         "revision": model_args.model_revision,
-        "token": model_args.token,
-        "trust_remote_code": model_args.trust_remote_code,
+        "use_auth_token": True if model_args.use_auth_token else None,
     }
     if model_args.tokenizer_name:
         tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name, **tokenizer_kwargs)
@@ -325,7 +311,7 @@ def main():
         tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, **tokenizer_kwargs)
     else:
         raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script. "
+            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
 
@@ -336,8 +322,7 @@ def main():
             config=config,
             cache_dir=model_args.cache_dir,
             revision=model_args.model_revision,
-            token=model_args.token,
-            trust_remote_code=model_args.trust_remote_code,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
     else:
         logger.info("Training new model from scratch")
@@ -351,16 +336,14 @@ def main():
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        token=model_args.token,
-        trust_remote_code=model_args.trust_remote_code,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
         use_fast=model_args.use_fast_tokenizer,
         revision=model_args.model_revision,
-        token=model_args.token,
-        trust_remote_code=model_args.trust_remote_code,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
     model = AutoModelForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
@@ -368,8 +351,7 @@ def main():
         config=config,
         cache_dir=model_args.cache_dir,
         revision=model_args.model_revision,
-        token=model_args.token,
-        trust_remote_code=model_args.trust_remote_code,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
 {% endif %}
 
@@ -502,7 +484,7 @@ def main():
 
         trainer.log_metrics("predict", metrics)
         trainer.save_metrics("predict", metrics)
-
+        
         # write custom code for saving predictions according to task
 
 def _mp_fn(index):
@@ -735,7 +717,7 @@ def main():
         extension = args.train_file.split(".")[-1]
         raw_datasets = load_dataset(extension, data_files=data_files)
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.
+    # https://huggingface.co/docs/datasets/loading_datasets.html.
 
     # Load pretrained model and tokenizer
     #
@@ -756,7 +738,7 @@ def main():
         tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
     else:
         raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script. "
+            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
 
@@ -900,7 +882,7 @@ def main():
 
         model.eval()
         for step, batch in enumerate(eval_dataloader):
-            with torch.no_grad():
+            with torch.no_grad(): 
                 outputs = model(**batch)
             predictions = outputs.logits.argmax(dim=-1)
             metric.add_batch(

@@ -147,7 +147,6 @@ class BartTokenizerFast(PreTrainedTokenizerFast):
         trim_offsets (`bool`, *optional*, defaults to `True`):
             Whether the post processing step should trim offsets to avoid including whitespaces.
     """
-
     vocab_files_names = VOCAB_FILES_NAMES
     pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
     max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
@@ -171,12 +170,6 @@ class BartTokenizerFast(PreTrainedTokenizerFast):
         trim_offsets=True,
         **kwargs,
     ):
-        # we have to specify that this tokens is special otherwise adding it will reset the normalized flag to `False` in `add_special_tokens`
-        mask_token = (
-            AddedToken(mask_token, lstrip=True, normalized=True, special=True)
-            if isinstance(mask_token, str)
-            else mask_token
-        )
         super().__init__(
             vocab_file,
             merges_file,

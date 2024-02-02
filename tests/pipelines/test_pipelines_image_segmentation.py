@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import tempfile
+import hashlib
 import unittest
 from typing import Dict
 
@@ -20,7 +20,6 @@ import datasets
 import numpy as np
 import requests
 from datasets import load_dataset
-from huggingface_hub.utils import insecure_hashlib
 
 from transformers import (
     MODEL_FOR_IMAGE_SEGMENTATION_MAPPING,
@@ -59,7 +58,7 @@ else:
 
 
 def hashimage(image: Image) -> str:
-    m = insecure_hashlib.md5(image.tobytes())
+    m = hashlib.md5(image.tobytes())
     return m.hexdigest()[:10]
 
 
@@ -715,17 +714,3 @@ class ImageSegmentationPipelineTests(unittest.TestCase):
                 },
             ],
         )
-
-    def test_save_load(self):
-        model_id = "hf-internal-testing/tiny-detr-mobilenetsv3-panoptic"
-
-        model = AutoModelForImageSegmentation.from_pretrained(model_id)
-        image_processor = AutoImageProcessor.from_pretrained(model_id)
-        image_segmenter = pipeline(
-            task="image-segmentation",
-            model=model,
-            image_processor=image_processor,
-        )
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            image_segmenter.save_pretrained(tmpdirname)
-            pipeline(task="image-segmentation", model=tmpdirname)

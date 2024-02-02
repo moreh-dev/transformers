@@ -15,8 +15,6 @@
 """ Testing suite for the TensorFlow ViT model. """
 
 
-from __future__ import annotations
-
 import inspect
 import unittest
 
@@ -38,7 +36,7 @@ if is_tf_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import ViTImageProcessor
+    from transformers import ViTFeatureExtractor
 
 
 class TFViTModelTester:
@@ -52,7 +50,7 @@ class TFViTModelTester:
         is_training=True,
         use_labels=True,
         hidden_size=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -228,16 +226,16 @@ def prepare_img():
 @require_vision
 class TFViTModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_image_processor(self):
-        return ViTImageProcessor.from_pretrained("google/vit-base-patch16-224") if is_vision_available() else None
+    def default_feature_extractor(self):
+        return ViTFeatureExtractor.from_pretrained("google/vit-base-patch16-224") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
         model = TFViTForImageClassification.from_pretrained("google/vit-base-patch16-224")
 
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="tf")
+        inputs = feature_extractor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(**inputs)

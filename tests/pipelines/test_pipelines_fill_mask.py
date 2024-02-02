@@ -12,21 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gc
 import unittest
 
 from transformers import MODEL_FOR_MASKED_LM_MAPPING, TF_MODEL_FOR_MASKED_LM_MAPPING, FillMaskPipeline, pipeline
 from transformers.pipelines import PipelineException
 from transformers.testing_utils import (
-    backend_empty_cache,
     is_pipeline_test,
-    is_torch_available,
     nested_simplify,
     require_tf,
     require_torch,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 from .test_pipelines_common import ANY
@@ -36,13 +32,6 @@ from .test_pipelines_common import ANY
 class FillMaskPipelineTests(unittest.TestCase):
     model_mapping = MODEL_FOR_MASKED_LM_MAPPING
     tf_model_mapping = TF_MODEL_FOR_MASKED_LM_MAPPING
-
-    def tearDown(self):
-        super().tearDown()
-        # clean-up as much as possible GPU memory occupied by PyTorch
-        gc.collect()
-        if is_torch_available():
-            backend_empty_cache(torch_device)
 
     @require_tf
     def test_small_model_tf(self):
@@ -148,14 +137,9 @@ class FillMaskPipelineTests(unittest.TestCase):
             ],
         )
 
-    @require_torch_accelerator
+    @require_torch_gpu
     def test_fp16_casting(self):
-        pipe = pipeline(
-            "fill-mask",
-            model="hf-internal-testing/tiny-random-distilbert",
-            device=torch_device,
-            framework="pt",
-        )
+        pipe = pipeline("fill-mask", model="hf-internal-testing/tiny-random-distilbert", device=0, framework="pt")
 
         # convert model to fp16
         pipe.model.half()
@@ -213,27 +197,6 @@ class FillMaskPipelineTests(unittest.TestCase):
                 {"sequence": "My name is Patrick", "score": 0.005, "token": 3499, "token_str": " Patrick"},
                 {"sequence": "My name is Clara", "score": 0.000, "token": 13606, "token_str": " Clara"},
                 {"sequence": "My name is Te", "score": 0.000, "token": 2941, "token_str": " Te"},
-            ],
-        )
-
-        dummy_str = "Lorem ipsum dolor sit amet, consectetur adipiscing elit," * 100
-        outputs = unmasker(
-            "My name is <mask>" + dummy_str,
-            tokenizer_kwargs={"truncation": True},
-        )
-        simplified = nested_simplify(outputs, decimals=4)
-        self.assertEqual(
-            [{"sequence": x["sequence"][:100]} for x in simplified],
-            [
-                {"sequence": f"My name is,{dummy_str}"[:100]},
-                {"sequence": f"My name is:,{dummy_str}"[:100]},
-            ],
-        )
-        self.assertEqual(
-            [{k: x[k] for k in x if k != "sequence"} for x in simplified],
-            [
-                {"score": 0.2819, "token": 6, "token_str": ","},
-                {"score": 0.0954, "token": 46686, "token_str": ":,"},
             ],
         )
 

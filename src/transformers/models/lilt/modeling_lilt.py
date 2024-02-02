@@ -59,9 +59,7 @@ class LiltTextEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer(
-            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
-        )
+        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
 
         # End copy
@@ -514,13 +512,19 @@ class LiltEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
             if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(layer_module),
                     hidden_states,
                     layout_inputs,
                     attention_mask,
                     layer_head_mask,
-                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(
@@ -573,6 +577,7 @@ class LiltPooler(nn.Module):
         return pooled_output
 
 
+# Copied from transformers.models.roberta.modeling_roberta.RobertaPreTrainedModel with Roberta->Lilt,roberta->lilt
 class LiltPreTrainedModel(PreTrainedModel):
     """
     An abstract class to handle weights initialization and a simple interface for downloading and loading pretrained
@@ -600,6 +605,19 @@ class LiltPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, LiltEncoder):
+            module.gradient_checkpointing = value
+
+    def update_keys_to_ignore(self, config, del_keys_to_ignore):
+        """Remove some keys from ignore list"""
+        if not config.tie_word_embeddings:
+            # must make a new list, or the class variable gets modified!
+            self._keys_to_ignore_on_save = [k for k in self._keys_to_ignore_on_save if k not in del_keys_to_ignore]
+            self._keys_to_ignore_on_load_missing = [
+                k for k in self._keys_to_ignore_on_load_missing if k not in del_keys_to_ignore
+            ]
 
 
 LILT_START_DOCSTRING = r"""
@@ -679,6 +697,8 @@ LILT_INPUTS_DOCSTRING = r"""
     LILT_START_DOCSTRING,
 )
 class LiltModel(LiltPreTrainedModel):
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
+
     def __init__(self, config, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
@@ -753,7 +773,6 @@ class LiltModel(LiltPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
-            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -828,6 +847,8 @@ class LiltModel(LiltPreTrainedModel):
     LILT_START_DOCSTRING,
 )
 class LiltForSequenceClassification(LiltPreTrainedModel):
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
+
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForSequenceClassification.__init__ with Roberta->Lilt, roberta->lilt
     def __init__(self, config):
         super().__init__(config)
@@ -946,6 +967,9 @@ class LiltForSequenceClassification(LiltPreTrainedModel):
     LILT_START_DOCSTRING,
 )
 class LiltForTokenClassification(LiltPreTrainedModel):
+    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
+
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForTokenClassification.__init__ with Roberta->Lilt, roberta->lilt
     def __init__(self, config):
         super().__init__(config)
@@ -1072,6 +1096,9 @@ class LiltClassificationHead(nn.Module):
     LILT_START_DOCSTRING,
 )
 class LiltForQuestionAnswering(LiltPreTrainedModel):
+    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
+
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForQuestionAnswering.__init__ with Roberta->Lilt, roberta->lilt
     def __init__(self, config):
         super().__init__(config)

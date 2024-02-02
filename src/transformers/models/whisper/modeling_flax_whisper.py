@@ -14,7 +14,6 @@
 # limitations under the License.
 """ Flax whisper model."""
 
-import math
 import random
 from functools import partial
 from typing import Optional, Tuple
@@ -57,19 +56,6 @@ _CHECKPOINT_FOR_DOC = "openai/whisper-tiny"
 _CONFIG_FOR_DOC = "WhisperConfig"
 
 remat = nn_partitioning.remat
-
-
-def sinusoidal_embedding_init(key, shape, dtype=jnp.float_) -> jax.Array:
-    """Returns sinusoids for positional embedding"""
-    length, channels = shape
-    if channels % 2 != 0:
-        raise ValueError(
-            f"Number of channels has to be divisible by 2 for sinusoidal positional embeddings, got {channels} channels."
-        )
-    log_timescale_increment = math.log(10000) / (channels // 2 - 1)
-    inv_timescales = jnp.exp(-log_timescale_increment * jnp.arange(channels // 2))
-    scaled_time = jnp.arange(length).reshape(-1, 1) * inv_timescales.reshape(1, -1)
-    return jnp.concatenate([jnp.sin(scaled_time), jnp.cos(scaled_time)], axis=1).astype(dtype)
 
 
 WHISPER_START_DOCSTRING = r"""
@@ -663,13 +649,7 @@ class FlaxWhisperEncoder(nn.Module):
             dtype=self.dtype,
             gradient_checkpointing=self.gradient_checkpointing,
         )
-
-        self.embed_positions = nn.Embed(
-            self.config.max_source_positions,
-            self.config.d_model,
-            dtype=self.dtype,
-            embedding_init=sinusoidal_embedding_init,
-        )
+        self.embed_positions = nn.Embed(self.config.max_source_positions, self.config.d_model, dtype=self.dtype)
 
         self.layer_norm = nn.LayerNorm(dtype=self.dtype, epsilon=1e-05)
 
@@ -693,8 +673,6 @@ class FlaxWhisperEncoder(nn.Module):
         hidden_states = jax.nn.gelu(self.conv2(hidden_states), approximate=False)
 
         embed_positions = self.embed_positions(jnp.arange(self.config.max_source_positions))
-        # freeze the sinusoidal embeddings by stopping the back-prop
-        embed_positions = jax.lax.stop_gradient(embed_positions)
         hidden_states = hidden_states + embed_positions
 
         hidden_states = self.dropout_layer(hidden_states, deterministic=deterministic)
@@ -867,7 +845,7 @@ class FlaxWhisperPreTrainedModel(FlaxPreTrainedModel):
     def __init__(
         self,
         config: WhisperConfig,
-        input_shape: Tuple[int] = None,
+        input_shape: Tuple[int] = (1, 80, 3000),
         seed: int = 0,
         dtype: jnp.dtype = jnp.float32,
         _do_init: bool = True,
@@ -875,8 +853,6 @@ class FlaxWhisperPreTrainedModel(FlaxPreTrainedModel):
         **kwargs,
     ):
         module = self.module_class(config=config, dtype=dtype, gradient_checkpointing=gradient_checkpointing, **kwargs)
-        if input_shape is None:
-            input_shape = (1, config.num_mel_bins, 2 * config.max_source_positions)
         super().__init__(config, module, input_shape=input_shape, seed=seed, dtype=dtype, _do_init=_do_init)
 
     def enable_gradient_checkpointing(self):
@@ -1041,17 +1017,16 @@ class FlaxWhisperPreTrainedModel(FlaxPreTrainedModel):
         ```python
         >>> from transformers import WhisperProcessor, FlaxWhisperForConditionalGeneration
         >>> from datasets import load_dataset
-        >>> import jax.numpy as jnp
 
         >>> processor = WhisperProcessor.from_pretrained("openai/whisper-tiny.en")
         >>> model = FlaxWhisperForConditionalGeneration.from_pretrained("openai/whisper-tiny.en", from_pt=True)
         >>> ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
-        >>> input_features = processor(ds[0]["audio"]["array"], return_tensors="np").input_features
-
+        >>> inputs = processor(ds[0]["audio"]["array"], return_tensors="np")
+        >>> input_features = inputs.input_features
         >>> encoder_outputs = model.encode(input_features=input_features)
         >>> decoder_start_token_id = model.config.decoder_start_token_id
 
-        >>> decoder_input_ids = jnp.ones((input_features.shape[0], 1), dtype="i4") * decoder_start_token_id
+        >>> decoder_input_ids = jnp.ones((inputs.input_ids.shape[0], 1), dtype="i4") * decoder_start_token_id
 
         >>> outputs = model.decode(decoder_input_ids, encoder_outputs)
         >>> last_decoder_hidden_states = outputs.last_hidden_state
@@ -1472,8 +1447,8 @@ class FlaxWhisperForConditionalGeneration(FlaxWhisperPreTrainedModel):
         self,
         decoder_input_ids,
         max_length,
-        attention_mask: Optional[jax.Array] = None,
-        decoder_attention_mask: Optional[jax.Array] = None,
+        attention_mask: Optional[jnp.DeviceArray] = None,
+        decoder_attention_mask: Optional[jnp.DeviceArray] = None,
         encoder_outputs=None,
         **kwargs,
     ):
@@ -1540,9 +1515,7 @@ class FlaxWhisperForAudioClassificationModule(nn.Module):
     gradient_checkpointing: bool = False
 
     def setup(self) -> None:
-        self.encoder = FlaxWhisperEncoder(
-            config=self.config, dtype=self.dtype, gradient_checkpointing=self.gradient_checkpointing
-        )
+        self.encoder = FlaxWhisperEncoder(config=self.config, dtype=self.dtype)
         self.config.is_encoder_decoder = False
         num_layers = self.config.num_hidden_layers + 1
         if self.config.use_weighted_layer_sum:

@@ -15,14 +15,14 @@
 """ Testing suite for the PyTorch ViT model. """
 
 
+import inspect
 import unittest
 
 from transformers import ViTConfig
 from transformers.testing_utils import (
     require_accelerate,
     require_torch,
-    require_torch_accelerator,
-    require_torch_fp16,
+    require_torch_gpu,
     require_vision,
     slow,
     torch_device,
@@ -45,7 +45,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import ViTImageProcessor
+    from transformers import ViTFeatureExtractor
 
 
 class ViTModelTester:
@@ -59,7 +59,7 @@ class ViTModelTester:
         is_training=True,
         use_labels=True,
         hidden_size=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -223,6 +223,18 @@ class ViTModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
 
+    def test_forward_signature(self):
+        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
+
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            signature = inspect.signature(model.forward)
+            # signature.parameters is an OrderedDict => so arg_names order is deterministic
+            arg_names = [*signature.parameters.keys()]
+
+            expected_arg_names = ["pixel_values"]
+            self.assertListEqual(arg_names[:1], expected_arg_names)
+
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
@@ -252,16 +264,16 @@ def prepare_img():
 @require_vision
 class ViTModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_image_processor(self):
-        return ViTImageProcessor.from_pretrained("google/vit-base-patch16-224") if is_vision_available() else None
+    def default_feature_extractor(self):
+        return ViTFeatureExtractor.from_pretrained("google/vit-base-patch16-224") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
         model = ViTForImageClassification.from_pretrained("google/vit-base-patch16-224").to(torch_device)
 
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
+        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():
@@ -283,9 +295,9 @@ class ViTModelIntegrationTest(unittest.TestCase):
         # to visualize self-attention on higher resolution images.
         model = ViTModel.from_pretrained("facebook/dino-vits8").to(torch_device)
 
-        image_processor = ViTImageProcessor.from_pretrained("facebook/dino-vits8", size=480)
+        feature_extractor = ViTFeatureExtractor.from_pretrained("facebook/dino-vits8", size=480)
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="pt")
+        inputs = feature_extractor(images=image, return_tensors="pt")
         pixel_values = inputs.pixel_values.to(torch_device)
 
         # forward pass
@@ -304,17 +316,16 @@ class ViTModelIntegrationTest(unittest.TestCase):
 
     @slow
     @require_accelerate
-    @require_torch_accelerator
-    @require_torch_fp16
+    @require_torch_gpu
     def test_inference_fp16(self):
         r"""
         A small test to make sure that inference work in half precision without any problem.
         """
         model = ViTModel.from_pretrained("facebook/dino-vits8", torch_dtype=torch.float16, device_map="auto")
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
 
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="pt")
+        inputs = feature_extractor(images=image, return_tensors="pt")
         pixel_values = inputs.pixel_values.to(torch_device)
 
         # forward pass to make sure inference works in fp16

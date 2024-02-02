@@ -146,13 +146,13 @@ class FSMTTokenizer(PreTrainedTokenizer):
     this superclass for more information regarding those methods.
 
     Args:
-        langs (`List[str]`, *optional*):
+        langs (`List[str]`):
             A list of two languages to translate from and to, for instance `["en", "ru"]`.
-        src_vocab_file (`str`, *optional*):
+        src_vocab_file (`str`):
             File containing the vocabulary for the source language.
-        tgt_vocab_file (`st`, *optional*):
+        tgt_vocab_file (`st`):
             File containing the vocabulary for the target language.
-        merges_file (`str`, *optional*):
+        merges_file (`str`):
             File containing the merges.
         do_lower_case (`bool`, *optional*, defaults to `False`):
             Whether or not to lowercase the input when tokenizing.
@@ -197,6 +197,19 @@ class FSMTTokenizer(PreTrainedTokenizer):
         pad_token="<pad>",
         **kwargs,
     ):
+        super().__init__(
+            langs=langs,
+            src_vocab_file=src_vocab_file,
+            tgt_vocab_file=tgt_vocab_file,
+            merges_file=merges_file,
+            do_lower_case=do_lower_case,
+            unk_token=unk_token,
+            bos_token=bos_token,
+            sep_token=sep_token,
+            pad_token=pad_token,
+            **kwargs,
+        )
+
         try:
             import sacremoses
         except ImportError:
@@ -237,18 +250,6 @@ class FSMTTokenizer(PreTrainedTokenizer):
         merges = [tuple(merge.split()[:2]) for merge in merges]
         self.bpe_ranks = dict(zip(merges, range(len(merges))))
         self.cache = {}
-        super().__init__(
-            langs=langs,
-            src_vocab_file=src_vocab_file,
-            tgt_vocab_file=tgt_vocab_file,
-            merges_file=merges_file,
-            do_lower_case=do_lower_case,
-            unk_token=unk_token,
-            bos_token=bos_token,
-            sep_token=sep_token,
-            pad_token=pad_token,
-            **kwargs,
-        )
 
     # hack override
     def get_vocab(self) -> Dict[str, int]:

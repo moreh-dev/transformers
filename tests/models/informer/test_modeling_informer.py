@@ -279,24 +279,6 @@ class InformerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase
     def test_determinism(self):
         pass
 
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant_false(self):
-        pass
-
     # # Input is 'static_categorical_features' not 'input_ids'
     def test_model_main_input_name(self):
         model_signature = inspect.signature(getattr(InformerModel, "forward"))
@@ -456,7 +438,7 @@ class InformerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase
 
 
 def prepare_batch(filename="train-batch.pt"):
-    file = hf_hub_download(repo_id="hf-internal-testing/tourism-monthly-batch", filename=filename, repo_type="dataset")
+    file = hf_hub_download(repo_id="kashif/tourism-monthly-batch", filename=filename, repo_type="dataset")
     batch = torch.load(file, map_location=torch_device)
     return batch
 

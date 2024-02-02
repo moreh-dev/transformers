@@ -36,7 +36,7 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
-from ...utils.backbone_utils import BackboneMixin
+from ...utils.backbone_utils import BackboneMixin, get_aligned_output_features_output_indices
 from .configuration_focalnet import FocalNetConfig
 
 
@@ -286,7 +286,7 @@ class FocalNetPatchEmbeddings(nn.Module):
 
 
 # Copied from transformers.models.beit.modeling_beit.drop_path
-def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = False) -> torch.Tensor:
+def drop_path(input, drop_prob=0.0, training=False, scale_by_keep=True):
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
@@ -586,8 +586,15 @@ class FocalNetEncoder(nn.Module):
 
         for i, stage_module in enumerate(self.stages):
             if self.gradient_checkpointing and self.training:
-                stage_outputs = self._gradient_checkpointing_func(
-                    stage_module.__call__,
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs)
+
+                    return custom_forward
+
+                stage_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(stage_module),
                     hidden_states,
                     input_dimensions,
                 )
@@ -651,6 +658,10 @@ class FocalNetPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, FocalNetEncoder):
+            module.gradient_checkpointing = value
 
 
 FOCALNET_START_DOCSTRING = r"""
@@ -970,12 +981,16 @@ class FocalNetForImageClassification(FocalNetPreTrainedModel):
     FOCALNET_START_DOCSTRING,
 )
 class FocalNetBackbone(FocalNetPreTrainedModel, BackboneMixin):
-    def __init__(self, config: FocalNetConfig):
+    def __init__(self, config):
         super().__init__(config)
-        super()._init_backbone(config)
+
+        self.stage_names = config.stage_names
+        self.focalnet = FocalNetModel(config)
 
         self.num_features = [config.embed_dim] + config.hidden_sizes
-        self.focalnet = FocalNetModel(config)
+        self._out_features, self._out_indices = get_aligned_output_features_output_indices(
+            config.out_features, config.out_indices, self.stage_names
+        )
 
         # initialize weights and apply final processing
         self.post_init()

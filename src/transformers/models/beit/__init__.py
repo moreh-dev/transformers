@@ -47,7 +47,6 @@ else:
         "BeitForSemanticSegmentation",
         "BeitModel",
         "BeitPreTrainedModel",
-        "BeitBackbone",
     ]
 
 
@@ -84,7 +83,6 @@ if TYPE_CHECKING:
     else:
         from .modeling_beit import (
             BEIT_PRETRAINED_MODEL_ARCHIVE_LIST,
-            BeitBackbone,
             BeitForImageClassification,
             BeitForMaskedImageModeling,
             BeitForSemanticSegmentation,

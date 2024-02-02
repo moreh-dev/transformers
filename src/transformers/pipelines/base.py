@@ -15,11 +15,11 @@
 import collections
 import csv
 import importlib
+import inspect
 import json
 import os
 import pickle
 import sys
-import traceback
 import types
 import warnings
 from abc import ABC, abstractmethod
@@ -28,13 +28,15 @@ from contextlib import contextmanager
 from os.path import abspath, exists
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
+from packaging import version
+
 from ..dynamic_module_utils import custom_object_save
 from ..feature_extraction_utils import PreTrainedFeatureExtractor
 from ..image_processing_utils import BaseImageProcessor
 from ..modelcard import ModelCard
 from ..models.auto.configuration_auto import AutoConfig
 from ..tokenization_utils import PreTrainedTokenizer
-from ..utils import ModelOutput, add_end_docstrings, infer_framework, is_tf_available, is_torch_available, logging
+from ..utils import ModelOutput, add_end_docstrings, is_tf_available, is_torch_available, logging
 
 
 GenericTensor = Union[List["GenericTensor"], "torch.Tensor", "tf.Tensor"]
@@ -249,7 +251,6 @@ def infer_framework_load_model(
         if len(class_tuple) == 0:
             raise ValueError(f"Pipeline cannot infer suitable model classes from {model}")
 
-        all_traceback = {}
         for model_class in class_tuple:
             kwargs = model_kwargs.copy()
             if framework == "pt" and model.endswith(".h5"):
@@ -272,19 +273,12 @@ def infer_framework_load_model(
                 # Stop loading on the first successful load.
                 break
             except (OSError, ValueError):
-                all_traceback[model_class.__name__] = traceback.format_exc()
                 continue
 
         if isinstance(model, str):
-            error = ""
-            for class_name, trace in all_traceback.items():
-                error += f"while loading with {class_name}, an error is thrown:\n{trace}\n"
-            raise ValueError(
-                f"Could not load model {model} with any of the following classes: {class_tuple}. See the original errors:\n\n{error}\n"
-            )
+            raise ValueError(f"Could not load model {model} with any of the following classes: {class_tuple}.")
 
-    if framework is None:
-        framework = infer_framework(model.__class__)
+    framework = "tf" if "keras.engine.training.Model" in str(inspect.getmro(model.__class__)) else "pt"
     return framework, model
 
 
@@ -357,7 +351,7 @@ def get_framework(model, revision: Optional[str] = None):
             except OSError:
                 model = TFAutoModel.from_pretrained(model, revision=revision)
 
-    framework = infer_framework(model.__class__)
+    framework = "tf" if "keras.engine.training.Model" in str(inspect.getmro(model.__class__)) else "pt"
     return framework
 
 
@@ -445,9 +439,9 @@ class PipelineDataFormat:
     pipelines keyword arguments through the `dataset_kwarg_1=dataset_column_1` format.
 
     Args:
-        output_path (`str`): Where to save the outgoing data.
-        input_path (`str`): Where to look for the input data.
-        column (`str`): The column to read.
+        output_path (`str`, *optional*): Where to save the outgoing data.
+        input_path (`str`, *optional*): Where to look for the input data.
+        column (`str`, *optional*): The column to read.
         overwrite (`bool`, *optional*, defaults to `False`):
             Whether or not to overwrite the `output_path`.
     """
@@ -521,7 +515,7 @@ class PipelineDataFormat:
         Creates an instance of the right subclass of [`~pipelines.PipelineDataFormat`] depending on `format`.
 
         Args:
-            format (`str`):
+            format: (`str`):
                 The format of the desired pipeline. Acceptable values are `"json"`, `"csv"` or `"pipe"`.
             output_path (`str`, *optional*):
                 Where to save the outgoing data.
@@ -550,9 +544,9 @@ class CsvPipelineDataFormat(PipelineDataFormat):
     Support for pipelines using CSV data format.
 
     Args:
-        output_path (`str`): Where to save the outgoing data.
-        input_path (`str`): Where to look for the input data.
-        column (`str`): The column to read.
+        output_path (`str`, *optional*): Where to save the outgoing data.
+        input_path (`str`, *optional*): Where to look for the input data.
+        column (`str`, *optional*): The column to read.
         overwrite (`bool`, *optional*, defaults to `False`):
             Whether or not to overwrite the `output_path`.
     """
@@ -594,9 +588,9 @@ class JsonPipelineDataFormat(PipelineDataFormat):
     Support for pipelines using JSON file format.
 
     Args:
-        output_path (`str`): Where to save the outgoing data.
-        input_path (`str`): Where to look for the input data.
-        column (`str`): The column to read.
+        output_path (`str`, *optional*): Where to save the outgoing data.
+        input_path (`str`, *optional*): Where to look for the input data.
+        column (`str`, *optional*): The column to read.
         overwrite (`bool`, *optional*, defaults to `False`):
             Whether or not to overwrite the `output_path`.
     """
@@ -638,9 +632,9 @@ class PipedPipelineDataFormat(PipelineDataFormat):
     If columns are provided, then the output will be a dictionary with {column_x: value_x}
 
     Args:
-        output_path (`str`): Where to save the outgoing data.
-        input_path (`str`): Where to look for the input data.
-        column (`str`): The column to read.
+        output_path (`str`, *optional*): Where to save the outgoing data.
+        input_path (`str`, *optional*): Where to look for the input data.
+        column (`str`, *optional*): The column to read.
         overwrite (`bool`, *optional*, defaults to `False`):
             Whether or not to overwrite the `output_path`.
     """
@@ -767,7 +761,7 @@ class Pipeline(_ScikitCompat):
         framework: Optional[str] = None,
         task: str = "",
         args_parser: ArgumentHandler = None,
-        device: Union[int, "torch.device"] = None,
+        device: Union[int, str, "torch.device"] = None,
         torch_dtype: Optional[Union[str, "torch.dtype"]] = None,
         binary_output: bool = False,
         **kwargs,
@@ -783,20 +777,12 @@ class Pipeline(_ScikitCompat):
         self.modelcard = modelcard
         self.framework = framework
 
-        # `accelerate` device map
-        hf_device_map = getattr(self.model, "hf_device_map", None)
-
-        if hf_device_map is not None and device is not None:
-            raise ValueError(
-                "The model has been loaded with `accelerate` and therefore cannot be moved to a specific device. Please "
-                "discard the `device` argument when creating your pipeline object."
-            )
-
-        # We shouldn't call `model.to()` for models loaded with accelerate
         if self.framework == "pt" and device is not None and not (isinstance(device, int) and device < 0):
             self.model.to(device)
 
         if device is None:
+            # `accelerate` device map
+            hf_device_map = getattr(self.model, "hf_device_map", None)
             if hf_device_map is not None:
                 # Take the first device used by `accelerate`.
                 device = next(iter(hf_device_map.values()))
@@ -836,15 +822,13 @@ class Pipeline(_ScikitCompat):
                 # then we should keep working
                 self.image_processor = self.feature_extractor
 
-    def save_pretrained(self, save_directory: str, safe_serialization: bool = True):
+    def save_pretrained(self, save_directory: str):
         """
         Save the pipeline's model and tokenizer.
 
         Args:
             save_directory (`str`):
                 A path to the directory where to saved. It will be created if it doesn't exist.
-            safe_serialization (`str`):
-                Whether to save the model using `safetensors` or the traditional way for PyTorch or Tensorflow.
         """
         if os.path.isfile(save_directory):
             logger.error(f"Provided path ({save_directory}) should be a directory, not a file")
@@ -872,16 +856,13 @@ class Pipeline(_ScikitCompat):
             # Save the pipeline custom code
             custom_object_save(self, save_directory)
 
-        self.model.save_pretrained(save_directory, safe_serialization=safe_serialization)
+        self.model.save_pretrained(save_directory)
 
         if self.tokenizer is not None:
             self.tokenizer.save_pretrained(save_directory)
 
         if self.feature_extractor is not None:
             self.feature_extractor.save_pretrained(save_directory)
-
-        if self.image_processor is not None:
-            self.image_processor.save_pretrained(save_directory)
 
         if self.modelcard is not None:
             self.modelcard.save_pretrained(save_directory)
@@ -920,10 +901,9 @@ class Pipeline(_ScikitCompat):
                 yield
         else:
             if self.device.type == "cuda":
-                with torch.cuda.device(self.device):
-                    yield
-            else:
-                yield
+                torch.cuda.set_device(self.device)
+
+            yield
 
     def ensure_tensor_on_device(self, **inputs):
         """
@@ -969,18 +949,12 @@ class Pipeline(_ScikitCompat):
         """
         if not isinstance(supported_models, list):  # Create from a model mapping
             supported_models_names = []
-            for _, model_name in supported_models.items():
+            for config, model in supported_models.items():
                 # Mapping can now contain tuples of models for the same configuration.
-                if isinstance(model_name, tuple):
-                    supported_models_names.extend(list(model_name))
+                if isinstance(model, tuple):
+                    supported_models_names.extend([_model.__name__ for _model in model])
                 else:
-                    supported_models_names.append(model_name)
-            if hasattr(supported_models, "_model_mapping"):
-                for _, model in supported_models._model_mapping._extra_content.items():
-                    if isinstance(model_name, tuple):
-                        supported_models_names.extend([m.__name__ for m in model])
-                    else:
-                        supported_models_names.append(model.__name__)
+                    supported_models_names.append(model.__name__)
             supported_models = supported_models_names
         if self.model.__class__.__name__ not in supported_models:
             logger.error(
@@ -1032,7 +1006,12 @@ class Pipeline(_ScikitCompat):
         raise NotImplementedError("postprocess not implemented")
 
     def get_inference_context(self):
-        return torch.no_grad
+        inference_context = (
+            torch.inference_mode
+            if version.parse(version.parse(torch.__version__).base_version) >= version.parse("1.9.0")
+            else torch.no_grad
+        )
+        return inference_context
 
     def forward(self, model_inputs, **forward_params):
         with self.device_placement():

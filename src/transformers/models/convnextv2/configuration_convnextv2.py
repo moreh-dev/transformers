@@ -79,7 +79,6 @@ class ConvNextV2Config(BackboneConfigMixin, PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "convnextv2"
 
     def __init__(

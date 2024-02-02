@@ -111,7 +111,6 @@ class Data2VecVisionConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "data2vec-vision"
 
     def __init__(

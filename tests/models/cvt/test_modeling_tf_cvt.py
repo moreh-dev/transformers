@@ -1,8 +1,6 @@
 """ Testing suite for the Tensorflow CvT model. """
 
 
-from __future__ import annotations
-
 import inspect
 import unittest
 from math import floor
@@ -28,7 +26,7 @@ if is_tf_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import AutoImageProcessor
+    from transformers import AutoFeatureExtractor
 
 
 class TFCvtConfigTester(ConfigTester):
@@ -45,8 +43,8 @@ class TFCvtModelTester:
         batch_size=13,
         image_size=64,
         num_channels=3,
-        embed_dim=[16, 32, 48],
-        num_heads=[1, 2, 3],
+        embed_dim=[16, 48, 96],
+        num_heads=[1, 3, 6],
         depth=[1, 2, 10],
         patch_sizes=[7, 3, 3],
         patch_stride=[4, 2, 2],
@@ -185,11 +183,9 @@ class TFCvtModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
         not is_tf_available() or len(tf.config.list_physical_devices("GPU")) == 0,
         reason="TF does not support backprop for grouped convolutions on CPU.",
     )
-    @slow
     def test_keras_fit(self):
         super().test_keras_fit()
 
-    @unittest.skip(reason="Get `Failed to determine best cudnn convolution algo.` error after using TF 2.12+cuda 11.8")
     def test_keras_fit_mixed_precision(self):
         policy = tf.keras.mixed_precision.Policy("mixed_float16")
         tf.keras.mixed_precision.set_global_policy(policy)
@@ -265,16 +261,16 @@ def prepare_img():
 @require_vision
 class TFCvtModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_image_processor(self):
-        return AutoImageProcessor.from_pretrained(TF_CVT_PRETRAINED_MODEL_ARCHIVE_LIST[0])
+    def default_feature_extractor(self):
+        return AutoFeatureExtractor.from_pretrained(TF_CVT_PRETRAINED_MODEL_ARCHIVE_LIST[0])
 
     @slow
     def test_inference_image_classification_head(self):
         model = TFCvtForImageClassification.from_pretrained(TF_CVT_PRETRAINED_MODEL_ARCHIVE_LIST[0])
 
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="tf")
+        inputs = feature_extractor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(**inputs)

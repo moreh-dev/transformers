@@ -15,15 +15,13 @@
 """ Testing suite for the TF 2.0 Swin model. """
 
 
-from __future__ import annotations
-
 import inspect
 import unittest
 
 import numpy as np
 
 from transformers import SwinConfig
-from transformers.testing_utils import require_tf, require_vision, slow, to_2tuple
+from transformers.testing_utils import require_tf, require_vision, slow, to_2tuple, tooslow
 from transformers.utils import cached_property, is_tf_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
@@ -45,7 +43,7 @@ if is_tf_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import AutoImageProcessor
+    from transformers import AutoFeatureExtractor
 
 
 class TFSwinModelTester:
@@ -232,6 +230,10 @@ class TFSwinModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase
     def test_inputs_embeds(self):
         pass
 
+    @tooslow
+    def test_saved_model_creation(self):
+        pass
+
     def test_model_common_attributes(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
@@ -382,9 +384,9 @@ class TFSwinModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase
 @require_tf
 class TFSwinModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_image_processor(self):
+    def default_feature_extractor(self):
         return (
-            AutoImageProcessor.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
+            AutoFeatureExtractor.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
             if is_vision_available()
             else None
         )
@@ -392,10 +394,10 @@ class TFSwinModelIntegrationTest(unittest.TestCase):
     @slow
     def test_inference_image_classification_head(self):
         model = TFSwinForImageClassification.from_pretrained("microsoft/swin-tiny-patch4-window7-224")
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
 
         image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")
-        inputs = image_processor(images=image, return_tensors="tf")
+        inputs = feature_extractor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(inputs)

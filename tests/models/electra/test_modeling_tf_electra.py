@@ -14,8 +14,6 @@
 # limitations under the License.
 
 
-from __future__ import annotations
-
 import unittest
 
 from transformers import ElectraConfig, is_tf_available
@@ -54,7 +52,7 @@ class TFElectraModelTester:
         self.use_labels = True
         self.vocab_size = 99
         self.hidden_size = 32
-        self.num_hidden_layers = 2
+        self.num_hidden_layers = 5
         self.num_attention_heads = 4
         self.intermediate_size = 37
         self.hidden_act = "gelu"

@@ -17,7 +17,6 @@ import copy
 import json
 import os
 import random
-import unittest
 from pathlib import Path
 
 from transformers.testing_utils import (
@@ -40,7 +39,6 @@ from .pipelines.test_pipelines_feature_extraction import FeatureExtractionPipeli
 from .pipelines.test_pipelines_fill_mask import FillMaskPipelineTests
 from .pipelines.test_pipelines_image_classification import ImageClassificationPipelineTests
 from .pipelines.test_pipelines_image_segmentation import ImageSegmentationPipelineTests
-from .pipelines.test_pipelines_image_to_image import ImageToImagePipelineTests
 from .pipelines.test_pipelines_image_to_text import ImageToTextPipelineTests
 from .pipelines.test_pipelines_mask_generation import MaskGenerationPipelineTests
 from .pipelines.test_pipelines_object_detection import ObjectDetectionPipelineTests
@@ -50,7 +48,6 @@ from .pipelines.test_pipelines_table_question_answering import TQAPipelineTests
 from .pipelines.test_pipelines_text2text_generation import Text2TextGenerationPipelineTests
 from .pipelines.test_pipelines_text_classification import TextClassificationPipelineTests
 from .pipelines.test_pipelines_text_generation import TextGenerationPipelineTests
-from .pipelines.test_pipelines_text_to_audio import TextToAudioPipelineTests
 from .pipelines.test_pipelines_token_classification import TokenClassificationPipelineTests
 from .pipelines.test_pipelines_translation import TranslationPipelineTests
 from .pipelines.test_pipelines_video_classification import VideoClassificationPipelineTests
@@ -71,7 +68,6 @@ pipeline_test_mapping = {
     "fill-mask": {"test": FillMaskPipelineTests},
     "image-classification": {"test": ImageClassificationPipelineTests},
     "image-segmentation": {"test": ImageSegmentationPipelineTests},
-    "image-to-image": {"test": ImageToImagePipelineTests},
     "image-to-text": {"test": ImageToTextPipelineTests},
     "mask-generation": {"test": MaskGenerationPipelineTests},
     "object-detection": {"test": ObjectDetectionPipelineTests},
@@ -81,7 +77,6 @@ pipeline_test_mapping = {
     "text2text-generation": {"test": Text2TextGenerationPipelineTests},
     "text-classification": {"test": TextClassificationPipelineTests},
     "text-generation": {"test": TextGenerationPipelineTests},
-    "text-to-audio": {"test": TextToAudioPipelineTests},
     "token-classification": {"test": TokenClassificationPipelineTests},
     "translation": {"test": TranslationPipelineTests},
     "video-classification": {"test": VideoClassificationPipelineTests},
@@ -268,15 +263,6 @@ class PipelineTesterMixin:
             )
             return
 
-        pipeline_test_class_name = pipeline_test_mapping[task]["test"].__name__
-        if self.is_pipeline_test_to_skip_more(pipeline_test_class_name, model.config, model, tokenizer, processor):
-            logger.warning(
-                f"{self.__class__.__name__}::test_pipeline_{task.replace('-', '_')} is skipped: test is "
-                f"currently known to fail for: model `{model_architecture.__name__}` | tokenizer "
-                f"`{tokenizer_name}` | processor `{processor_name}`."
-            )
-            return
-
         # validate
         validate_test_components(self, task, model, tokenizer, processor)
 
@@ -312,17 +298,14 @@ class PipelineTesterMixin:
                     yield copy.deepcopy(random.choice(examples))
 
             out = []
-            if task == "conversational":
-                for item in pipeline(data(10), batch_size=4, max_new_tokens=5):
-                    out.append(item)
-            else:
-                for item in pipeline(data(10), batch_size=4):
-                    out.append(item)
+            for item in pipeline(data(10), batch_size=4):
+                out.append(item)
             self.assertEqual(len(out), 10)
 
         run_batch_test(pipeline, examples)
 
     @is_pipeline_test
+    @require_torch
     def test_pipeline_audio_classification(self):
         self.run_task_tests(task="audio-classification")
 
@@ -374,7 +357,6 @@ class PipelineTesterMixin:
     def test_pipeline_image_to_text(self):
         self.run_task_tests(task="image-to-text")
 
-    @unittest.skip(reason="`run_pipeline_test` is currently not implemented.")
     @is_pipeline_test
     @require_vision
     @require_torch
@@ -412,11 +394,6 @@ class PipelineTesterMixin:
     @require_torch_or_tf
     def test_pipeline_text_generation(self):
         self.run_task_tests(task="text-generation")
-
-    @is_pipeline_test
-    @require_torch
-    def test_pipeline_text_to_audio(self):
-        self.run_task_tests(task="text-to-audio")
 
     @is_pipeline_test
     def test_pipeline_token_classification(self):
@@ -463,10 +440,6 @@ class PipelineTesterMixin:
     def is_pipeline_test_to_skip(
         self, pipeline_test_casse_name, config_class, model_architecture, tokenizer_name, processor_name
     ):
-        """Skip some tests based on the classes or their names without the instantiated objects.
-
-        This is to avoid calling `from_pretrained` (so reducing the runtime) if we already know the tests will fail.
-        """
         # No fix is required for this case.
         if (
             pipeline_test_casse_name == "DocumentQuestionAnsweringPipelineTests"
@@ -474,20 +447,6 @@ class PipelineTesterMixin:
             and not tokenizer_name.endswith("Fast")
         ):
             # `DocumentQuestionAnsweringPipelineTests` requires a fast tokenizer.
-            return True
-
-        return False
-
-    def is_pipeline_test_to_skip_more(self, pipeline_test_casse_name, config, model, tokenizer, processor):  # noqa
-        """Skip some more tests based on the information from the instantiated objects."""
-        # No fix is required for this case.
-        if (
-            pipeline_test_casse_name == "QAPipelineTests"
-            and tokenizer is not None
-            and getattr(tokenizer, "pad_token", None) is None
-            and not tokenizer.__class__.__name__.endswith("Fast")
-        ):
-            # `QAPipelineTests` doesn't work with a slow tokenizer that has no pad token.
             return True
 
         return False
@@ -506,12 +465,8 @@ def validate_test_components(test_case, task, model, tokenizer, processor):
     if tokenizer is not None:
         config_vocab_size = getattr(model.config, "vocab_size", None)
         # For CLIP-like models
-        if config_vocab_size is None:
-            if hasattr(model.config, "text_config"):
-                config_vocab_size = getattr(model.config.text_config, "vocab_size", None)
-            elif hasattr(model.config, "text_encoder"):
-                config_vocab_size = getattr(model.config.text_encoder, "vocab_size", None)
-
+        if config_vocab_size is None and hasattr(model.config, "text_config"):
+            config_vocab_size = getattr(model.config.text_config, "vocab_size", None)
         if config_vocab_size is None and model.config.__class__.__name__ not in CONFIG_WITHOUT_VOCAB_SIZE:
             raise ValueError(
                 "Could not determine `vocab_size` from model configuration while `tokenizer` is not `None`."

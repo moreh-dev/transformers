@@ -46,6 +46,7 @@ class LukeTokenizerTest(TokenizerTesterMixin, unittest.TestCase):
             task=task,
             **kwargs,
         )
+        tokenizer.sanitize_special_tokens()
         return tokenizer
 
     def get_input_output_texts(self, tokenizer):

@@ -77,7 +77,8 @@ class FeatureExtractionPipeline(Pipeline):
         return preprocess_params, {}, postprocess_params
 
     def preprocess(self, inputs, **tokenize_kwargs) -> Dict[str, GenericTensor]:
-        model_inputs = self.tokenizer(inputs, return_tensors=self.framework, **tokenize_kwargs)
+        return_tensors = self.framework
+        model_inputs = self.tokenizer(inputs, return_tensors=return_tensors, **tokenize_kwargs)
         return model_inputs
 
     def _forward(self, model_inputs):

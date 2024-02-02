@@ -336,11 +336,17 @@ class ASTEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
             if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(layer_module),
                     hidden_states,
                     layer_head_mask,
-                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(hidden_states, layer_head_mask, output_attentions)
@@ -388,6 +394,11 @@ class ASTPreTrainedModel(PreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
+    # Copied from transformers.models.vit.modeling_vit.ViTPreTrainedModel._set_gradient_checkpointing with ViT->AST
+    def _set_gradient_checkpointing(self, module: ASTEncoder, value: bool = False) -> None:
+        if isinstance(module, ASTEncoder):
+            module.gradient_checkpointing = value
+
 
 AUDIO_SPECTROGRAM_TRANSFORMER_START_DOCSTRING = r"""
     This model is a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass. Use it
@@ -432,7 +443,7 @@ AUDIO_SPECTROGRAM_TRANSFORMER_INPUTS_DOCSTRING = r"""
     AUDIO_SPECTROGRAM_TRANSFORMER_START_DOCSTRING,
 )
 class ASTModel(ASTPreTrainedModel):
-    def __init__(self, config: ASTConfig) -> None:
+    def __init__(self, config: ASTConfig):
         super().__init__(config)
         self.config = config
 
@@ -470,7 +481,7 @@ class ASTModel(ASTPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ) -> Union[Tuple, BaseModelOutputWithPooling]:
+    ):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states

@@ -27,10 +27,8 @@ from transformers.testing_utils import (
     require_accelerate,
     require_tf,
     require_torch,
-    require_torch_accelerator,
     require_torch_gpu,
     require_torch_or_tf,
-    torch_device,
 )
 
 from .test_pipelines_common import ANY
@@ -242,16 +240,7 @@ class TextGenerationPipelineTests(unittest.TestCase):
         # We don't care about infinite range models.
         # They already work.
         # Skip this test for XGLM, since it uses sinusoidal positional embeddings which are resized on-the-fly.
-        EXTRA_MODELS_CAN_HANDLE_LONG_INPUTS = [
-            "RwkvForCausalLM",
-            "XGLMForCausalLM",
-            "GPTNeoXForCausalLM",
-            "FuyuForCausalLM",
-        ]
-        if (
-            tokenizer.model_max_length < 10000
-            and text_generator.model.__class__.__name__ not in EXTRA_MODELS_CAN_HANDLE_LONG_INPUTS
-        ):
+        if tokenizer.model_max_length < 10000 and "XGLM" not in tokenizer.__class__.__name__:
             # Handling of large generations
             with self.assertRaises((RuntimeError, IndexError, ValueError, AssertionError)):
                 text_generator("This is a test" * 500, max_new_tokens=20)
@@ -326,20 +315,16 @@ class TextGenerationPipelineTests(unittest.TestCase):
         )
 
     @require_torch
-    @require_torch_accelerator
+    @require_torch_gpu
     def test_small_model_fp16(self):
         import torch
 
-        pipe = pipeline(
-            model="hf-internal-testing/tiny-random-bloom",
-            device=torch_device,
-            torch_dtype=torch.float16,
-        )
+        pipe = pipeline(model="hf-internal-testing/tiny-random-bloom", device=0, torch_dtype=torch.float16)
         pipe("This is a test")
 
     @require_torch
     @require_accelerate
-    @require_torch_accelerator
+    @require_torch_gpu
     def test_pipeline_accelerate_top_p(self):
         import torch
 

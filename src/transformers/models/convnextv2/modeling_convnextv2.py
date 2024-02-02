@@ -37,7 +37,7 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
-from ...utils.backbone_utils import BackboneMixin
+from ...utils.backbone_utils import BackboneMixin, get_aligned_output_features_output_indices
 from .configuration_convnextv2 import ConvNextV2Config
 
 
@@ -61,7 +61,7 @@ CONVNEXTV2_PRETRAINED_MODEL_ARCHIVE_LIST = [
 
 
 # Copied from transformers.models.beit.modeling_beit.drop_path
-def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = False) -> torch.Tensor:
+def drop_path(input, drop_prob: float = 0.0, training: bool = False):
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
@@ -303,6 +303,7 @@ class ConvNextV2PreTrainedModel(PreTrainedModel):
     config_class = ConvNextV2Config
     base_model_prefix = "convnextv2"
     main_input_name = "pixel_values"
+    supports_gradient_checkpointing = True
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -315,6 +316,10 @@ class ConvNextV2PreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, ConvNextV2Encoder):
+            module.gradient_checkpointing = value
 
 
 CONVNEXTV2_START_DOCSTRING = r"""
@@ -499,11 +504,15 @@ class ConvNextV2ForImageClassification(ConvNextV2PreTrainedModel):
 class ConvNextV2Backbone(ConvNextV2PreTrainedModel, BackboneMixin):
     def __init__(self, config):
         super().__init__(config)
-        super()._init_backbone(config)
 
+        self.stage_names = config.stage_names
         self.embeddings = ConvNextV2Embeddings(config)
         self.encoder = ConvNextV2Encoder(config)
+
         self.num_features = [config.hidden_sizes[0]] + config.hidden_sizes
+        self._out_features, self._out_indices = get_aligned_output_features_output_indices(
+            config.out_features, config.out_indices, self.stage_names
+        )
 
         # Add layer norms to hidden states of out_features
         hidden_states_norms = {}
@@ -552,13 +561,14 @@ class ConvNextV2Backbone(ConvNextV2PreTrainedModel, BackboneMixin):
         outputs = self.encoder(
             embedding_output,
             output_hidden_states=True,
-            return_dict=return_dict,
+            return_dict=True,
         )
 
-        hidden_states = outputs.hidden_states if return_dict else outputs[1]
+        hidden_states = outputs.hidden_states
 
         feature_maps = ()
-        for stage, hidden_state in zip(self.stage_names, hidden_states):
+        # we skip the stem
+        for idx, (stage, hidden_state) in enumerate(zip(self.stage_names[1:], hidden_states[1:])):
             if stage in self.out_features:
                 hidden_state = self.hidden_states_norms[stage](hidden_state)
                 feature_maps += (hidden_state,)
@@ -566,11 +576,11 @@ class ConvNextV2Backbone(ConvNextV2PreTrainedModel, BackboneMixin):
         if not return_dict:
             output = (feature_maps,)
             if output_hidden_states:
-                output += (hidden_states,)
+                output += (outputs.hidden_states,)
             return output
 
         return BackboneOutput(
             feature_maps=feature_maps,
-            hidden_states=hidden_states if output_hidden_states else None,
+            hidden_states=outputs.hidden_states if output_hidden_states else None,
             attentions=None,
         )

@@ -38,18 +38,16 @@ class LayoutLMv2Processor(ProcessorMixin):
     into token-level `labels` for token classification tasks (such as FUNSD, CORD).
 
     Args:
-        image_processor (`LayoutLMv2ImageProcessor`, *optional*):
+        image_processor (`LayoutLMv2ImageProcessor`):
             An instance of [`LayoutLMv2ImageProcessor`]. The image processor is a required input.
-        tokenizer (`LayoutLMv2Tokenizer` or `LayoutLMv2TokenizerFast`, *optional*):
+        tokenizer (`LayoutLMv2Tokenizer` or `LayoutLMv2TokenizerFast`):
             An instance of [`LayoutLMv2Tokenizer`] or [`LayoutLMv2TokenizerFast`]. The tokenizer is a required input.
     """
-
     attributes = ["image_processor", "tokenizer"]
     image_processor_class = "LayoutLMv2ImageProcessor"
     tokenizer_class = ("LayoutLMv2Tokenizer", "LayoutLMv2TokenizerFast")
 
     def __init__(self, image_processor=None, tokenizer=None, **kwargs):
-        feature_extractor = None
         if "feature_extractor" in kwargs:
             warnings.warn(
                 "The `feature_extractor` argument is deprecated and will be removed in v5, use `image_processor`"

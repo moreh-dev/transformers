@@ -45,7 +45,7 @@ class GetTestInfoTester(unittest.TestCase):
             "BlipTextImageModelTest": "BlipTextImageModelsModelTester",
             "BlipTextModelTest": "BlipTextModelTester",
             "BlipTextRetrievalModelTest": "BlipTextRetrievalModelTester",
-            "BlipVQAModelTest": "BlipVQAModelTester",
+            "BlipVQAModelTest": "BlipModelTester",
             "BlipVisionModelTest": "BlipVisionModelTester",
         }
 
@@ -71,7 +71,7 @@ class GetTestInfoTester(unittest.TestCase):
         EXPECTED_BLIP_MAPPING = {
             "BlipForConditionalGeneration": ["BlipTextImageModelTest"],
             "BlipForImageTextRetrieval": ["BlipTextRetrievalModelTest"],
-            "BlipForQuestionAnswering": ["BlipVQAModelTest"],
+            "BlipForQuestionAnswering": ["BlipTextImageModelTest", "BlipVQAModelTest"],
             "BlipModel": ["BlipModelTest"],
             "BlipTextModel": ["BlipTextModelTest"],
             "BlipVisionModel": ["BlipVisionModelTest"],
@@ -99,7 +99,7 @@ class GetTestInfoTester(unittest.TestCase):
         EXPECTED_BLIP_MAPPING = {
             "BlipForConditionalGeneration": ["BlipTextImageModelsModelTester"],
             "BlipForImageTextRetrieval": ["BlipTextRetrievalModelTester"],
-            "BlipForQuestionAnswering": ["BlipVQAModelTester"],
+            "BlipForQuestionAnswering": ["BlipModelTester", "BlipTextImageModelsModelTester"],
             "BlipModel": ["BlipModelTester"],
             "BlipTextModel": ["BlipTextModelTester"],
             "BlipVisionModel": ["BlipVisionModelTester"],

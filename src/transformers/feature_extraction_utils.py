@@ -19,7 +19,6 @@
 import copy
 import json
 import os
-import warnings
 from collections import UserDict
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, Union
 
@@ -65,7 +64,7 @@ class BatchFeature(UserDict):
     This class is derived from a python dictionary and can be used as a dictionary.
 
     Args:
-        data (`dict`, *optional*):
+        data (`dict`):
             Dictionary of lists/arrays/tensors returned by the __call__/pad methods ('input_values', 'attention_mask',
             etc.).
         tensor_type (`Union[None, str, TensorType]`, *optional*):
@@ -112,9 +111,17 @@ class BatchFeature(UserDict):
     def items(self):
         return self.data.items()
 
-    def _get_is_as_tensor_fns(self, tensor_type: Optional[Union[str, TensorType]] = None):
+    def convert_to_tensors(self, tensor_type: Optional[Union[str, TensorType]] = None):
+        """
+        Convert the inner content to tensors.
+
+        Args:
+            tensor_type (`str` or [`~utils.TensorType`], *optional*):
+                The type of tensors to use. If `str`, should be one of the values of the enum [`~utils.TensorType`]. If
+                `None`, no modification is done.
+        """
         if tensor_type is None:
-            return None, None
+            return self
 
         # Convert to TensorType
         if not isinstance(tensor_type, TensorType):
@@ -149,31 +156,8 @@ class BatchFeature(UserDict):
             as_tensor = jnp.array
             is_tensor = is_jax_tensor
         else:
-
-            def as_tensor(value, dtype=None):
-                if isinstance(value, (list, tuple)) and isinstance(value[0], (list, tuple, np.ndarray)):
-                    value_lens = [len(val) for val in value]
-                    if len(set(value_lens)) > 1 and dtype is None:
-                        # we have a ragged list so handle explicitly
-                        value = as_tensor([np.asarray(val) for val in value], dtype=object)
-                return np.asarray(value, dtype=dtype)
-
+            as_tensor = np.asarray
             is_tensor = is_numpy_array
-        return is_tensor, as_tensor
-
-    def convert_to_tensors(self, tensor_type: Optional[Union[str, TensorType]] = None):
-        """
-        Convert the inner content to tensors.
-
-        Args:
-            tensor_type (`str` or [`~utils.TensorType`], *optional*):
-                The type of tensors to use. If `str`, should be one of the values of the enum [`~utils.TensorType`]. If
-                `None`, no modification is done.
-        """
-        if tensor_type is None:
-            return self
-
-        is_tensor, as_tensor = self._get_is_as_tensor_fns(tensor_type)
 
         # Do the tensor conversion in batch
         for key, value in self.items():
@@ -263,15 +247,8 @@ class FeatureExtractionMixin(PushToHubMixin):
 
     @classmethod
     def from_pretrained(
-        cls,
-        pretrained_model_name_or_path: Union[str, os.PathLike],
-        cache_dir: Optional[Union[str, os.PathLike]] = None,
-        force_download: bool = False,
-        local_files_only: bool = False,
-        token: Optional[Union[str, bool]] = None,
-        revision: str = "main",
-        **kwargs,
-    ):
+        cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs
+    ) -> PreTrainedFeatureExtractor:
         r"""
         Instantiate a type of [`~feature_extraction_utils.FeatureExtractionMixin`] from a feature extractor, *e.g.* a
         derived class of [`SequenceFeatureExtractor`].
@@ -300,7 +277,7 @@ class FeatureExtractionMixin(PushToHubMixin):
             proxies (`Dict[str, str]`, *optional*):
                 A dictionary of proxy servers to use by protocol or endpoint, e.g., `{'http': 'foo.bar:3128',
                 'http://hostname': 'foo.bar:4012'}.` The proxies are used on each request.
-            token (`str` or `bool`, *optional*):
+            use_auth_token (`str` or `bool`, *optional*):
                 The token to use as HTTP bearer authorization for remote files. If `True`, or not specified, will use
                 the token generated when running `huggingface-cli login` (stored in `~/.huggingface`).
             revision (`str`, *optional*, defaults to `"main"`):
@@ -350,26 +327,6 @@ class FeatureExtractionMixin(PushToHubMixin):
         assert feature_extractor.return_attention_mask is False
         assert unused_kwargs == {"foo": False}
         ```"""
-        kwargs["cache_dir"] = cache_dir
-        kwargs["force_download"] = force_download
-        kwargs["local_files_only"] = local_files_only
-        kwargs["revision"] = revision
-
-        use_auth_token = kwargs.pop("use_auth_token", None)
-        if use_auth_token is not None:
-            warnings.warn(
-                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
-                FutureWarning,
-            )
-            if token is not None:
-                raise ValueError(
-                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
-                )
-            token = use_auth_token
-
-        if token is not None:
-            kwargs["token"] = token
-
         feature_extractor_dict, kwargs = cls.get_feature_extractor_dict(pretrained_model_name_or_path, **kwargs)
 
         return cls.from_dict(feature_extractor_dict, **kwargs)
@@ -386,22 +343,9 @@ class FeatureExtractionMixin(PushToHubMixin):
                 Whether or not to push your model to the Hugging Face model hub after saving it. You can specify the
                 repository you want to push to with `repo_id` (will default to the name of `save_directory` in your
                 namespace).
-            kwargs (`Dict[str, Any]`, *optional*):
+            kwargs:
                 Additional key word arguments passed along to the [`~utils.PushToHubMixin.push_to_hub`] method.
         """
-        use_auth_token = kwargs.pop("use_auth_token", None)
-
-        if use_auth_token is not None:
-            warnings.warn(
-                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
-                FutureWarning,
-            )
-            if kwargs.get("token", None) is not None:
-                raise ValueError(
-                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
-                )
-            kwargs["token"] = use_auth_token
-
         if os.path.isfile(save_directory):
             raise AssertionError(f"Provided path ({save_directory}) should be a directory, not a file")
 
@@ -430,7 +374,7 @@ class FeatureExtractionMixin(PushToHubMixin):
                 repo_id,
                 files_timestamps,
                 commit_message=commit_message,
-                token=kwargs.get("token"),
+                token=kwargs.get("use_auth_token"),
             )
 
         return [output_feature_extractor_file]
@@ -454,21 +398,9 @@ class FeatureExtractionMixin(PushToHubMixin):
         force_download = kwargs.pop("force_download", False)
         resume_download = kwargs.pop("resume_download", False)
         proxies = kwargs.pop("proxies", None)
-        token = kwargs.pop("token", None)
         use_auth_token = kwargs.pop("use_auth_token", None)
         local_files_only = kwargs.pop("local_files_only", False)
         revision = kwargs.pop("revision", None)
-
-        if use_auth_token is not None:
-            warnings.warn(
-                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
-                FutureWarning,
-            )
-            if token is not None:
-                raise ValueError(
-                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
-                )
-            token = use_auth_token
 
         from_pipeline = kwargs.pop("_from_pipeline", None)
         from_auto_class = kwargs.pop("_from_auto", False)
@@ -503,7 +435,7 @@ class FeatureExtractionMixin(PushToHubMixin):
                     proxies=proxies,
                     resume_download=resume_download,
                     local_files_only=local_files_only,
-                    token=token,
+                    use_auth_token=use_auth_token,
                     user_agent=user_agent,
                     revision=revision,
                 )
@@ -584,15 +516,14 @@ class FeatureExtractionMixin(PushToHubMixin):
 
     def to_dict(self) -> Dict[str, Any]:
         """
-        Serializes this instance to a Python dictionary. Returns:
-            `Dict[str, Any]`: Dictionary of all the attributes that make up this configuration instance.
+        Serializes this instance to a Python dictionary.
+
+        Returns:
+            `Dict[str, Any]`: Dictionary of all the attributes that make up this feature extractor instance.
         """
         output = copy.deepcopy(self.__dict__)
         output["feature_extractor_type"] = self.__class__.__name__
-        if "mel_filters" in output:
-            del output["mel_filters"]
-        if "window" in output:
-            del output["window"]
+
         return output
 
     @classmethod

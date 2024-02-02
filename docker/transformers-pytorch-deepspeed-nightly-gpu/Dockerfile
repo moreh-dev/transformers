@@ -1,11 +1,11 @@
-# https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-23-11.html#rel-23-11
-FROM nvcr.io/nvidia/pytorch:23.11-py3
+# https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel_22-08.html#rel_22-08
+FROM nvcr.io/nvidia/pytorch:22.08-py3
 LABEL maintainer="Hugging Face"
 
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Example: `cu102`, `cu113`, etc.
-ARG CUDA='cu121'
+ARG CUDA='cu117'
 
 RUN apt -y update
 RUN apt install -y libaio-dev
@@ -13,8 +13,6 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip
 
 ARG REF=main
 RUN git clone https://github.com/huggingface/transformers && cd transformers && git checkout $REF
-
-RUN python3 -m pip uninstall -y torch torchvision torchaudio
 
 # Install **nightly** release PyTorch (flag `--pre`)
 # (PyTorch must be installed before pre-compiling any DeepSpeed c++/cuda ops.)
@@ -24,9 +22,6 @@ RUN python3 -m pip install --no-cache-dir -U --pre torch torchvision torchaudio 
 RUN python3 -m pip install --no-cache-dir ./transformers[deepspeed-testing]
 
 RUN python3 -m pip install --no-cache-dir git+https://github.com/huggingface/accelerate@main#egg=accelerate
-
-# Uninstall `transformer-engine` shipped with the base image
-RUN python3 -m pip uninstall -y transformer-engine
 
 # Uninstall `torch-tensorrt` and `apex` shipped with the base image
 RUN python3 -m pip uninstall -y torch-tensorrt apex

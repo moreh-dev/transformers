@@ -15,8 +15,6 @@
 """ Testing suite for the TensorFlow GroupViT model. """
 
 
-from __future__ import annotations
-
 import inspect
 import os
 import random
@@ -149,10 +147,6 @@ class TFGroupViTVisionModelTest(TFModelTesterMixin, unittest.TestCase):
     test_resize_embeddings = False
     test_head_masking = False
     test_onnx = False
-
-    def check_pt_tf_outputs(self, tf_outputs, pt_outputs, model_class, tol=1e-4, name="outputs", attributes=None):
-        # We override with a slightly higher tol value, as this model tends to diverge a bit more
-        super().check_pt_tf_outputs(tf_outputs, pt_outputs, model_class, tol, name, attributes)
 
     def setUp(self):
         self.model_tester = TFGroupViTVisionModelTester(self)
@@ -385,7 +379,7 @@ class TFGroupViTTextModelTester:
         use_labels=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,
@@ -462,10 +456,6 @@ class TFGroupViTTextModelTest(TFModelTesterMixin, unittest.TestCase):
     test_pruning = False
     test_head_masking = False
     test_onnx = False
-
-    def check_pt_tf_outputs(self, tf_outputs, pt_outputs, model_class, tol=1e-4, name="outputs", attributes=None):
-        # We override with a slightly higher tol value, as this model tends to diverge a bit more
-        super().check_pt_tf_outputs(tf_outputs, pt_outputs, model_class, tol, name, attributes)
 
     def setUp(self):
         self.model_tester = TFGroupViTTextModelTester(self)
@@ -589,10 +579,6 @@ class TFGroupViTModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Test
     test_attention_outputs = False
     test_onnx = False
 
-    def check_pt_tf_outputs(self, tf_outputs, pt_outputs, model_class, tol=1e-4, name="outputs", attributes=None):
-        # We override with a slightly higher tol value, as this model tends to diverge a bit more
-        super().check_pt_tf_outputs(tf_outputs, pt_outputs, model_class, tol, name, attributes)
-
     def setUp(self):
         self.model_tester = TFGroupViTModelTester(self)
 
@@ -613,7 +599,6 @@ class TFGroupViTModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Test
         pass
 
     @require_tensorflow_probability
-    @slow
     def test_keras_fit(self):
         super().test_keras_fit()
 
@@ -703,6 +688,11 @@ class TFGroupViTModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Test
     @unittest.skip(reason="Currently `saved_model` doesn't work with nested outputs.")
     @slow
     def test_saved_model_creation(self):
+        pass
+
+    @unittest.skip(reason="Currently `saved_model` doesn't work with nested outputs.")
+    @slow
+    def test_saved_model_creation_extended(self):
         pass
 
     @unittest.skip(reason="`saved_model` doesn't work with nested outputs so no preparation happens.")

@@ -15,6 +15,7 @@
 """ Testing suite for the PyTorch DPT model. """
 
 
+import inspect
 import unittest
 
 from transformers import DPTConfig
@@ -38,7 +39,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import DPTImageProcessor
+    from transformers import DPTFeatureExtractor
 
 
 class DPTModelTester:
@@ -61,8 +62,7 @@ class DPTModelTester:
         attention_probs_dropout_prob=0.1,
         initializer_range=0.02,
         num_labels=3,
-        backbone_featmap_shape=[1, 32, 24, 24],
-        neck_hidden_sizes=[16, 16, 32, 32],
+        backbone_featmap_shape=[1, 384, 24, 24],
         is_hybrid=True,
         scope=None,
     ):
@@ -86,7 +86,6 @@ class DPTModelTester:
         self.backbone_featmap_shape = backbone_featmap_shape
         self.scope = scope
         self.is_hybrid = is_hybrid
-        self.neck_hidden_sizes = neck_hidden_sizes
         # sequence length of DPT = num_patches + 1 (we add 1 for the [CLS] token)
         num_patches = (image_size // patch_size) ** 2
         self.seq_length = num_patches + 1
@@ -109,7 +108,7 @@ class DPTModelTester:
             "depths": [3, 4, 9],
             "out_features": ["stage1", "stage2", "stage3"],
             "embedding_dynamic_padding": True,
-            "hidden_sizes": [16, 16, 32, 32],
+            "hidden_sizes": [96, 192, 384, 768],
             "num_groups": 2,
         }
 
@@ -118,7 +117,6 @@ class DPTModelTester:
             patch_size=self.patch_size,
             num_channels=self.num_channels,
             hidden_size=self.hidden_size,
-            fusion_hidden_size=self.hidden_size,
             num_hidden_layers=self.num_hidden_layers,
             backbone_out_indices=self.backbone_out_indices,
             num_attention_heads=self.num_attention_heads,
@@ -131,7 +129,6 @@ class DPTModelTester:
             is_hybrid=self.is_hybrid,
             backbone_config=backbone_config,
             backbone_featmap_shape=self.backbone_featmap_shape,
-            neck_hidden_sizes=self.neck_hidden_sizes,
         )
 
     def create_and_check_model(self, config, pixel_values, labels):
@@ -208,6 +205,18 @@ class DPTModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
 
+    def test_forward_signature(self):
+        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
+
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            signature = inspect.signature(model.forward)
+            # signature.parameters is an OrderedDict => so arg_names order is deterministic
+            arg_names = [*signature.parameters.keys()]
+
+            expected_arg_names = ["pixel_values"]
+            self.assertListEqual(arg_names[:1], expected_arg_names)
+
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
@@ -257,18 +266,6 @@ class DPTModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             loss = model(**inputs).loss
             loss.backward()
 
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant_false(self):
-        pass
-
     def test_initialization(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
 
@@ -317,11 +314,11 @@ def prepare_img():
 @slow
 class DPTModelIntegrationTest(unittest.TestCase):
     def test_inference_depth_estimation(self):
-        image_processor = DPTImageProcessor.from_pretrained("Intel/dpt-hybrid-midas")
+        feature_extractor = DPTFeatureExtractor.from_pretrained("Intel/dpt-hybrid-midas")
         model = DPTForDepthEstimation.from_pretrained("Intel/dpt-hybrid-midas").to(torch_device)
 
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
+        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():

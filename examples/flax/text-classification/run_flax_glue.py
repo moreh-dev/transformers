@@ -21,7 +21,6 @@ import os
 import random
 import sys
 import time
-import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -50,12 +49,12 @@ from transformers import (
     TrainingArguments,
     is_tensorboard_available,
 )
-from transformers.utils import check_min_version, send_example_telemetry
+from transformers.utils import check_min_version, get_full_repo_name, send_example_telemetry
 
 
 logger = logging.getLogger(__name__)
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.36.0")
+check_min_version("4.29.0")
 
 Array = Any
 Dataset = datasets.arrow_dataset.Dataset
@@ -102,28 +101,12 @@ class ModelArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    token: str = field(
-        default=None,
-        metadata={
-            "help": (
-                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
-                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
-            )
-        },
-    )
     use_auth_token: bool = field(
-        default=None,
-        metadata={
-            "help": "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead."
-        },
-    )
-    trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option"
-                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
-                "execute code present on the Hub on your local machine."
+                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
+                "with private models)."
             )
         },
     )
@@ -212,7 +195,7 @@ class DataTrainingArguments:
             if self.validation_file is not None:
                 extension = self.validation_file.split(".")[-1]
                 assert extension in ["csv", "json"], "`validation_file` should be a csv or a json file."
-        self.task_name = self.task_name.lower() if isinstance(self.task_name, str) else self.task_name
+        self.task_name = self.task_name.lower() if type(self.task_name) == str else self.task_name
 
 
 def create_train_state(
@@ -288,7 +271,7 @@ def create_train_state(
 
 def create_learning_rate_fn(
     train_ds_size: int, train_batch_size: int, num_train_epochs: int, num_warmup_steps: int, learning_rate: float
-) -> Callable[[int], jnp.ndarray]:
+) -> Callable[[int], jnp.array]:
     """Returns a linear warmup, linear_decay learning rate function."""
     steps_per_epoch = train_ds_size // train_batch_size
     num_train_steps = steps_per_epoch * num_train_epochs
@@ -338,15 +321,6 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if model_args.use_auth_token is not None:
-        warnings.warn(
-            "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead.",
-            FutureWarning,
-        )
-        if model_args.token is not None:
-            raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
-        model_args.token = model_args.use_auth_token
-
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
     send_example_telemetry("run_glue", model_args, data_args, framework="flax")
@@ -368,14 +342,14 @@ def main():
 
     # Handle the repository creation
     if training_args.push_to_hub:
-        # Retrieve of infer repo_name
-        repo_name = training_args.hub_model_id
-        if repo_name is None:
-            repo_name = Path(training_args.output_dir).absolute().name
-        # Create repo and retrieve repo_id
-        repo_id = create_repo(repo_name, exist_ok=True, token=training_args.hub_token).repo_id
-        # Clone repo locally
-        repo = Repository(training_args.output_dir, clone_from=repo_id, token=training_args.hub_token)
+        if training_args.hub_model_id is None:
+            repo_name = get_full_repo_name(
+                Path(training_args.output_dir).absolute().name, token=training_args.hub_token
+            )
+        else:
+            repo_name = training_args.hub_model_id
+        create_repo(repo_name, exist_ok=True, token=training_args.hub_token)
+        repo = Repository(training_args.output_dir, clone_from=repo_name, token=training_args.hub_token)
 
     # Get the datasets: you can either provide your own CSV/JSON training and evaluation files (see below)
     # or specify a GLUE benchmark task (the dataset will be downloaded automatically from the datasets Hub).
@@ -394,7 +368,7 @@ def main():
         raw_datasets = load_dataset(
             "glue",
             data_args.task_name,
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
     else:
         # Loading the dataset from local csv or json file.
@@ -407,10 +381,10 @@ def main():
         raw_datasets = load_dataset(
             extension,
             data_files=data_files,
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
     # See more about loading any type of standard or custom dataset at
-    # https://huggingface.co/docs/datasets/loading_datasets.
+    # https://huggingface.co/docs/datasets/loading_datasets.html.
 
     # Labels
     if data_args.task_name is not None:
@@ -427,7 +401,7 @@ def main():
             num_labels = 1
         else:
             # A useful fast method:
-            # https://huggingface.co/docs/datasets/package_reference/main_classes#datasets.Dataset.unique
+            # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.unique
             label_list = raw_datasets["train"].unique("label")
             label_list.sort()  # Let's sort it for determinism
             num_labels = len(label_list)
@@ -437,20 +411,17 @@ def main():
         model_args.model_name_or_path,
         num_labels=num_labels,
         finetuning_task=data_args.task_name,
-        token=model_args.token,
-        trust_remote_code=model_args.trust_remote_code,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
         use_fast=not model_args.use_slow_tokenizer,
-        token=model_args.token,
-        trust_remote_code=model_args.trust_remote_code,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
     model = FlaxAutoModelForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
         config=config,
-        token=model_args.token,
-        trust_remote_code=model_args.trust_remote_code,
+        use_auth_token=True if model_args.use_auth_token else None,
     )
 
     # Preprocessing the datasets

@@ -89,7 +89,6 @@ class NystromformerConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "nystromformer"
 
     def __init__(

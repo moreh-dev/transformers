@@ -24,14 +24,7 @@ import numpy as np
 import requests
 
 from transformers import OwlViTConfig, OwlViTTextConfig, OwlViTVisionConfig
-from transformers.testing_utils import (
-    require_torch,
-    require_torch_accelerator,
-    require_torch_fp16,
-    require_vision,
-    slow,
-    torch_device,
-)
+from transformers.testing_utils import require_torch, require_torch_gpu, require_vision, slow, torch_device
 from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
@@ -69,7 +62,7 @@ class OwlViTVisionModelTester:
         num_channels=3,
         is_training=True,
         hidden_size=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,
@@ -193,18 +186,6 @@ class OwlViTVisionModelTest(ModelTesterMixin, unittest.TestCase):
 
     @unittest.skip(reason="OWL-ViT does not support training yet")
     def test_training_gradient_checkpointing(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant_false(self):
         pass
 
     @unittest.skip(reason="OwlViTVisionModel has no base class and is not available in MODEL_MAPPING")
@@ -335,18 +316,6 @@ class OwlViTTextModelTest(ModelTesterMixin, unittest.TestCase):
 
     @unittest.skip(reason="OWL-ViT does not support training yet")
     def test_training_gradient_checkpointing(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant_false(self):
         pass
 
     @unittest.skip(reason="OWLVIT does not use inputs_embeds")
@@ -522,27 +491,7 @@ class OwlViTModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             model_state_dict = model.state_dict()
             loaded_model_state_dict = loaded_model.state_dict()
 
-            non_persistent_buffers = {}
-            for key in loaded_model_state_dict.keys():
-                if key not in model_state_dict.keys():
-                    non_persistent_buffers[key] = loaded_model_state_dict[key]
-
-            loaded_model_state_dict = {
-                key: value for key, value in loaded_model_state_dict.items() if key not in non_persistent_buffers
-            }
-
             self.assertEqual(set(model_state_dict.keys()), set(loaded_model_state_dict.keys()))
-
-            model_buffers = list(model.buffers())
-            for non_persistent_buffer in non_persistent_buffers.values():
-                found_buffer = False
-                for i, model_buffer in enumerate(model_buffers):
-                    if torch.equal(non_persistent_buffer, model_buffer):
-                        found_buffer = True
-                        break
-
-                self.assertTrue(found_buffer)
-                model_buffers.pop(i)
 
             models_equal = True
             for layer_name, p1 in model_state_dict.items():
@@ -684,18 +633,6 @@ class OwlViTForObjectDetectionTest(ModelTesterMixin, unittest.TestCase):
     def test_training_gradient_checkpointing(self):
         pass
 
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(
-        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
-    )
-    def test_training_gradient_checkpointing_use_reentrant_false(self):
-        pass
-
     def _create_and_check_torchscript(self, config, inputs_dict):
         if not self.test_torchscript:
             return
@@ -733,27 +670,7 @@ class OwlViTForObjectDetectionTest(ModelTesterMixin, unittest.TestCase):
             model_state_dict = model.state_dict()
             loaded_model_state_dict = loaded_model.state_dict()
 
-            non_persistent_buffers = {}
-            for key in loaded_model_state_dict.keys():
-                if key not in model_state_dict.keys():
-                    non_persistent_buffers[key] = loaded_model_state_dict[key]
-
-            loaded_model_state_dict = {
-                key: value for key, value in loaded_model_state_dict.items() if key not in non_persistent_buffers
-            }
-
             self.assertEqual(set(model_state_dict.keys()), set(loaded_model_state_dict.keys()))
-
-            model_buffers = list(model.buffers())
-            for non_persistent_buffer in non_persistent_buffers.values():
-                found_buffer = False
-                for i, model_buffer in enumerate(model_buffers):
-                    if torch.equal(non_persistent_buffer, model_buffer):
-                        found_buffer = True
-                        break
-
-                self.assertTrue(found_buffer)
-                model_buffers.pop(i)
 
             models_equal = True
             for layer_name, p1 in model_state_dict.items():
@@ -867,8 +784,7 @@ class OwlViTModelIntegrationTest(unittest.TestCase):
         self.assertTrue(torch.allclose(outputs.target_pred_boxes[0, :3, :3], expected_slice_boxes, atol=1e-4))
 
     @slow
-    @require_torch_accelerator
-    @require_torch_fp16
+    @require_torch_gpu
     def test_inference_one_shot_object_detection_fp16(self):
         model_name = "google/owlvit-base-patch32"
         model = OwlViTForObjectDetection.from_pretrained(model_name, torch_dtype=torch.float16).to(torch_device)

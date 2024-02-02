@@ -194,8 +194,7 @@ class FlaxGPTJAttention(nn.Module):
             cached_value.value = value
             num_updated_cache_vectors = query.shape[1]
             cache_index.value = cache_index.value + num_updated_cache_vectors
-            # causal mask for cached decoder self-attention: our single query position should only attend to those key
-            # positions that have already been generated and cached, not the remaining zero elements.
+            # causal mask for cached decoder self-attention: our single query position should only attend to those key positions that have already been generated and cached, not the remaining zero elements.
             pad_mask = jnp.broadcast_to(
                 jnp.arange(max_length) < cur_index + num_updated_cache_vectors,
                 tuple(batch_dims) + (1, num_updated_cache_vectors, max_length),
@@ -683,7 +682,7 @@ class FlaxGPTJForCausalLMModule(nn.Module):
 class FlaxGPTJForCausalLM(FlaxGPTJPreTrainedModel):
     module_class = FlaxGPTJForCausalLMModule
 
-    def prepare_inputs_for_generation(self, input_ids, max_length, attention_mask: Optional[jax.Array] = None):
+    def prepare_inputs_for_generation(self, input_ids, max_length, attention_mask: Optional[jnp.DeviceArray] = None):
         # initializing the cache
         batch_size, seq_length = input_ids.shape
 

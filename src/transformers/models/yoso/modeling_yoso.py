@@ -16,7 +16,7 @@
 
 
 import math
-from pathlib import Path
+import os
 from typing import Optional, Tuple, Union
 
 import torch
@@ -56,8 +56,8 @@ def load_cuda_kernels():
         from torch.utils.cpp_extension import load
 
         def append_root(files):
-            src_folder = Path(__file__).resolve().parent.parent.parent / "kernels" / "yoso"
-            return [src_folder / file for file in files]
+            src_folder = os.path.dirname(os.path.realpath(__file__))
+            return [os.path.join(src_folder, file) for file in files]
 
         src_files = append_root(
             ["fast_lsh_cumulation_torch.cpp", "fast_lsh_cumulation.cu", "fast_lsh_cumulation_cuda.cu"]
@@ -88,7 +88,7 @@ def to_contiguous(input_tensors):
 
 
 def normalize(input_tensors):
-    if isinstance(input_tensors, list):
+    if type(input_tensors) is list:
         out = []
         for tensor in input_tensors:
             out.append(nn.functional.normalize(tensor, p=2, dim=-1))
@@ -252,9 +252,7 @@ class YosoEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer(
-            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)) + 2, persistent=False
-        )
+        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)) + 2)
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         self.register_buffer(
             "token_type_ids",
@@ -561,11 +559,17 @@ class YosoEncoder(nn.Module):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(layer_module),
                     hidden_states,
                     attention_mask,
-                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(hidden_states, attention_mask, output_attentions)
@@ -645,6 +649,7 @@ class YosoPreTrainedModel(PreTrainedModel):
     config_class = YosoConfig
     base_model_prefix = "yoso"
     supports_gradient_checkpointing = True
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -661,6 +666,10 @@ class YosoPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, YosoEncoder):
+            module.gradient_checkpointing = value
 
 
 YOSO_START_DOCSTRING = r"""
@@ -780,7 +789,6 @@ class YosoModel(YosoPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
-            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -841,7 +849,11 @@ class YosoModel(YosoPreTrainedModel):
 
 @add_start_docstrings("""YOSO Model with a `language modeling` head on top.""", YOSO_START_DOCSTRING)
 class YosoForMaskedLM(YosoPreTrainedModel):
-    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
+    _keys_to_ignore_on_load_missing = [
+        "cls.predictions.decoder.bias",
+        "cls.predictions.decoder.weight",
+        "embeddings.position_ids",
+    ]
 
     def __init__(self, config):
         super().__init__(config)

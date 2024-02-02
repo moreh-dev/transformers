@@ -14,8 +14,6 @@
 # limitations under the License.
 
 
-from __future__ import annotations
-
 import unittest
 
 from transformers import MPNetConfig, is_tf_available
@@ -51,7 +49,7 @@ class TFMPNetModelTester:
         use_labels=True,
         vocab_size=99,
         hidden_size=64,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=64,
         hidden_act="gelu",

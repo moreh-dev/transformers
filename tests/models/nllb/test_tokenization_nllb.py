@@ -288,10 +288,6 @@ class NllbTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
                     self.assertTrue(special_token_id in p_output)
                     self.assertTrue(special_token_id in cr_output)
 
-    @unittest.skip("Need to fix this after #26538")
-    def test_training_new_tokenizer(self):
-        pass
-
 
 @require_torch
 @require_sentencepiece
@@ -345,7 +341,9 @@ class NllbDistilledIntegrationTest(unittest.TestCase):
 
     def test_enro_tokenizer_decode_ignores_language_codes(self):
         self.assertIn(RO_CODE, self.tokenizer.all_special_ids)
-        generated_ids = [RO_CODE, 4254, 98068, 112923, 39072, 3909, 713, 102767, 26, 17314, 35642, 14683, 33118, 2022, 66987, 2, 256047]  # fmt: skip
+        # fmt: off
+        generated_ids = [RO_CODE, 4254, 98068, 112923, 39072, 3909, 713, 102767, 26, 17314, 35642, 14683, 33118, 2022, 66987, 2, 256047]
+        # fmt: on
 
         result = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         expected_romanian = self.tokenizer.decode(generated_ids[1:], skip_special_tokens=True)

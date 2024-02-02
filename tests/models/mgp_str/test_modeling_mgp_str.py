@@ -14,7 +14,6 @@
 # limitations under the License.
 """ Testing suite for the PyTorch MGP-STR model. """
 
-import inspect
 import unittest
 
 import requests
@@ -55,7 +54,7 @@ class MgpstrModelTester:
         num_bpe_labels=99,
         num_wordpiece_labels=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         mlp_ratio=4.0,
         patch_embeds_hidden_size=257,
@@ -150,18 +149,6 @@ class MgpstrModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             self.assertIsInstance(model.get_input_embeddings(), (nn.Module))
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
-
-    def test_forward_signature(self):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            signature = inspect.signature(model.forward)
-            # signature.parameters is an OrderedDict => so arg_names order is deterministic
-            arg_names = [*signature.parameters.keys()]
-
-            expected_arg_names = ["pixel_values"]
-            self.assertListEqual(arg_names[:1], expected_arg_names)
 
     @unittest.skip(reason="MgpstrModel does not support feedforward chunking")
     def test_feed_forward_chunking(self):

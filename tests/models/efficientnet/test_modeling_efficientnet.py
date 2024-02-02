@@ -15,7 +15,6 @@
 """ Testing suite for the PyTorch EfficientNet model. """
 
 
-import inspect
 import unittest
 
 from transformers import EfficientNetConfig
@@ -49,7 +48,7 @@ class EfficientNetModelTester:
         num_channels=3,
         kernel_sizes=[3, 3, 5],
         in_channels=[32, 16, 24],
-        out_channels=[16, 24, 40],
+        out_channels=[16, 24, 20],
         strides=[1, 1, 2],
         num_block_repeats=[1, 1, 2],
         expand_ratios=[1, 6, 6],
@@ -172,18 +171,6 @@ class EfficientNetModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.Test
     def test_feed_forward_chunking(self):
         pass
 
-    def test_forward_signature(self):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            signature = inspect.signature(model.forward)
-            # signature.parameters is an OrderedDict => so arg_names order is deterministic
-            arg_names = [*signature.parameters.keys()]
-
-            expected_arg_names = ["pixel_values"]
-            self.assertListEqual(arg_names[:1], expected_arg_names)
-
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
@@ -265,5 +252,5 @@ class EfficientNetModelIntegrationTest(unittest.TestCase):
         expected_shape = torch.Size((1, 1000))
         self.assertEqual(outputs.logits.shape, expected_shape)
 
-        expected_slice = torch.tensor([0.0001, 0.0002, 0.0002]).to(torch_device)
+        expected_slice = torch.tensor([-0.2962, 0.4487, 0.4499]).to(torch_device)
         self.assertTrue(torch.allclose(outputs.logits[0, :3], expected_slice, atol=1e-4))

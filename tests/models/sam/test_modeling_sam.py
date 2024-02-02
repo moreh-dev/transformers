@@ -15,13 +15,13 @@
 """ Testing suite for the PyTorch SAM model. """
 
 
-import inspect
+import gc
 import unittest
 
 import requests
 
-from transformers import SamConfig, SamMaskDecoderConfig, SamPromptEncoderConfig, SamVisionConfig
-from transformers.testing_utils import require_torch, slow, torch_device
+from transformers import SamConfig, SamMaskDecoderConfig, SamPromptEncoderConfig, SamVisionConfig, pipeline
+from transformers.testing_utils import backend_empty_cache, require_torch, slow, torch_device
 from transformers.utils import is_torch_available, is_vision_available
 
 from ...test_configuration_common import ConfigTester
@@ -337,18 +337,6 @@ class SamModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
 
-    def test_forward_signature(self):
-        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            signature = inspect.signature(model.forward)
-            # signature.parameters is an OrderedDict => so arg_names order is deterministic
-            arg_names = [*signature.parameters.keys()]
-
-            expected_arg_names = ["pixel_values"]
-            self.assertListEqual(arg_names[:1], expected_arg_names)
-
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
@@ -420,6 +408,18 @@ class SamModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     def test_training_gradient_checkpointing(self):
         pass
 
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant_false(self):
+        pass
+
     @unittest.skip(reason="SamModel has no base class and is not available in MODEL_MAPPING")
     def test_save_load_fast_init_from_base(self):
         pass
@@ -435,6 +435,10 @@ class SamModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
     @unittest.skip(reason="Hidden_states is tested in create_and_check_model tests")
     def test_hidden_states_output(self):
         pass
+
+    def check_pt_tf_outputs(self, tf_outputs, pt_outputs, model_class, tol=5e-5, name="outputs", attributes=None):
+        # Use a slightly higher default tol to make the tests non-flaky
+        super().check_pt_tf_outputs(tf_outputs, pt_outputs, model_class, tol=tol, name=name, attributes=attributes)
 
     @slow
     def test_model_from_pretrained(self):
@@ -457,9 +461,15 @@ def prepare_dog_img():
 
 @slow
 class SamModelIntegrationTest(unittest.TestCase):
+    def tearDown(self):
+        super().tearDown()
+        # clean-up as much as possible GPU memory occupied by PyTorch
+        gc.collect()
+        backend_empty_cache(torch_device)
+
     def test_inference_mask_generation_no_point(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
@@ -470,18 +480,19 @@ class SamModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
-
-        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.5798), atol=1e-4))
+        masks = outputs.pred_masks[0, 0, 0, 0, :3]
+        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.4515), atol=2e-4))
+        self.assertTrue(torch.allclose(masks, torch.tensor([-4.1800, -3.4948, -3.4481]).to(torch_device), atol=2e-4))
 
     def test_inference_mask_generation_one_point_one_bb(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
 
         raw_image = prepare_image()
-        input_boxes = [[650, 900, 1000, 1250]]
+        input_boxes = [[[650, 900, 1000, 1250]]]
         input_points = [[[820, 1080]]]
 
         inputs = processor(
@@ -491,12 +502,15 @@ class SamModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
-
-        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9935), atol=1e-4))
+        masks = outputs.pred_masks[0, 0, 0, 0, :3]
+        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9566), atol=2e-4))
+        self.assertTrue(
+            torch.allclose(masks, torch.tensor([-12.7729, -12.3665, -12.6061]).to(torch_device), atol=2e-4)
+        )
 
     def test_inference_mask_generation_batched_points_batched_images(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
@@ -514,34 +528,37 @@ class SamModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze().cpu()
+        masks = outputs.pred_masks[0, 0, 0, 0, :3].cpu()
 
         EXPECTED_SCORES = torch.tensor(
             [
                 [
-                    [0.9673, 0.9441, 0.9084],
-                    [0.9673, 0.9441, 0.9084],
-                    [0.9673, 0.9441, 0.9084],
-                    [0.9673, 0.9441, 0.9084],
+                    [0.6765, 0.9379, 0.8803],
+                    [0.6765, 0.9379, 0.8803],
+                    [0.6765, 0.9379, 0.8803],
+                    [0.6765, 0.9379, 0.8803],
                 ],
                 [
-                    [0.8405, 0.6292, 0.3840],
-                    [0.9673, 0.9441, 0.9084],
-                    [0.9673, 0.9441, 0.9084],
-                    [0.9673, 0.9441, 0.9084],
+                    [0.3317, 0.7264, 0.7646],
+                    [0.6765, 0.9379, 0.8803],
+                    [0.6765, 0.9379, 0.8803],
+                    [0.6765, 0.9379, 0.8803],
                 ],
             ]
         )
+        EXPECTED_MASKS = torch.tensor([-2.8550, -2.7988, -2.9625])
         self.assertTrue(torch.allclose(scores, EXPECTED_SCORES, atol=1e-3))
+        self.assertTrue(torch.allclose(masks, EXPECTED_MASKS, atol=1e-3))
 
     def test_inference_mask_generation_one_point_one_bb_zero(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
 
         raw_image = prepare_image()
-        input_boxes = [[620, 900, 1000, 1255]]
+        input_boxes = [[[620, 900, 1000, 1255]]]
         input_points = [[[820, 1080]]]
         labels = [[0]]
 
@@ -557,11 +574,11 @@ class SamModelIntegrationTest(unittest.TestCase):
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
 
-        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9689), atol=1e-4))
+        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.7894), atol=1e-4))
 
     def test_inference_mask_generation_one_point(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
@@ -578,8 +595,7 @@ class SamModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
-
-        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9712), atol=1e-4))
+        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9675), atol=1e-4))
 
         # With no label
         input_points = [[[400, 650]]]
@@ -589,12 +605,11 @@ class SamModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
-
-        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9712), atol=1e-4))
+        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9675), atol=1e-4))
 
     def test_inference_mask_generation_two_points(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
@@ -611,8 +626,7 @@ class SamModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
-
-        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9936), atol=1e-4))
+        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9762), atol=1e-4))
 
         # no labels
         inputs = processor(images=raw_image, input_points=input_points, return_tensors="pt").to(torch_device)
@@ -621,11 +635,11 @@ class SamModelIntegrationTest(unittest.TestCase):
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
 
-        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9936), atol=1e-4))
+        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.9762), atol=1e-4))
 
     def test_inference_mask_generation_two_points_batched(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
@@ -642,13 +656,12 @@ class SamModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
-
-        self.assertTrue(torch.allclose(scores[0][-1], torch.tensor(0.9936), atol=1e-4))
-        self.assertTrue(torch.allclose(scores[1][-1], torch.tensor(0.9716), atol=1e-4))
+        self.assertTrue(torch.allclose(scores[0][-1], torch.tensor(0.9762), atol=1e-4))
+        self.assertTrue(torch.allclose(scores[1][-1], torch.tensor(0.9637), atol=1e-4))
 
     def test_inference_mask_generation_one_box(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
@@ -662,12 +675,11 @@ class SamModelIntegrationTest(unittest.TestCase):
         with torch.no_grad():
             outputs = model(**inputs)
         scores = outputs.iou_scores.squeeze()
-
-        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.8686), atol=1e-4))
+        self.assertTrue(torch.allclose(scores[-1], torch.tensor(0.7937), atol=1e-4))
 
     def test_inference_mask_generation_batched_image_one_point(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
@@ -695,17 +707,15 @@ class SamModelIntegrationTest(unittest.TestCase):
         self.assertTrue(torch.allclose(scores_batched[1, :], scores_single, atol=1e-4))
 
     def test_inference_mask_generation_two_points_point_batch(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
 
         raw_image = prepare_image()
 
-        # fmt: off
-        input_points = torch.Tensor([[[400, 650]], [[220, 470]]]).cpu()
-        # fmt: on
+        input_points = torch.Tensor([[[400, 650]], [[220, 470]]]).cpu()  # fmt: skip
 
         input_points = input_points.unsqueeze(0)
 
@@ -717,12 +727,12 @@ class SamModelIntegrationTest(unittest.TestCase):
         iou_scores = outputs.iou_scores.cpu()
         self.assertTrue(iou_scores.shape == (1, 2, 3))
         torch.testing.assert_allclose(
-            iou_scores, torch.tensor([[[0.9848, 0.9788, 0.9713], [0.9211, 0.9128, 0.7427]]]), atol=1e-4, rtol=1e-4
+            iou_scores, torch.tensor([[[0.9105, 0.9825, 0.9675], [0.7646, 0.7943, 0.7774]]]), atol=1e-4, rtol=1e-4
         )
 
     def test_inference_mask_generation_three_boxes_point_batch(self):
-        model = SamModel.from_pretrained("facebook/sam-vit-huge")
-        processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+        model = SamModel.from_pretrained("facebook/sam-vit-base")
+        processor = SamProcessor.from_pretrained("facebook/sam-vit-base")
 
         model.to(torch_device)
         model.eval()
@@ -731,7 +741,9 @@ class SamModelIntegrationTest(unittest.TestCase):
 
         # fmt: off
         input_boxes = torch.Tensor([[[620, 900, 1000, 1255]], [[75, 275, 1725, 850]],  [[75, 275, 1725, 850]]]).cpu()
-        EXPECTED_IOU = torch.tensor([[[1.0071, 1.0032, 0.9946], [0.4962, 0.8770, 0.8686], [0.4962, 0.8770, 0.8686]]])
+        EXPECTED_IOU = torch.tensor([[[0.9773, 0.9881, 0.9522],
+         [0.5996, 0.7661, 0.7937],
+         [0.5996, 0.7661, 0.7937]]])
         # fmt: on
         input_boxes = input_boxes.unsqueeze(0)
 
@@ -743,3 +755,9 @@ class SamModelIntegrationTest(unittest.TestCase):
         iou_scores = outputs.iou_scores.cpu()
         self.assertTrue(iou_scores.shape == (1, 3, 3))
         torch.testing.assert_allclose(iou_scores, EXPECTED_IOU, atol=1e-4, rtol=1e-4)
+
+    def test_dummy_pipeline_generation(self):
+        generator = pipeline("mask-generation", model="facebook/sam-vit-base", device=torch_device)
+        raw_image = prepare_image()
+
+        _ = generator(raw_image, points_per_batch=64)

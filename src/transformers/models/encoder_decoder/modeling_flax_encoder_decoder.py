@@ -306,7 +306,6 @@ class FlaxEncoderDecoderModel(FlaxPreTrainedModel):
     decoder module when created with the :meth*~transformers.FlaxAutoModel.from_pretrained* class method for the
     encoder and :meth*~transformers.FlaxAutoModelForCausalLM.from_pretrained* class method for the decoder.
     """
-
     config_class = EncoderDecoderConfig
     base_model_prefix = "encoder_decoder"
     module_class = FlaxEncoderDecoderModule
@@ -723,8 +722,8 @@ class FlaxEncoderDecoderModel(FlaxPreTrainedModel):
         self,
         decoder_input_ids,
         max_length,
-        attention_mask: Optional[jax.Array] = None,
-        decoder_attention_mask: Optional[jax.Array] = None,
+        attention_mask: Optional[jnp.DeviceArray] = None,
+        decoder_attention_mask: Optional[jnp.DeviceArray] = None,
         encoder_outputs=None,
         **kwargs,
     ):

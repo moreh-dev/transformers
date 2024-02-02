@@ -17,6 +17,7 @@ from ...utils import (
     OptionalDependencyNotAvailable,
     _LazyModule,
     is_sentencepiece_available,
+    is_speech_available,
     is_tf_available,
     is_torch_available,
 )
@@ -24,7 +25,6 @@ from ...utils import (
 
 _import_structure = {
     "configuration_speech_to_text": ["SPEECH_TO_TEXT_PRETRAINED_CONFIG_ARCHIVE_MAP", "Speech2TextConfig"],
-    "feature_extraction_speech_to_text": ["Speech2TextFeatureExtractor"],
     "processing_speech_to_text": ["Speech2TextProcessor"],
 }
 
@@ -35,6 +35,14 @@ except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["tokenization_speech_to_text"] = ["Speech2TextTokenizer"]
+
+try:
+    if not is_speech_available():
+        raise OptionalDependencyNotAvailable()
+except OptionalDependencyNotAvailable:
+    pass
+else:
+    _import_structure["feature_extraction_speech_to_text"] = ["Speech2TextFeatureExtractor"]
 
 try:
     if not is_tf_available():
@@ -65,7 +73,6 @@ else:
 
 if TYPE_CHECKING:
     from .configuration_speech_to_text import SPEECH_TO_TEXT_PRETRAINED_CONFIG_ARCHIVE_MAP, Speech2TextConfig
-    from .feature_extraction_speech_to_text import Speech2TextFeatureExtractor
     from .processing_speech_to_text import Speech2TextProcessor
 
     try:
@@ -75,6 +82,14 @@ if TYPE_CHECKING:
         pass
     else:
         from .tokenization_speech_to_text import Speech2TextTokenizer
+
+    try:
+        if not is_speech_available():
+            raise OptionalDependencyNotAvailable()
+    except OptionalDependencyNotAvailable:
+        pass
+    else:
+        from .feature_extraction_speech_to_text import Speech2TextFeatureExtractor
 
     try:
         if not is_tf_available():

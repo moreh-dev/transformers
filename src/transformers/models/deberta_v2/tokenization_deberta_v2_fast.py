@@ -148,10 +148,7 @@ class DebertaV2TokenizerFast(PreTrainedTokenizerFast):
         self.do_lower_case = do_lower_case
         self.split_by_punct = split_by_punct
         self.vocab_file = vocab_file
-
-    @property
-    def can_save_slow_tokenizer(self) -> bool:
-        return os.path.isfile(self.vocab_file) if self.vocab_file else False
+        self.can_save_slow_tokenizer = False if not self.vocab_file else True
 
     def build_inputs_with_special_tokens(self, token_ids_0, token_ids_1=None):
         """

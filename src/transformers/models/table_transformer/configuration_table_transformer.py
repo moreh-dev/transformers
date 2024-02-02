@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ Table Transformer model configuration"""
+
 from collections import OrderedDict
 from typing import Mapping
 
@@ -132,7 +133,6 @@ class TableTransformerConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "table-transformer"
     keys_to_ignore_at_inference = ["past_key_values"]
     attribute_map = {

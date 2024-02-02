@@ -51,7 +51,7 @@ MGP_STR_PRETRAINED_MODEL_ARCHIVE_LIST = [
 
 
 # Copied from transformers.models.beit.modeling_beit.drop_path
-def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = False) -> torch.Tensor:
+def drop_path(input, drop_prob: float = 0.0, training: bool = False):
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
@@ -333,6 +333,10 @@ class MgpstrPreTrainedModel(PreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
+    def _set_gradient_checkpointing(self, module: MgpstrEncoder, value: bool = False) -> None:
+        if isinstance(module, MgpstrEncoder):
+            module.gradient_checkpointing = value
+
 
 MGP_STR_START_DOCSTRING = r"""
     This model is a PyTorch [torch.nn.Module](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) subclass. Use it
@@ -376,13 +380,7 @@ class MgpstrModel(MgpstrPreTrainedModel):
         return self.embeddings.proj
 
     @add_start_docstrings_to_model_forward(MGP_STR_INPUTS_DOCSTRING)
-    def forward(
-        self,
-        pixel_values: torch.FloatTensor,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.FloatTensor], BaseModelOutput]:
+    def forward(self, pixel_values, output_attentions=None, output_hidden_states=None, return_dict=None):
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -439,12 +437,12 @@ class MgpstrForSceneTextRecognition(MgpstrPreTrainedModel):
     @replace_return_docstrings(output_type=MgpstrModelOutput, config_class=MgpstrConfig)
     def forward(
         self,
-        pixel_values: torch.FloatTensor,
-        output_attentions: Optional[bool] = None,
-        output_a3_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-    ) -> Union[Tuple[torch.FloatTensor], MgpstrModelOutput]:
+        pixel_values,
+        output_attentions=None,
+        output_a3_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
         r"""
         output_a3_attentions (`bool`, *optional*):
             Whether or not to return the attentions tensors of a3 modules. See `a3_attentions` under returned tensors

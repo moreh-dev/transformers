@@ -15,6 +15,7 @@
 """ Testing suite for the PyTorch MobileNetV2 model. """
 
 
+import inspect
 import unittest
 
 from transformers import MobileNetV2Config
@@ -36,7 +37,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import MobileNetV2ImageProcessor
+    from transformers import MobileNetV2FeatureExtractor
 
 
 class MobileNetV2ConfigTester(ConfigTester):
@@ -227,6 +228,18 @@ class MobileNetV2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestC
     def test_attention_outputs(self):
         pass
 
+    def test_forward_signature(self):
+        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
+
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            signature = inspect.signature(model.forward)
+            # signature.parameters is an OrderedDict => so arg_names order is deterministic
+            arg_names = [*signature.parameters.keys()]
+
+            expected_arg_names = ["pixel_values"]
+            self.assertListEqual(arg_names[:1], expected_arg_names)
+
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
@@ -282,18 +295,20 @@ def prepare_img():
 @require_vision
 class MobileNetV2ModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_image_processor(self):
+    def default_feature_extractor(self):
         return (
-            MobileNetV2ImageProcessor.from_pretrained("google/mobilenet_v2_1.0_224") if is_vision_available() else None
+            MobileNetV2FeatureExtractor.from_pretrained("google/mobilenet_v2_1.0_224")
+            if is_vision_available()
+            else None
         )
 
     @slow
     def test_inference_image_classification_head(self):
         model = MobileNetV2ForImageClassification.from_pretrained("google/mobilenet_v2_1.0_224").to(torch_device)
 
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
+        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():
@@ -312,10 +327,10 @@ class MobileNetV2ModelIntegrationTest(unittest.TestCase):
         model = MobileNetV2ForSemanticSegmentation.from_pretrained("google/deeplabv3_mobilenet_v2_1.0_513")
         model = model.to(torch_device)
 
-        image_processor = MobileNetV2ImageProcessor.from_pretrained("google/deeplabv3_mobilenet_v2_1.0_513")
+        feature_extractor = MobileNetV2FeatureExtractor.from_pretrained("google/deeplabv3_mobilenet_v2_1.0_513")
 
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
+        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
 
         # forward pass
         with torch.no_grad():

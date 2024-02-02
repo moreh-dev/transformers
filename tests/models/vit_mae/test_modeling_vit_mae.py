@@ -15,6 +15,7 @@
 """ Testing suite for the PyTorch ViTMAE model. """
 
 
+import inspect
 import math
 import tempfile
 import unittest
@@ -41,7 +42,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import ViTImageProcessor
+    from transformers import ViTFeatureExtractor
 
 
 class ViTMAEModelTester:
@@ -55,7 +56,7 @@ class ViTMAEModelTester:
         is_training=True,
         use_labels=True,
         hidden_size=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -117,10 +118,6 @@ class ViTMAEModelTester:
             is_decoder=False,
             initializer_range=self.initializer_range,
             mask_ratio=self.mask_ratio,
-            decoder_hidden_size=self.hidden_size,
-            decoder_intermediate_size=self.intermediate_size,
-            decoder_num_attention_heads=self.num_attention_heads,
-            decoder_num_hidden_layers=self.num_hidden_layers,
         )
 
     def create_and_check_model(self, config, pixel_values, labels):
@@ -190,6 +187,18 @@ class ViTMAEModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             self.assertIsInstance(model.get_input_embeddings(), (nn.Module))
             x = model.get_output_embeddings()
             self.assertTrue(x is None or isinstance(x, nn.Linear))
+
+    def test_forward_signature(self):
+        config, _ = self.model_tester.prepare_config_and_inputs_for_common()
+
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            signature = inspect.signature(model.forward)
+            # signature.parameters is an OrderedDict => so arg_names order is deterministic
+            arg_names = [*signature.parameters.keys()]
+
+            expected_arg_names = ["pixel_values"]
+            self.assertListEqual(arg_names[:1], expected_arg_names)
 
     def test_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -287,8 +296,8 @@ def prepare_img():
 @require_vision
 class ViTMAEModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_image_processor(self):
-        return ViTImageProcessor.from_pretrained("facebook/vit-mae-base") if is_vision_available() else None
+    def default_feature_extractor(self):
+        return ViTFeatureExtractor.from_pretrained("facebook/vit-mae-base") if is_vision_available() else None
 
     @slow
     def test_inference_for_pretraining(self):
@@ -297,9 +306,9 @@ class ViTMAEModelIntegrationTest(unittest.TestCase):
 
         model = ViTMAEForPreTraining.from_pretrained("facebook/vit-mae-base").to(torch_device)
 
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="pt").to(torch_device)
+        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
 
         # prepare a noise vector that will be also used for testing the TF model
         # (this way we can ensure that the PT and TF models operate on the same inputs)

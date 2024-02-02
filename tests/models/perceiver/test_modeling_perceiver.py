@@ -61,7 +61,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import PerceiverImageProcessor
+    from transformers import PerceiverFeatureExtractor
 
 
 class PerceiverModelTester:
@@ -79,7 +79,6 @@ class PerceiverModelTester:
         nchunks=20,
         num_latents=10,
         d_latents=20,
-        d_model=64,
         num_blocks=1,
         num_self_attends_per_block=2,
         num_self_attention_heads=1,
@@ -109,7 +108,6 @@ class PerceiverModelTester:
         self.nchunks = nchunks
         self.num_latents = num_latents
         self.d_latents = d_latents
-        self.d_model = d_model
         self.num_blocks = num_blocks
         self.num_self_attends_per_block = num_self_attends_per_block
         self.num_self_attention_heads = num_self_attention_heads
@@ -183,7 +181,6 @@ class PerceiverModelTester:
         return PerceiverConfig(
             num_latents=self.num_latents,
             d_latents=self.d_latents,
-            d_model=self.d_model,
             qk_channels=self.d_latents,
             v_channels=self.d_latents,
             num_blocks=self.num_blocks,
@@ -203,8 +200,6 @@ class PerceiverModelTester:
             audio_samples_per_frame=self.audio_samples_per_frame,
             samples_per_patch=self.samples_per_patch,
             num_labels=self.num_labels,
-            output_num_channels=32,
-            _label_trainable_num_channels=16,
         )
 
     def get_pipeline_config(self):
@@ -888,7 +883,7 @@ class PerceiverModelIntegrationTest(unittest.TestCase):
         logits = outputs.logits
 
         # verify logits
-        expected_shape = torch.Size((1, tokenizer.model_max_length, len(tokenizer)))
+        expected_shape = torch.Size((1, tokenizer.model_max_length, tokenizer.vocab_size))
         self.assertEqual(logits.shape, expected_shape)
 
         expected_slice = torch.tensor(
@@ -904,13 +899,13 @@ class PerceiverModelIntegrationTest(unittest.TestCase):
 
     @slow
     def test_inference_image_classification(self):
-        image_processor = PerceiverImageProcessor()
+        feature_extractor = PerceiverFeatureExtractor()
         model = PerceiverForImageClassificationLearned.from_pretrained("deepmind/vision-perceiver-learned")
         model.to(torch_device)
 
         # prepare inputs
         image = prepare_img()
-        inputs = image_processor(image, return_tensors="pt").pixel_values.to(torch_device)
+        inputs = feature_extractor(image, return_tensors="pt").pixel_values.to(torch_device)
         input_mask = None
 
         # forward pass
@@ -928,13 +923,13 @@ class PerceiverModelIntegrationTest(unittest.TestCase):
 
     @slow
     def test_inference_image_classification_fourier(self):
-        image_processor = PerceiverImageProcessor()
+        feature_extractor = PerceiverFeatureExtractor()
         model = PerceiverForImageClassificationFourier.from_pretrained("deepmind/vision-perceiver-fourier")
         model.to(torch_device)
 
         # prepare inputs
         image = prepare_img()
-        inputs = image_processor(image, return_tensors="pt").pixel_values.to(torch_device)
+        inputs = feature_extractor(image, return_tensors="pt").pixel_values.to(torch_device)
         input_mask = None
 
         # forward pass
@@ -952,13 +947,13 @@ class PerceiverModelIntegrationTest(unittest.TestCase):
 
     @slow
     def test_inference_image_classification_conv(self):
-        image_processor = PerceiverImageProcessor()
+        feature_extractor = PerceiverFeatureExtractor()
         model = PerceiverForImageClassificationConvProcessing.from_pretrained("deepmind/vision-perceiver-conv")
         model.to(torch_device)
 
         # prepare inputs
         image = prepare_img()
-        inputs = image_processor(image, return_tensors="pt").pixel_values.to(torch_device)
+        inputs = feature_extractor(image, return_tensors="pt").pixel_values.to(torch_device)
         input_mask = None
 
         # forward pass

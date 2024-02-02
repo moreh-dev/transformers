@@ -38,11 +38,7 @@ def ffmpeg_read(bpayload: bytes, sampling_rate: int) -> np.array:
     out_bytes = output_stream[0]
     audio = np.frombuffer(out_bytes, np.float32)
     if audio.shape[0] == 0:
-        raise ValueError(
-            "Soundfile is either not in the correct format or is malformed. Ensure that the soundfile has "
-            "a valid audio file extension (e.g. wav, flac or mp3) and is not corrupted. If reading from a remote "
-            "URL, ensure that the URL is the full address to **download** the audio file."
-        )
+        raise ValueError("Malformed soundfile")
     return audio
 
 
@@ -123,7 +119,7 @@ def ffmpeg_microphone_live(
             The length of the striding to be used. Stride is used to provide context to a model on the (left, right) of
             an audio sample but without using that part to actually make the prediction. Setting this does not change
             the length of the chunk.
-        format_for_conversion (`str`, defalts to `f32le`)
+        format_for_conversion: (`str`, defalts to `f32le`)
             The name of the format of the audio samples to be returned by ffmpeg. The standard is `f32le`, `s16le`
             could also be used.
     Return:

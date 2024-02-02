@@ -97,7 +97,6 @@ class XLMRobertaXLConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "xlm-roberta-xl"
 
     def __init__(

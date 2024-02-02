@@ -15,8 +15,6 @@
 """ Testing suite for the Tensorflow ResNet model. """
 
 
-from __future__ import annotations
-
 import inspect
 import unittest
 
@@ -41,7 +39,7 @@ if is_tf_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import AutoImageProcessor
+    from transformers import AutoFeatureExtractor
 
 
 class TFResNetModelTester:
@@ -229,9 +227,9 @@ def prepare_img():
 @require_vision
 class TFResNetModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_image_processor(self):
+    def default_feature_extractor(self):
         return (
-            AutoImageProcessor.from_pretrained(TF_RESNET_PRETRAINED_MODEL_ARCHIVE_LIST[0])
+            AutoFeatureExtractor.from_pretrained(TF_RESNET_PRETRAINED_MODEL_ARCHIVE_LIST[0])
             if is_vision_available()
             else None
         )
@@ -240,9 +238,9 @@ class TFResNetModelIntegrationTest(unittest.TestCase):
     def test_inference_image_classification_head(self):
         model = TFResNetForImageClassification.from_pretrained(TF_RESNET_PRETRAINED_MODEL_ARCHIVE_LIST[0])
 
-        image_processor = self.default_image_processor
+        feature_extractor = self.default_feature_extractor
         image = prepare_img()
-        inputs = image_processor(images=image, return_tensors="tf")
+        inputs = feature_extractor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(**inputs)

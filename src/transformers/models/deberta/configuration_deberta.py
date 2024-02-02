@@ -105,7 +105,6 @@ class DebertaConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "deberta"
 
     def __init__(
@@ -149,7 +148,7 @@ class DebertaConfig(PretrainedConfig):
         self.position_biased_input = position_biased_input
 
         # Backwards compatibility
-        if isinstance(pos_att_type, str):
+        if type(pos_att_type) == str:
             pos_att_type = [x.strip() for x in pos_att_type.lower().split("|")]
 
         self.pos_att_type = pos_att_type

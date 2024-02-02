@@ -12,18 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import hashlib
 import unittest
 from typing import Dict
 
 import numpy as np
-from huggingface_hub.utils import insecure_hashlib
 
-from transformers import (
-    MODEL_FOR_MASK_GENERATION_MAPPING,
-    TF_MODEL_FOR_MASK_GENERATION_MAPPING,
-    is_vision_available,
-    pipeline,
-)
+from transformers import MODEL_FOR_MASK_GENERATION_MAPPING, is_vision_available, pipeline
 from transformers.pipelines import MaskGenerationPipeline
 from transformers.testing_utils import (
     is_pipeline_test,
@@ -46,7 +41,7 @@ else:
 
 
 def hashimage(image: Image) -> str:
-    m = insecure_hashlib.md5(image.tobytes())
+    m = hashlib.md5(image.tobytes())
     return m.hexdigest()[:10]
 
 
@@ -63,9 +58,6 @@ class MaskGenerationPipelineTests(unittest.TestCase):
     model_mapping = dict(
         (list(MODEL_FOR_MASK_GENERATION_MAPPING.items()) if MODEL_FOR_MASK_GENERATION_MAPPING else [])
     )
-    tf_model_mapping = dict(
-        (list(TF_MODEL_FOR_MASK_GENERATION_MAPPING.items()) if TF_MODEL_FOR_MASK_GENERATION_MAPPING else [])
-    )
 
     def get_test_pipeline(self, model, tokenizer, processor):
         image_segmenter = MaskGenerationPipeline(model=model, image_processor=processor)
@@ -74,7 +66,7 @@ class MaskGenerationPipelineTests(unittest.TestCase):
             "./tests/fixtures/tests_samples/COCO/000000039769.png",
         ]
 
-    # TODO: Implement me @Arthur
+    # TODO: Fix me @Arthur
     def run_pipeline_test(self, mask_generator, examples):
         pass
 

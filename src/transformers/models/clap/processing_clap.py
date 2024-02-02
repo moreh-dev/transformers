@@ -33,7 +33,6 @@ class ClapProcessor(ProcessorMixin):
         tokenizer ([`RobertaTokenizerFast`]):
             The tokenizer is a required input.
     """
-
     feature_extractor_class = "ClapFeatureExtractor"
     tokenizer_class = ("RobertaTokenizer", "RobertaTokenizerFast")
 

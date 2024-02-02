@@ -30,7 +30,6 @@ import math
 import os
 import random
 import sys
-import warnings
 from dataclasses import dataclass, field
 from itertools import chain
 from pathlib import Path
@@ -78,7 +77,7 @@ class ModelArguments:
         default=None,
         metadata={
             "help": (
-                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
+                "The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
             )
         },
     )
@@ -113,28 +112,12 @@ class ModelArguments:
         default="main",
         metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    token: str = field(
-        default=None,
-        metadata={
-            "help": (
-                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
-                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
-            )
-        },
-    )
     use_auth_token: bool = field(
-        default=None,
-        metadata={
-            "help": "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead."
-        },
-    )
-    trust_remote_code: bool = field(
         default=False,
         metadata={
             "help": (
-                "Whether or not to allow for custom models defined on the Hub in their own modeling files. This option"
-                "should only be set to `True` for repositories you trust and in which you have read the code, as it will "
-                "execute code present on the Hub on your local machine."
+                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
+                "with private models)."
             )
         },
     )
@@ -237,15 +220,6 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if model_args.use_auth_token is not None:
-        warnings.warn(
-            "The `use_auth_token` argument is deprecated and will be removed in v4.34. Please use `token` instead.",
-            FutureWarning,
-        )
-        if model_args.token is not None:
-            raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
-        model_args.token = model_args.use_auth_token
-
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
     send_example_telemetry("run_clm", model_args, data_args, framework="tensorflow")
@@ -313,7 +287,7 @@ def main():
             data_args.dataset_name,
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
         )
         if "validation" not in raw_datasets.keys():
             raw_datasets["validation"] = load_dataset(
@@ -321,14 +295,14 @@ def main():
                 data_args.dataset_config_name,
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
-                token=model_args.token,
+                use_auth_token=True if model_args.use_auth_token else None,
             )
             raw_datasets["train"] = load_dataset(
                 data_args.dataset_name,
                 data_args.dataset_config_name,
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
-                token=model_args.token,
+                use_auth_token=True if model_args.use_auth_token else None,
             )
     else:
         data_files = {}
@@ -349,7 +323,7 @@ def main():
             extension,
             data_files=data_files,
             cache_dir=model_args.cache_dir,
-            token=model_args.token,
+            use_auth_token=True if model_args.use_auth_token else None,
             **dataset_args,
         )
         # If no validation data is there, validation_split_percentage will be used to divide the dataset.
@@ -359,7 +333,7 @@ def main():
                 data_files=data_files,
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
-                token=model_args.token,
+                use_auth_token=True if model_args.use_auth_token else None,
                 **dataset_args,
             )
             raw_datasets["train"] = load_dataset(
@@ -367,11 +341,11 @@ def main():
                 data_files=data_files,
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
-                token=model_args.token,
+                use_auth_token=True if model_args.use_auth_token else None,
                 **dataset_args,
             )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
-    # https://huggingface.co/docs/datasets/loading_datasets.
+    # https://huggingface.co/docs/datasets/loading_datasets.html.
     # endregion
 
     # region Load pretrained model and tokenizer
@@ -379,30 +353,20 @@ def main():
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
     if model_args.config_name:
-        config = AutoConfig.from_pretrained(
-            model_args.config_name,
-            token=model_args.token,
-            trust_remote_code=model_args.trust_remote_code,
-        )
+        config = AutoConfig.from_pretrained(model_args.config_name)
     elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(
-            model_args.model_name_or_path, token=model_args.token, trust_remote_code=model_args.trust_remote_code
-        )
+        config = AutoConfig.from_pretrained(model_args.model_name_or_path)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
         logger.warning("You are instantiating a new config instance from scratch.")
 
     if model_args.tokenizer_name:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_args.tokenizer_name, token=model_args.token, trust_remote_code=model_args.trust_remote_code
-        )
+        tokenizer = AutoTokenizer.from_pretrained(model_args.tokenizer_name)
     elif model_args.model_name_or_path:
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_args.model_name_or_path, token=model_args.token, trust_remote_code=model_args.trust_remote_code
-        )
+        tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path)
     else:
         raise ValueError(
-            "You are instantiating a new tokenizer from scratch. This is not supported by this script. "
+            "You are instantiating a new tokenizer from scratch. This is not supported by this script."
             "You can do it from another script, save it, and load it from here, using --tokenizer_name."
         )
     # endregion
@@ -426,16 +390,16 @@ def main():
 
     if data_args.block_size is None:
         block_size = tokenizer.model_max_length
-        if block_size > config.max_position_embeddings:
+        if block_size > 1024:
             logger.warning(
                 f"The tokenizer picked seems to have a very large `model_max_length` ({tokenizer.model_max_length}). "
-                f"Using block_size={min(1024, config.max_position_embeddings)} instead. You can change that default value by passing --block_size xxx."
+                "Picking 1024 instead. You can change that default value by passing --block_size xxx."
             )
-            block_size = min(1024, config.max_position_embeddings)
+            block_size = 1024
     else:
         if data_args.block_size > tokenizer.model_max_length:
             logger.warning(
-                f"The block_size passed ({data_args.block_size}) is larger than the maximum length for the model "
+                f"The block_size passed ({data_args.block_size}) is larger than the maximum length for the model"
                 f"({tokenizer.model_max_length}). Using block_size={tokenizer.model_max_length}."
             )
         block_size = min(data_args.block_size, tokenizer.model_max_length)
@@ -462,7 +426,7 @@ def main():
     # to preprocess.
     #
     # To speed up this part, we use multiprocessing. See the documentation of the map method for more information:
-    # https://huggingface.co/docs/datasets/process#map
+    # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.map
 
     lm_datasets = tokenized_datasets.map(
         group_texts,
@@ -502,21 +466,12 @@ def main():
     with training_args.strategy.scope():
         # region Prepare model
         if checkpoint is not None:
-            model = TFAutoModelForCausalLM.from_pretrained(
-                checkpoint, config=config, token=model_args.token, trust_remote_code=model_args.trust_remote_code
-            )
+            model = TFAutoModelForCausalLM.from_pretrained(checkpoint, config=config)
         elif model_args.model_name_or_path:
-            model = TFAutoModelForCausalLM.from_pretrained(
-                model_args.model_name_or_path,
-                config=config,
-                token=model_args.token,
-                trust_remote_code=model_args.trust_remote_code,
-            )
+            model = TFAutoModelForCausalLM.from_pretrained(model_args.model_name_or_path, config=config)
         else:
             logger.info("Training new model from scratch")
-            model = TFAutoModelForCausalLM.from_config(
-                config, token=model_args.token, trust_remote_code=model_args.trust_remote_code
-            )
+            model = TFAutoModelForCausalLM.from_config(config)
 
         # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
         # on a small vocab and want a smaller embedding size, remove this test.
@@ -582,8 +537,7 @@ def main():
             adam_global_clipnorm=training_args.max_grad_norm,
         )
 
-        # Transformers models compute the right loss for their task by default when labels are passed, and will
-        # use this for training unless you specify your own loss function in compile().
+        # no user-specified loss = will use the model internal loss
         model.compile(optimizer=optimizer, jit_compile=training_args.xla)
         # endregion
 

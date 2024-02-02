@@ -13,11 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-from __future__ import annotations
-
 import math
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import tensorflow as tf
 
@@ -27,7 +24,7 @@ from ...modeling_tf_outputs import (
     TFCausalLMOutputWithCrossAttentions,
 )
 from ...modeling_tf_utils import (
-    TFModelInputType,
+    DUMMY_INPUTS,
     TFPreTrainedModel,
     get_initializer,
     get_tf_activation,
@@ -35,7 +32,7 @@ from ...modeling_tf_utils import (
     shape_list,
     unpack_inputs,
 )
-from ...tf_utils import check_embeddings_within_bounds, invert_attention_mask, stable_softmax
+from ...tf_utils import invert_attention_mask, stable_softmax
 from ...utils import add_start_docstrings_to_model_forward, logging
 from .configuration_blip import BlipTextConfig
 
@@ -115,7 +112,16 @@ class TFBlipTextEmbeddings(tf.keras.layers.Layer):
             position_ids = self.position_ids[:, past_key_values_length : seq_length + past_key_values_length]
 
         if inputs_embeds is None:
-            check_embeddings_within_bounds(input_ids, self.config.vocab_size)
+            # Note: tf.gather, on which the embedding layer is based, won't check positive out of bound
+            # indices on GPU, returning zeros instead. This is a dangerous silent behavior.
+            tf.debugging.assert_less(
+                input_ids,
+                tf.cast(self.config.vocab_size, dtype=input_ids.dtype),
+                message=(
+                    "input_ids must be smaller than the embedding layer's input dimension (got"
+                    f" {tf.math.reduce_max(input_ids)} >= {self.config.vocab_size})"
+                ),
+            )
             inputs_embeds = self.word_embeddings(input_ids)
 
         embeddings = inputs_embeds
@@ -280,11 +286,11 @@ class TFBlipTextAttention(tf.keras.layers.Layer):
     def call(
         self,
         hidden_states: tf.Tensor,
-        attention_mask: tf.Tensor | None = None,
-        head_mask: tf.Tensor | None = None,
-        encoder_hidden_states: tf.Tensor | None = None,
-        encoder_attention_mask: tf.Tensor | None = None,
-        past_key_value: Tuple[Tuple[tf.Tensor]] | None = None,
+        attention_mask: Optional[tf.Tensor] = None,
+        head_mask: Optional[tf.Tensor] = None,
+        encoder_hidden_states: Optional[tf.Tensor] = None,
+        encoder_attention_mask: Optional[tf.Tensor] = None,
+        past_key_value: Optional[Tuple[Tuple[tf.Tensor]]] = None,
         output_attentions: Optional[bool] = False,
         training: Optional[bool] = None,
     ):
@@ -544,9 +550,8 @@ class TFBlipTextLMPredictionHead(tf.keras.layers.Layer):
         )
         self.config = config
 
-    def build(self, input_shape=None):
+    def build(self, input_shape):
         self.bias = self.add_weight(name="bias", shape=(self.config.vocab_size,), initializer="zeros", trainable=True)
-        super().build(input_shape)
 
     def call(self, hidden_states):
         hidden_states = self.transform(hidden_states)
@@ -594,6 +599,31 @@ class TFBlipTextModel(TFBlipTextPreTrainedModel):
         self.encoder = TFBlipTextEncoder(config, name="encoder")
         self.pooler = TFBlipTextPooler(config, name="pooler") if add_pooling_layer else None
 
+    @tf.function(
+        input_signature=[
+            {
+                "input_ids": tf.TensorSpec((None, None), tf.int32, name="input_ids"),
+                "attention_mask": tf.TensorSpec((None, None), tf.int32, name="attention_mask"),
+            }
+        ]
+    )
+    def serving(self, inputs: Dict[str, tf.Tensor]) -> TFBaseModelOutputWithPoolingAndCrossAttentions:
+        output = self.call(inputs)
+        return self.serving_output(output)
+
+    def serving_output(
+        self, output: TFBaseModelOutputWithPoolingAndCrossAttentions
+    ) -> TFBaseModelOutputWithPoolingAndCrossAttentions:
+        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
+        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
+
+        return TFBaseModelOutputWithPoolingAndCrossAttentions(
+            last_hidden_state=output.last_hidden_state,
+            pooler_output=output.pooler_output,
+            hidden_states=hs,
+            attentions=attns,
+        )
+
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
 
@@ -612,7 +642,7 @@ class TFBlipTextModel(TFBlipTextPreTrainedModel):
                 Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
             input_shape (`Tuple[int]`):
                 The shape of the input to the model.
-            is_decoder (`bool`):
+            is_decoder: (`bool`):
                 Whether the model is used as a decoder.
 
         Returns:
@@ -669,22 +699,22 @@ class TFBlipTextModel(TFBlipTextPreTrainedModel):
     @unpack_inputs
     def call(
         self,
-        input_ids: TFModelInputType | None = None,
-        attention_mask: tf.Tensor | None = None,
-        position_ids: tf.Tensor | None = None,
-        head_mask: tf.Tensor | None = None,
-        inputs_embeds: tf.Tensor | None = None,
-        encoder_embeds: tf.Tensor | None = None,
-        encoder_hidden_states: tf.Tensor | None = None,
-        encoder_attention_mask: tf.Tensor | None = None,
-        past_key_values: Tuple[Tuple[tf.Tensor]] | None = None,
-        use_cache: bool | None = None,
-        output_attentions: bool | None = None,
-        output_hidden_states: bool | None = None,
-        return_dict: bool | None = None,
-        is_decoder: bool = False,
-        training: bool = False,
-    ) -> Tuple[tf.Tensor] | TFBaseModelOutputWithPoolingAndCrossAttentions:
+        input_ids=None,
+        attention_mask=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        encoder_embeds=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        past_key_values=None,
+        use_cache=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+        is_decoder=False,
+        training=None,
+    ):
         r"""
         encoder_hidden_states  (`tf.Tensor`, *optional*):
             Sequence of hidden-states at the output of the last layer of the encoder. Used in the cross-attention if
@@ -741,13 +771,13 @@ class TFBlipTextModel(TFBlipTextPreTrainedModel):
         # If a 2D or 3D attention mask is provided for the cross-attention
         # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
         if encoder_hidden_states is not None:
-            if isinstance(encoder_hidden_states, list):
+            if type(encoder_hidden_states) == list:
                 encoder_batch_size, encoder_sequence_length, _ = shape_list(encoder_hidden_states[0])
             else:
                 encoder_batch_size, encoder_sequence_length, _ = shape_list(encoder_hidden_states)
             encoder_hidden_shape = (encoder_batch_size, encoder_sequence_length)
 
-            if isinstance(encoder_attention_mask, list):
+            if type(encoder_attention_mask) == list:
                 encoder_extended_attention_mask = [invert_attention_mask(mask) for mask in encoder_attention_mask]
             elif encoder_attention_mask is None:
                 encoder_attention_mask = tf.ones(encoder_hidden_shape)
@@ -819,6 +849,46 @@ class TFBlipTextLMHeadModel(TFBlipTextPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.cls.predictions.decoder = new_embeddings
+
+    @property
+    def dummy_inputs(self) -> Dict[str, tf.Tensor]:
+        """
+        Dummy inputs to build the network.
+
+        Returns:
+            `Dict[str, tf.Tensor]`: The dummy inputs.
+        """
+        return {"input_ids": tf.constant(DUMMY_INPUTS, dtype=tf.int32)}
+
+    @tf.function(
+        input_signature=[
+            {
+                "input_ids": tf.TensorSpec((None, None), tf.int32, name="input_ids"),
+            }
+        ]
+    )
+    def serving(self, inputs: Dict[str, tf.Tensor]) -> TFCausalLMOutputWithCrossAttentions:
+        """
+        Method used for serving the model.
+
+        Args:
+            inputs (`Dict[str, tf.Tensor]`):
+                The input of the saved model as a dictionary of tensors.
+        """
+        output = self.call(inputs)
+
+        return self.serving_output(output)
+
+    def serving_output(self, output: TFCausalLMOutputWithCrossAttentions) -> TFCausalLMOutputWithCrossAttentions:
+        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
+        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
+
+        return TFCausalLMOutputWithCrossAttentions(
+            logits=output.logits,
+            cross_attentions=output.cross_attentions,
+            hidden_states=hs,
+            attentions=attns,
+        )
 
     @add_start_docstrings_to_model_forward(BLIP_TEXT_INPUTS_DOCSTRING)
     @unpack_inputs

@@ -97,7 +97,6 @@ class EsmConfig(PretrainedConfig):
 
     >>> # Accessing the model configuration >>> configuration = model.config
     ```"""
-
     model_type = "esm"
 
     def __init__(

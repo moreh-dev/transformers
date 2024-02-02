@@ -97,7 +97,6 @@ class MarkupLMConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "markuplm"
 
     def __init__(

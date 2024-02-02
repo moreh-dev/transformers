@@ -17,26 +17,25 @@ Simple check list from AllenNLP repo: https://github.com/allenai/allennlp/blob/m
 
 To create the package for pypi.
 
-1. Create the release branch named: v<RELEASE>-release, for example v4.19-release. For a patch release checkout the
-   current release branch.
+1. Run `make pre-release` (or `make pre-patch` for a patch release) then run `make fix-copies` to fix the index of the
+   documentation.
 
    If releasing on a special branch, copy the updated README.md on the main branch for your the commit you will make
    for the post-release and run `make fix-copies` on the main branch as well.
 
-2. Run `make pre-release` (or `make pre-patch` for a patch release) and commit these changes with the message:
-   "Release: <VERSION>" and push.
+2. Run Tests for Amazon Sagemaker. The documentation is located in `./tests/sagemaker/README.md`, otherwise @philschmid.
 
-3. Go back to the main branch and run `make post-release` then `make fix-copies`. Commit these changes with the
-   message "v<NEXT_VERSION>.dev.0" and push to main.
+3. Unpin specific versions from setup.py that use a git install.
 
-# If you were just cutting the branch in preparation for a release, you can stop here for now.
+4. Checkout the release branch (v<RELEASE>-release, for example v4.19-release), and commit these changes with the
+   message: "Release: <VERSION>" and push.
 
-4. Wait for the tests on the release branch to be completed and be green (otherwise revert and fix bugs)
+5. Wait for the tests on main to be completed and be green (otherwise revert and fix bugs)
 
-5. On the release branch, add a tag in git to mark the release: "git tag v<VERSION> -m 'Adds tag v<VERSION> for pypi' "
+6. Add a tag in git to mark the release: "git tag v<VERSION> -m 'Adds tag v<VERSION> for pypi' "
    Push the tag to git: git push --tags origin v<RELEASE>-release
 
-6. Build both the sources and the wheel. Do not change anything in setup.py between
+7. Build both the sources and the wheel. Do not change anything in setup.py between
    creating the wheel and the source distribution (obviously).
 
    Run `make build-release`. This will build the release and do some sanity checks for you. If this ends with an error
@@ -44,7 +43,7 @@ To create the package for pypi.
 
    You should now have a /dist directory with both .whl and .tar.gz source versions.
 
-7. Check that everything looks correct by uploading the package to the pypi test server:
+8. Check that everything looks correct by uploading the package to the pypi test server:
 
    twine upload dist/* -r testpypi
    (pypi suggest using twine as other methods upload files via plaintext.)
@@ -61,10 +60,13 @@ To create the package for pypi.
 
    If making a patch release, double check the bug you are patching is indeed resolved.
 
-8. Upload the final version to actual pypi:
+9. Upload the final version to actual pypi:
    twine upload dist/* -r pypi
 
-9. Copy the release notes from RELEASE.md to the tag in github once everything is looking hunky-dory.
+10. Copy the release notes from RELEASE.md to the tag in github once everything is looking hunky-dory.
+
+11. Run `make post-release` then run `make fix-copies`. If you were on a branch for the release,
+    you need to go back to main before executing this.
 """
 
 import os
@@ -95,42 +97,42 @@ if stale_egg_info.exists():
 # 1. all dependencies should be listed here with their version requirements if any
 # 2. once modified, run: `make deps_table_update` to update src/transformers/dependency_versions_table.py
 _deps = [
-    "Pillow>=10.0.1,<=15.0",
-    "accelerate>=0.21.0",
+    "Pillow",
+    "accelerate>=0.19.0",
     "av==9.2.0",  # Latest version of PyAV (10.0.0) has issues with audio stream.
     "beautifulsoup4",
+    "black~=23.1",
     "codecarbon==1.2.0",
     "cookiecutter==1.7.3",
     "dataclasses",
     "datasets!=2.5.0",
     "decord==0.6.0",
-    "deepspeed>=0.9.3",
+    "deepspeed>=0.8.3",
     "diffusers",
     "dill<0.3.5",
     "evaluate>=0.2.0",
+    "fairscale>0.3",
     "faiss-cpu",
     "fastapi",
     "filelock",
-    "flax>=0.4.1,<=0.7.0",
-    "fsspec<2023.10.0",
+    "flax>=0.4.1,<=0.6.9",
     "ftfy",
     "fugashi>=1.0",
     "GitPython<3.1.19",
     "hf-doc-builder>=0.3.0",
-    "huggingface-hub>=0.19.3,<1.0",
+    "huggingface-hub>=0.14.1,<1.0",
     "importlib_metadata",
     "ipadic>=1.0.0,<2.0",
     "isort>=5.5.4",
-    "jax>=0.4.1,<=0.4.13",
-    "jaxlib>=0.4.1,<=0.4.13",
+    "jax>=0.2.8,!=0.3.2,<=0.3.6",
+    "jaxlib>=0.1.65,<=0.3.6",
     "jieba",
     "kenlm",
-    # Keras pin - this is to make sure Keras 3 doesn't destroy us. Remove or change when we have proper support.
-    "keras<2.16",
     "keras-nlp>=0.3.1",
     "librosa",
     "nltk",
     "natten>=0.14.6",
+    "numba<0.57.0",  # Can be removed once unpinned.
     "numpy>=1.17",
     "onnxconverter-common",
     "onnxruntime-tools>=1.4.2",
@@ -141,24 +143,24 @@ _deps = [
     "packaging>=20.0",
     "parameterized",
     "phonemizer",
-    "protobuf",
+    "protobuf<=3.20.2",
     "psutil",
     "pyyaml>=5.1",
-    "pydantic<2",
-    "pytest>=7.2.0",
+    "pydantic",
+    "pytest",
     "pytest-timeout",
     "pytest-xdist",
-    "python>=3.8.0",
-    "ray[tune]>=2.7.0",
+    "python>=3.7.0",
+    "ray[tune]",
     "regex!=2019.12.17",
     "requests",
-    "rhoknp>=1.1.0,<1.3.1",
+    "rhoknp>=1.1.0",
     "rjieba",
     "rouge-score!=0.0.7,!=0.0.8,!=0.1,!=0.1.1",
-    "ruff==0.1.5",
+    "ruff>=0.0.241,<=0.0.259",
     "sacrebleu>=1.4.12,<2.0.0",
     "sacremoses",
-    "safetensors>=0.3.1",
+    "safetensors>=0.2.1",
     "sagemaker>=2.31.0",
     "scikit-learn",
     "sentencepiece>=0.1.91,!=0.1.92",
@@ -166,16 +168,15 @@ _deps = [
     "starlette",
     "sudachipy>=0.6.6",
     "sudachidict_core>=20220729",
-    "tensorboard",
     # TensorFlow pin. When changing this value, update examples/tensorflow/_tests_requirements.txt accordingly
-    "tensorflow-cpu>=2.6,<2.16",
-    "tensorflow>=2.6,<2.16",
-    "tensorflow-text<2.16",
+    "tensorflow-cpu>=2.4,<2.13",
+    "tensorflow>=2.4,<2.13",
+    "tensorflow-text<2.13",
     "tf2onnx",
     "timeout-decorator",
     "timm",
-    "tokenizers>=0.14,<0.19",
-    "torch>=1.10,!=1.12.0",
+    "tokenizers>=0.11.1,!=0.11.3,<0.14",
+    "torch>=1.9,!=1.12.0",
     "torchaudio",
     "torchvision",
     "pyctcdecode>=0.4.0",
@@ -277,6 +278,7 @@ extras["modelcreation"] = deps_list("cookiecutter")
 
 extras["sagemaker"] = deps_list("sagemaker")
 extras["deepspeed"] = deps_list("deepspeed") + extras["accelerate"]
+extras["fairscale"] = deps_list("fairscale")
 extras["optuna"] = deps_list("optuna")
 extras["ray"] = deps_list("ray[tune]")
 extras["sigopt"] = deps_list("sigopt")
@@ -284,7 +286,8 @@ extras["sigopt"] = deps_list("sigopt")
 extras["integrations"] = extras["optuna"] + extras["ray"] + extras["sigopt"]
 
 extras["serving"] = deps_list("pydantic", "uvicorn", "fastapi", "starlette")
-extras["audio"] = deps_list("librosa", "pyctcdecode", "phonemizer", "kenlm")
+# numba can be removed here once unpinned
+extras["audio"] = deps_list("librosa", "pyctcdecode", "phonemizer", "kenlm", "numba")
 # `pip install ".[speech]"` is deprecated and `pip install ".[torch-speech]"` should be used instead
 extras["speech"] = deps_list("torchaudio") + extras["audio"]
 extras["torch-speech"] = deps_list("torchaudio") + extras["audio"]
@@ -309,7 +312,7 @@ extras["testing"] = (
         "dill",
         "evaluate",
         "pytest-timeout",
-        "ruff",
+        "black",
         "sacrebleu",
         "rouge-score",
         "nltk",
@@ -318,9 +321,8 @@ extras["testing"] = (
         "protobuf",  # Can be removed once we can unpin protobuf
         "sacremoses",
         "rjieba",
+        "safetensors",
         "beautifulsoup4",
-        "tensorboard",
-        "pydantic",
     )
     + extras["retrieval"]
     + extras["modelcreation"]
@@ -328,7 +330,7 @@ extras["testing"] = (
 
 extras["deepspeed-testing"] = extras["deepspeed"] + extras["testing"] + extras["optuna"] + extras["sentencepiece"]
 
-extras["quality"] = deps_list("datasets", "isort", "ruff", "GitPython", "hf-doc-builder", "urllib3")
+extras["quality"] = deps_list("black", "datasets", "isort", "ruff", "GitPython", "hf-doc-builder", "urllib3")
 
 extras["all"] = (
     extras["tf"]
@@ -414,6 +416,7 @@ extras["agents"] = deps_list(
 
 # when modifying the following list, make sure to update src/transformers/dependency_versions_check.py
 install_requires = [
+    deps["importlib_metadata"] + ";python_version<'3.8'",  # importlib_metadata for Python versions that don't have it
     deps["filelock"],  # filesystem locks, e.g., to prevent parallel downloads
     deps["huggingface-hub"],
     deps["numpy"],
@@ -422,13 +425,12 @@ install_requires = [
     deps["regex"],  # for OpenAI GPT
     deps["requests"],  # for downloading models over HTTPS
     deps["tokenizers"],
-    deps["safetensors"],
     deps["tqdm"],  # progress bars in model download and training scripts
 ]
 
 setup(
     name="transformers",
-    version="4.36.2",  # expected format is one of x.y.z.dev0, or x.y.z.rc1 or x.y.z (no to dashes, yes to dots)
+    version="4.29.2",  # expected format is one of x.y.z.dev0, or x.y.z.rc1 or x.y.z (no to dashes, yes to dots)
     author="The Hugging Face team (past and future) with the help of all our contributors (https://github.com/huggingface/transformers/graphs/contributors)",
     author_email="transformers@huggingface.co",
     description="State-of-the-art Machine Learning for JAX, PyTorch and TensorFlow",
@@ -444,8 +446,8 @@ setup(
     zip_safe=False,
     extras_require=extras,
     entry_points={"console_scripts": ["transformers-cli=transformers.commands.transformers_cli:main"]},
-    python_requires=">=3.8.0",
-    install_requires=list(install_requires),
+    python_requires=">=3.7.0",
+    install_requires=install_requires,
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
@@ -454,6 +456,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",

@@ -30,7 +30,6 @@ class SpeechT5Processor(ProcessorMixin):
         tokenizer (`SpeechT5Tokenizer`):
             An instance of [`SpeechT5Tokenizer`]. The tokenizer is a required input.
     """
-
     feature_extractor_class = "SpeechT5FeatureExtractor"
     tokenizer_class = "SpeechT5Tokenizer"
 

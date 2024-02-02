@@ -130,7 +130,6 @@ class ElectraConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "electra"
 
     def __init__(

@@ -38,9 +38,6 @@ PRETRAINED_VOCAB_FILES_MAP = {
 class CpmTokenizer(PreTrainedTokenizer):
     """Runs pre-tokenization with Jieba segmentation tool. It is used in CPM models."""
 
-    vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-
     def __init__(
         self,
         vocab_file,
@@ -124,24 +121,6 @@ class CpmTokenizer(PreTrainedTokenizer):
 
         self.sp_model_kwargs = {} if sp_model_kwargs is None else sp_model_kwargs
 
-        self.do_lower_case = do_lower_case
-        self.remove_space = remove_space
-        self.keep_accents = keep_accents
-        self.vocab_file = vocab_file
-
-        self.sp_model = spm.SentencePieceProcessor(**self.sp_model_kwargs)
-        self.sp_model.Load(vocab_file)
-
-        try:
-            import jieba
-        except ModuleNotFoundError as error:
-            raise error.__class__(
-                "You need to install jieba to use CpmTokenizer or CpmTokenizerFast. "
-                "See https://pypi.org/project/jieba/ for installation."
-            )
-        self.jieba = jieba
-        self.translator = str.maketrans(" \n", "\u2582\u2583")
-
         super().__init__(
             do_lower_case=do_lower_case,
             remove_space=remove_space,
@@ -159,6 +138,24 @@ class CpmTokenizer(PreTrainedTokenizer):
         )
 
         self._pad_token_type_id = 3
+
+        self.do_lower_case = do_lower_case
+        self.remove_space = remove_space
+        self.keep_accents = keep_accents
+        self.vocab_file = vocab_file
+
+        self.sp_model = spm.SentencePieceProcessor(**self.sp_model_kwargs)
+        self.sp_model.Load(vocab_file)
+
+        try:
+            import jieba
+        except ModuleNotFoundError as error:
+            raise error.__class__(
+                "You need to install jieba to use CpmTokenizer or CpmTokenizerFast. "
+                "See https://pypi.org/project/jieba/ for installation."
+            )
+        self.jieba = jieba
+        self.translator = str.maketrans(" \n", "\u2582\u2583")
 
     @property
     # Copied from transformers.models.xlnet.tokenization_xlnet.XLNetTokenizer.vocab_size

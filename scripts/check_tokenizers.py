@@ -1,11 +1,9 @@
 from collections import Counter
-
 import datasets
-
 import transformers
 from transformers.convert_slow_tokenizer import SLOW_TO_FAST_CONVERTERS
-from transformers.utils import logging
 
+from transformers.utils import logging
 
 logging.set_verbosity_info()
 
@@ -103,8 +101,8 @@ def check_details(line, spm_ids, tok_ids, slow, fast):
     except Exception:
         pass
 
-    fast.decode(spm_ids[:first])
-    fast.decode(spm_ids[last:])
+    ok_start = fast.decode(spm_ids[:first])
+    ok_end = fast.decode(spm_ids[last:])
     wrong = fast.decode(spm_ids[first:last])
     print()
     print(wrong)

@@ -140,7 +140,7 @@ class SequenceFeatureExtractor(FeatureExtractionMixin):
             return_attention_mask if return_attention_mask is not None else self.return_attention_mask
         )
 
-        if len(required_input) == 0:
+        if not required_input:
             if return_attention_mask:
                 processed_features["attention_mask"] = []
             return processed_features

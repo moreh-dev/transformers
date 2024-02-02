@@ -88,7 +88,6 @@ class SplinterConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "splinter"
 
     def __init__(

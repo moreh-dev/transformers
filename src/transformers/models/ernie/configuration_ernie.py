@@ -109,7 +109,6 @@ class ErnieConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "ernie"
 
     def __init__(

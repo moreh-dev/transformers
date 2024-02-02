@@ -15,8 +15,6 @@
 """ Testing suite for the TensorFlow CLIP model. """
 
 
-from __future__ import annotations
-
 import inspect
 import os
 import tempfile
@@ -57,7 +55,7 @@ class TFCLIPVisionModelTester:
         num_channels=3,
         is_training=True,
         hidden_size=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,
@@ -328,7 +326,7 @@ class TFCLIPTextModelTester:
         use_labels=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,

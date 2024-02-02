@@ -46,13 +46,15 @@ class MgpstrProcessorTest(unittest.TestCase):
 
     @property
     def image_processor_dict(self):
-        return self.prepare_image_processor_dict()
+        return self.image_processor_tester.prepare_image_processor_dict()
 
     def setUp(self):
         self.image_size = (3, 32, 128)
         self.tmpdirname = tempfile.mkdtemp()
 
-        vocab = ['[GO]', '[s]', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']  # fmt: skip
+        # fmt: off
+        vocab = ['[GO]', '[s]', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
+        # fmt: on
         vocab_tokens = dict(zip(vocab, range(len(vocab))))
 
         self.vocab_file = os.path.join(self.tmpdirname, VOCAB_FILES_NAMES["vocab_file"])
@@ -62,7 +64,7 @@ class MgpstrProcessorTest(unittest.TestCase):
         image_processor_map = {
             "do_normalize": False,
             "do_resize": True,
-            "image_processor_type": "ViTImageProcessor",
+            "feature_extractor_type": "ViTFeatureExtractor",
             "resample": 3,
             "size": {"height": 32, "width": 128},
         }

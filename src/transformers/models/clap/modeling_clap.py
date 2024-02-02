@@ -18,6 +18,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -92,7 +93,6 @@ def window_partition(hidden_states, window_size):
 # Adapted from https://github.com/LAION-AI/CLAP/blob/6ad05a971ba0622f6acee8c41993e0d02bbed639/src/open_clip/htsat.py#L263
 def window_reverse(windows, window_size, height, width):
     """
-    Merges windows to produce higher resolution features.
     Args:
         windows (`torch.FloatTensor` of shape `(num_windows * batch_size, window_size, window_size, num_channels)`):
             Input windows
@@ -103,10 +103,11 @@ def window_reverse(windows, window_size, height, width):
         width (`int`):
             Width of the resized audio
     """
-    num_channels = windows.shape[-1]
-    windows = windows.view(-1, height // window_size, width // window_size, window_size, window_size, num_channels)
-    windows = windows.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, height, width, num_channels)
-    return windows
+    batch_size = int(windows.shape[0] / (height * width / window_size / window_size))
+
+    hidden_states = windows.view(batch_size, height // window_size, width // window_size, window_size, window_size, -1)
+    hidden_states = hidden_states.permute(0, 1, 3, 2, 4, 5).contiguous().view(batch_size, height, width, -1)
+    return hidden_states
 
 
 # Copied from transformers.models.roberta.modeling_roberta.create_position_ids_from_input_ids
@@ -939,8 +940,15 @@ class ClapAudioEncoder(nn.Module):
             input_dimensions = self.input_resolutions[i]
 
             if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__, hidden_states, input_dimensions, layer_head_mask, output_attentions
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(layer_module), hidden_states, input_dimensions, layer_head_mask
                 )
             else:
                 layer_outputs = layer_module(
@@ -1158,9 +1166,7 @@ class ClapTextEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        self.register_buffer(
-            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=True
-        )
+        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=True
         )
@@ -1588,15 +1594,20 @@ class ClapTextEncoder(nn.Module):
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-                layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs, past_key_value, output_attentions)
+
+                    return custom_forward
+
+                layer_outputs = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(layer_module),
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
                     encoder_hidden_states,
                     encoder_attention_mask,
-                    past_key_value,
-                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(
@@ -1666,6 +1677,7 @@ class ClapPreTrainedModel(PreTrainedModel):
     config_class = ClapConfig
     base_model_prefix = "clap"
     supports_gradient_checkpointing = False
+    _keys_to_ignore_on_load_missing = [r"position_ids", r"logit_scale_a", r"logit_scale_t"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -1688,6 +1700,10 @@ class ClapPreTrainedModel(PreTrainedModel):
             nn.init.normal_(module.weight, std=in_proj_std)
             if module.bias is not None:
                 module.bias.data.zero_()
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, ClapTextEncoder):
+            module.gradient_checkpointing = value
 
 
 class ClapAudioModel(ClapPreTrainedModel):
@@ -1765,6 +1781,7 @@ class ClapTextModel(ClapPreTrainedModel):
     """
 
     config_class = ClapTextConfig
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->ClapText
     def __init__(self, config, add_pooling_layer=True):
@@ -1836,7 +1853,6 @@ class ClapTextModel(ClapPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
-            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -1920,6 +1936,7 @@ class ClapTextModel(ClapPreTrainedModel):
 @add_start_docstrings(CLAP_START_DOCSTRING)
 class ClapModel(ClapPreTrainedModel):
     config_class = ClapConfig
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def __init__(self, config: ClapConfig):
         super().__init__(config)
@@ -1939,8 +1956,8 @@ class ClapModel(ClapPreTrainedModel):
         text_config = config.text_config
         audio_config = config.audio_config
 
-        self.logit_scale_a = nn.Parameter(torch.tensor(math.log(config.logit_scale_init_value)))
-        self.logit_scale_t = nn.Parameter(torch.tensor(math.log(config.logit_scale_init_value)))
+        self.logit_scale_a = nn.Parameter(torch.ones([]) * np.log(config.logit_scale_init_value))
+        self.logit_scale_t = nn.Parameter(torch.ones([]) * np.log(config.logit_scale_init_value))
 
         self.projection_dim = config.projection_dim
 

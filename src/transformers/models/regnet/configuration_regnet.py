@@ -66,7 +66,6 @@ class RegNetConfig(PretrainedConfig):
     >>> configuration = model.config
     ```
     """
-
     model_type = "regnet"
     layer_types = ["x", "y"]
 

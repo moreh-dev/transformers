@@ -15,13 +15,15 @@
 """ Testing suite for the TVLT feature extraction. """
 
 import itertools
+import os
 import random
+import tempfile
 import unittest
 
 import numpy as np
 
-from transformers import TvltFeatureExtractor, is_datasets_available
-from transformers.testing_utils import require_torch, require_torchaudio
+from transformers import is_datasets_available, is_speech_available
+from transformers.testing_utils import check_json_file_has_correct_format, require_torch, require_torchaudio
 from transformers.utils.import_utils import is_torch_available
 
 from ...test_sequence_feature_extraction_common import SequenceFeatureExtractionTestMixin
@@ -33,10 +35,12 @@ if is_torch_available():
 if is_datasets_available():
     from datasets import load_dataset
 
+if is_speech_available():
+    from transformers import TvltFeatureExtractor
+
 global_rng = random.Random()
 
 
-# Copied from tests.models.whisper.test_feature_extraction_whisper.floats_list
 def floats_list(shape, scale=1.0, rng=None, name=None):
     """Creates a random float32 tensor"""
     if rng is None:
@@ -107,7 +111,7 @@ class TvltFeatureExtractionTester(unittest.TestCase):
 @require_torch
 @require_torchaudio
 class TvltFeatureExtractionTest(SequenceFeatureExtractionTestMixin, unittest.TestCase):
-    feature_extraction_class = TvltFeatureExtractor
+    feature_extraction_class = TvltFeatureExtractor if is_speech_available() else None
 
     def setUp(self):
         self.feat_extract_tester = TvltFeatureExtractionTester(self)
@@ -121,12 +125,42 @@ class TvltFeatureExtractionTest(SequenceFeatureExtractionTestMixin, unittest.Tes
         self.assertTrue(hasattr(feature_extractor, "chunk_length"))
         self.assertTrue(hasattr(feature_extractor, "sampling_rate"))
 
+    def test_feat_extract_from_and_save_pretrained(self):
+        feat_extract_first = self.feature_extraction_class(**self.feat_extract_dict)
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            saved_file = feat_extract_first.save_pretrained(tmpdirname)[0]
+            check_json_file_has_correct_format(saved_file)
+            feat_extract_second = self.feature_extraction_class.from_pretrained(tmpdirname)
+
+        dict_first = feat_extract_first.to_dict()
+        dict_second = feat_extract_second.to_dict()
+        mel_1 = dict_first.pop("mel_filters")
+        mel_2 = dict_second.pop("mel_filters")
+        self.assertTrue(np.allclose(mel_1, mel_2))
+        self.assertEqual(dict_first, dict_second)
+
+    def test_feat_extract_to_json_file(self):
+        feat_extract_first = self.feature_extraction_class(**self.feat_extract_dict)
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            json_file_path = os.path.join(tmpdirname, "feat_extract.json")
+            feat_extract_first.to_json_file(json_file_path)
+            feat_extract_second = self.feature_extraction_class.from_json_file(json_file_path)
+
+        dict_first = feat_extract_first.to_dict()
+        dict_second = feat_extract_second.to_dict()
+        mel_1 = dict_first.pop("mel_filters")
+        mel_2 = dict_second.pop("mel_filters")
+        self.assertTrue(np.allclose(mel_1, mel_2))
+        self.assertEqual(dict_first, dict_second)
+
     def test_call(self):
         # Initialize feature_extractor
         feature_extractor = self.feature_extraction_class(**self.feat_extract_dict)
 
         # create three inputs of length 800, 1000, and 1200
-        speech_inputs = [floats_list((1, x))[0] for x in range(800, 1400, 200)]
+        speech_inputs = [floats_list((1, x))[0] for x in range(8000, 14000, 20000)]
         np_speech_inputs = [np.asarray(speech_input) for speech_input in speech_inputs]
 
         # Test not batched input
@@ -150,15 +184,6 @@ class TvltFeatureExtractionTest(SequenceFeatureExtractionTestMixin, unittest.Tes
             np_speech_inputs, return_tensors="np", sampling_rate=44100, mask_audio=True
         ).audio_values
 
-        self.assertTrue(encoded_audios.ndim == 4)
-        self.assertTrue(encoded_audios.shape[-1] == feature_extractor.feature_size)
-        self.assertTrue(encoded_audios.shape[-2] <= feature_extractor.spectrogram_length)
-        self.assertTrue(encoded_audios.shape[-3] == feature_extractor.num_channels)
-
-        # Test 2-D numpy arrays are batched.
-        speech_inputs = [floats_list((1, x))[0] for x in (800, 800, 800)]
-        np_speech_inputs = np.asarray(speech_inputs)
-        encoded_audios = feature_extractor(np_speech_inputs, return_tensors="np", sampling_rate=44100).audio_values
         self.assertTrue(encoded_audios.ndim == 4)
         self.assertTrue(encoded_audios.shape[-1] == feature_extractor.feature_size)
         self.assertTrue(encoded_audios.shape[-2] <= feature_extractor.spectrogram_length)

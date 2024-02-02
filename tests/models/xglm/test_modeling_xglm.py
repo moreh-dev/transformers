@@ -14,18 +14,11 @@
 # limitations under the License.
 
 import datetime
-import gc
 import math
 import unittest
 
 from transformers import XGLMConfig, is_torch_available
-from transformers.testing_utils import (
-    require_torch,
-    require_torch_accelerator,
-    require_torch_fp16,
-    slow,
-    torch_device,
-)
+from transformers.testing_utils import require_torch, require_torch_gpu, slow, torch_device
 
 from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
@@ -50,7 +43,7 @@ class XGLMModelTester:
         use_labels=True,
         vocab_size=99,
         d_model=32,
-        num_hidden_layers=2,
+        num_hidden_layers=5,
         num_attention_heads=4,
         ffn_dim=37,
         activation_function="gelu",
@@ -353,19 +346,9 @@ class XGLMModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
             model = XGLMModel.from_pretrained(model_name)
             self.assertIsNotNone(model)
 
-    @unittest.skip("Does not work on the tiny model as we keep hitting edge cases.")
-    def test_model_parallelism(self):
-        super().test_model_parallelism()
-
 
 @require_torch
 class XGLMModelLanguageGenerationTest(unittest.TestCase):
-    def tearDown(self):
-        super().tearDown()
-        # clean-up as much as possible GPU memory occupied by PyTorch
-        gc.collect()
-        torch.cuda.empty_cache()
-
     def _test_lm_generate_xglm_helper(
         self,
         gradient_checkpointing=False,
@@ -379,7 +362,9 @@ class XGLMModelLanguageGenerationTest(unittest.TestCase):
         model.to(torch_device)
         input_ids = torch.tensor([[2, 268, 9865]], dtype=torch.long, device=torch_device)  # The dog
         # </s> The dog is a very friendly dog. He is very affectionate and loves to play with other
-        expected_output_ids = [2, 268, 9865, 67, 11, 1988, 57252, 9865, 5, 984, 67, 1988, 213838, 1658, 53, 70446, 33, 6657, 278, 1581]  # fmt: skip
+        # fmt: off
+        expected_output_ids = [2, 268, 9865, 67, 11, 1988, 57252, 9865, 5, 984, 67, 1988, 213838, 1658, 53, 70446, 33, 6657, 278, 1581]
+        # fmt: on
         output_ids = model.generate(input_ids, do_sample=False, num_beams=1)
         if verify_outputs:
             self.assertListEqual(output_ids[0].tolist(), expected_output_ids)
@@ -496,19 +481,18 @@ class XGLMModelLanguageGenerationTest(unittest.TestCase):
         duration = datetime.datetime.now() - start
         self.assertGreater(duration, datetime.timedelta(seconds=1.25 * MAX_TIME))
 
-    @require_torch_accelerator
-    @require_torch_fp16
+    @require_torch_gpu
     def test_batched_nan_fp16(self):
         model_name = "facebook/xglm-564M"
         tokenizer = XGLMTokenizer.from_pretrained(model_name, use_fast=False, padding_side="left")
 
-        model = XGLMForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, use_cache=True).to(torch_device)
+        model = XGLMForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, use_cache=True).cuda()
         model = model.eval()
 
         batch = tokenizer(["Who are you?", "Joe Biden is the president of"], padding=True, return_tensors="pt")
 
-        input_ids = batch["input_ids"].to(torch_device)
-        attention_mask = batch["attention_mask"].to(torch_device)
+        input_ids = batch["input_ids"].cuda()
+        attention_mask = batch["attention_mask"].cuda()
 
         with torch.no_grad():
             outputs = model(input_ids, attention_mask=attention_mask)

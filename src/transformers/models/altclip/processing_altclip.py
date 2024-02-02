@@ -30,18 +30,16 @@ class AltCLIPProcessor(ProcessorMixin):
     the [`~AltCLIPProcessor.__call__`] and [`~AltCLIPProcessor.decode`] for more information.
 
     Args:
-        image_processor ([`CLIPImageProcessor`], *optional*):
+        image_processor ([`CLIPImageProcessor`]):
             The image processor is a required input.
-        tokenizer ([`XLMRobertaTokenizerFast`], *optional*):
+        tokenizer ([`XLMRobertaTokenizerFast`]):
             The tokenizer is a required input.
     """
-
     attributes = ["image_processor", "tokenizer"]
     image_processor_class = "CLIPImageProcessor"
     tokenizer_class = ("XLMRobertaTokenizer", "XLMRobertaTokenizerFast")
 
     def __init__(self, image_processor=None, tokenizer=None, **kwargs):
-        feature_extractor = None
         if "feature_extractor" in kwargs:
             warnings.warn(
                 "The `feature_extractor` argument is deprecated and will be removed in v5, use `image_processor`"

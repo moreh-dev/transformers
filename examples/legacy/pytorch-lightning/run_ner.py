@@ -25,7 +25,7 @@ class NERTransformer(BaseTransformer):
     mode = "token-classification"
 
     def __init__(self, hparams):
-        if isinstance(hparams, dict):
+        if type(hparams) == dict:
             hparams = Namespace(**hparams)
         module = import_module("tasks")
         try:

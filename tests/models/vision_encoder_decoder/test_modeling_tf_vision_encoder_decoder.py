@@ -15,8 +15,6 @@
 """ Testing suite for the TensorFlow VisionEncoderDecoder model. """
 
 
-from __future__ import annotations
-
 import copy
 import os
 import tempfile
@@ -45,7 +43,7 @@ if is_tf_available():
 
     from transformers import (
         AutoConfig,
-        AutoImageProcessor,
+        AutoFeatureExtractor,
         AutoTokenizer,
         TFAutoModel,
         TFAutoModelForCausalLM,
@@ -64,7 +62,7 @@ if is_torch_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import ViTImageProcessor
+    from transformers import ViTFeatureExtractor
 
 
 @require_tf
@@ -407,7 +405,7 @@ class TFVisionEncoderDecoderMixin:
     def prepare_pt_inputs_from_tf_inputs(self, tf_inputs_dict):
         pt_inputs_dict = {}
         for name, key in tf_inputs_dict.items():
-            if isinstance(key, bool):
+            if type(key) == bool:
                 pt_inputs_dict[name] = key
             elif name == "input_values":
                 pt_inputs_dict[name] = torch.from_numpy(key.numpy()).to(torch.float32)
@@ -458,7 +456,7 @@ class TFVisionEncoderDecoderMixin:
         # PT -> TF
         with tempfile.TemporaryDirectory() as tmpdirname:
             pt_model.save_pretrained(tmpdirname)
-            tf_model = TFVisionEncoderDecoderModel.from_pretrained(tmpdirname)
+            tf_model = TFVisionEncoderDecoderModel.from_pretrained(tmpdirname, from_pt=True)
 
         self.check_pt_tf_models(tf_model, pt_model, tf_inputs_dict)
 
@@ -473,7 +471,7 @@ class TFVisionEncoderDecoderMixin:
 
         with tempfile.TemporaryDirectory() as tmpdirname:
             pt_model.save_pretrained(tmpdirname)
-            tf_model = TFVisionEncoderDecoderModel.from_pretrained(tmpdirname)
+            tf_model = TFVisionEncoderDecoderModel.from_pretrained(tmpdirname, from_pt=True)
 
         self.check_pt_tf_equivalence(tf_model, pt_model, tf_inputs_dict)
 
@@ -489,7 +487,7 @@ class TFVisionEncoderDecoderMixin:
         tf_model(**tf_inputs_dict)
 
         with tempfile.TemporaryDirectory() as tmpdirname:
-            tf_model.save_pretrained(tmpdirname, safe_serialization=False)
+            tf_model.save_pretrained(tmpdirname)
             pt_model = VisionEncoderDecoderModel.from_pretrained(tmpdirname, from_tf=True)
 
         self.check_pt_tf_equivalence(tf_model, pt_model, tf_inputs_dict)
@@ -729,9 +727,9 @@ class TFVisionEncoderDecoderModelSaveLoadTests(unittest.TestCase):
 
         # create two random ViT/GPT2 models for vit-gpt2 & initialize weights (+cross_attention weights)
         encoder = TFViTModel(config.encoder)
-        encoder.build()
+        encoder(encoder.dummy_inputs)
         decoder = TFGPT2LMHeadModel(config.decoder)
-        decoder.build()
+        decoder(decoder.dummy_inputs)
 
         encoder_decoder_orig = TFVisionEncoderDecoderModel(encoder=encoder, decoder=decoder)
 
@@ -803,7 +801,7 @@ class TFVisionEncoderDecoderModelSaveLoadTests(unittest.TestCase):
             encoder_decoder_pt.encoder.save_pretrained(tmp_dirname_1)
             encoder_decoder_pt.decoder.save_pretrained(tmp_dirname_2)
             encoder_decoder_tf = TFVisionEncoderDecoderModel.from_encoder_decoder_pretrained(
-                tmp_dirname_1, tmp_dirname_2
+                tmp_dirname_1, tmp_dirname_2, encoder_from_pt=True, decoder_from_pt=True
             )
 
         logits_tf = encoder_decoder_tf(pixel_values=pixel_values, decoder_input_ids=decoder_input_ids).logits
@@ -814,7 +812,7 @@ class TFVisionEncoderDecoderModelSaveLoadTests(unittest.TestCase):
         # Make sure `from_pretrained` following `save_pretrained` work and give the same result
         # (See https://github.com/huggingface/transformers/pull/14016)
         with tempfile.TemporaryDirectory() as tmp_dirname:
-            encoder_decoder_tf.save_pretrained(tmp_dirname, safe_serialization=False)
+            encoder_decoder_tf.save_pretrained(tmp_dirname)
             encoder_decoder_tf = TFVisionEncoderDecoderModel.from_pretrained(tmp_dirname)
 
             logits_tf_2 = encoder_decoder_tf(pixel_values=pixel_values, decoder_input_ids=decoder_input_ids).logits
@@ -828,11 +826,11 @@ class TFVisionEncoderDecoderModelSaveLoadTests(unittest.TestCase):
         load_weight_prefix = TFVisionEncoderDecoderModel.load_weight_prefix
 
         config = self.get_encoder_decoder_config()
-        image_processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
+        feature_extractor = AutoFeatureExtractor.from_pretrained("google/vit-base-patch16-224-in21k")
         decoder_tokenizer = AutoTokenizer.from_pretrained("gpt2")
 
         img = prepare_img()
-        pixel_values = image_processor(images=img, return_tensors="tf").pixel_values
+        pixel_values = feature_extractor(images=img, return_tensors="tf").pixel_values
         decoder_input_ids = decoder_tokenizer("Linda Davis", return_tensors="tf").input_ids
 
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -893,13 +891,13 @@ class TFViT2GPT2ModelIntegrationTest(unittest.TestCase):
     def test_inference_coco_en(self):
         loc = "ydshieh/vit-gpt2-coco-en"
 
-        image_processor = ViTImageProcessor.from_pretrained(loc)
+        feature_extractor = ViTFeatureExtractor.from_pretrained(loc)
         tokenizer = AutoTokenizer.from_pretrained(loc)
         model = TFVisionEncoderDecoderModel.from_pretrained(loc)
 
         # We will verify our results on an image of cute cats
         img = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")
-        pixel_values = image_processor(images=img, return_tensors="tf").pixel_values
+        pixel_values = feature_extractor(images=img, return_tensors="tf").pixel_values
 
         decoder_input_ids = tf.constant([[model.config.decoder_start_token_id]])
 

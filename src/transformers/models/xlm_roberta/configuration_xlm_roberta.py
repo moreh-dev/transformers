@@ -110,7 +110,6 @@ class XLMRobertaConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
-
     model_type = "xlm-roberta"
 
     def __init__(

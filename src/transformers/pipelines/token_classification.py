@@ -17,9 +17,9 @@ from .base import PIPELINE_INIT_ARGS, ArgumentHandler, ChunkPipeline, Dataset
 if is_tf_available():
     import tensorflow as tf
 
-    from ..models.auto.modeling_tf_auto import TF_MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING_NAMES
+    from ..models.auto.modeling_tf_auto import TF_MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
 if is_torch_available():
-    from ..models.auto.modeling_auto import MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING_NAMES
+    from ..models.auto.modeling_auto import MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
 
 
 class TokenClassificationArgumentHandler(ArgumentHandler):
@@ -135,9 +135,9 @@ class TokenClassificationPipeline(ChunkPipeline):
     def __init__(self, args_parser=TokenClassificationArgumentHandler(), *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.check_model_type(
-            TF_MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING_NAMES
+            TF_MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
             if self.framework == "tf"
-            else MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING_NAMES
+            else MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING
         )
 
         self._basic_tokenizer = BasicTokenizer(do_lower_case=False)
@@ -491,8 +491,7 @@ class TokenClassificationPipeline(ChunkPipeline):
                 word_entities.append(self.aggregate_word(word_group, aggregation_strategy))
                 word_group = [entity]
         # Last item
-        if word_group is not None:
-            word_entities.append(self.aggregate_word(word_group, aggregation_strategy))
+        word_entities.append(self.aggregate_word(word_group, aggregation_strategy))
         return word_entities
 
     def group_sub_entities(self, entities: List[dict]) -> dict:
@@ -503,7 +502,7 @@ class TokenClassificationPipeline(ChunkPipeline):
             entities (`dict`): The entities predicted by the pipeline.
         """
         # Get the first entity in the entity group
-        entity = entities[0]["entity"].split("-", 1)[-1]
+        entity = entities[0]["entity"].split("-")[-1]
         scores = np.nanmean([entity["score"] for entity in entities])
         tokens = [entity["word"] for entity in entities]
 

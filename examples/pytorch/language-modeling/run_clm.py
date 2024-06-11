@@ -623,11 +623,6 @@ def main():
         else None,
     )
     trainer.add_callback(TBTrainerCallback)
-    # Mlflow initial
-    #set the os enviroment for MLflowCallback
-    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
-    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
 
     # Training
     if training_args.do_train:

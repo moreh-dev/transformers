@@ -267,16 +267,16 @@ class TBTrainerCallback(TrainerCallback):
     "A callback log loss, learning rate, and throughput each logging step"
     start_time = time.time()
 
-    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+    def on_step_begin(self, args: Seq2SeqTrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if args.logging_strategy == 'steps':
             if state.global_step == 0 or state.global_step % args.logging_steps == 1:
                 self.start_time = time.time()
 
-    def on_epoch_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+    def on_epoch_begin(self, args: Seq2SeqTrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         if args.logging_strategy == 'epoch':
             self.start_time = time.time()
 
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
+    def on_log(self, args: Seq2SeqTrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
         logging_runtime = time.time() - self.start_time
         num_samples = args.per_device_train_batch_size * args.logging_steps
         throughput = num_samples / logging_runtime

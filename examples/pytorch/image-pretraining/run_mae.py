@@ -16,32 +16,29 @@
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
-import time
 
+import mlflow
 import torch
-from datasets import load_dataset
-from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
-from torchvision.transforms.functional import InterpolationMode
-
 import transformers
-from transformers import (
-    HfArgumentParser,
-    Trainer,
-    TrainingArguments,
-    ViTImageProcessor,
-    ViTMAEConfig,
-    ViTMAEForPreTraining,
-    TrainerCallback,
-    TrainerState,
-    TrainerControl,
-)
+from datasets import load_dataset
+from torchvision.transforms import (Compose, Lambda, Normalize,
+                                    RandomHorizontalFlip, RandomResizedCrop,
+                                    ToTensor)
+from torchvision.transforms.functional import InterpolationMode
+from transformers import (HfArgumentParser, Trainer, TrainerCallback,
+                          TrainerControl, TrainerState, TrainingArguments,
+                          ViTImageProcessor, ViTMAEConfig,
+                          ViTMAEForPreTraining)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-import mlflow
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from custom_callback.tbtrainercallback import (TBTrainerCallback,
+                                               get_num_parameters)
 """ Pre-training a 🤗 ViT model as an MAE (masked autoencoder), as proposed in https://arxiv.org/abs/2111.06377."""
 
 logger = logging.getLogger(__name__)
@@ -49,7 +46,10 @@ logger = logging.getLogger(__name__)
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
 
-require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt")
+require_version(
+    "datasets>=1.8.0",
+    "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt"
+)
 
 
 @dataclass
@@ -62,35 +62,40 @@ class DataTrainingArguments:
     """
 
     dataset_name: Optional[str] = field(
-        default="cifar10", metadata={"help": "Name of a dataset from the datasets package"}
-    )
+        default="cifar10",
+        metadata={"help": "Name of a dataset from the datasets package"})
     dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
+        default=None,
+        metadata={
+            "help":
+            "The configuration name of the dataset to use (via the datasets library)."
+        })
     image_column_name: Optional[str] = field(
-        default=None, metadata={"help": "The column name of the images in the files."}
-    )
-    train_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the training data."})
-    validation_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the validation data."})
+        default=None,
+        metadata={"help": "The column name of the images in the files."})
+    train_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "A folder containing the training data."})
+    validation_dir: Optional[str] = field(
+        default=None,
+        metadata={"help": "A folder containing the validation data."})
     train_val_split: Optional[float] = field(
-        default=0.15, metadata={"help": "Percent to split off of train for validation."}
-    )
+        default=0.15,
+        metadata={"help": "Percent to split off of train for validation."})
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
+            "help":
+            ("For debugging purposes or quicker training, truncate the number of training examples to this "
+             "value if set.")
         },
     )
     max_eval_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
+            "help":
+            ("For debugging purposes or quicker training, truncate the number of evaluation examples to this "
+             "value if set.")
         },
     )
 
@@ -112,113 +117,95 @@ class ModelArguments:
     model_name_or_path: str = field(
         default=None,
         metadata={
-            "help": (
-                "The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
-            )
+            "help":
+            ("The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
+             )
         },
     )
     config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name_or_path"}
-    )
+        default=None,
+        metadata={
+            "help":
+            "Pretrained config name or path if not the same as model_name_or_path"
+        })
     config_overrides: Optional[str] = field(
         default=None,
         metadata={
-            "help": (
-                "Override some existing default config settings when a model is trained from scratch. Example: "
-                "n_embd=10,resid_pdrop=0.2,scale_attn_weights=false,summary_type=cls_index"
-            )
+            "help":
+            ("Override some existing default config settings when a model is trained from scratch. Example: "
+             "n_embd=10,resid_pdrop=0.2,scale_attn_weights=false,summary_type=cls_index"
+             )
         },
     )
     cache_dir: Optional[str] = field(
-        default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
-    )
+        default=None,
+        metadata={
+            "help":
+            "Where do you want to store the pretrained models downloaded from s3"
+        })
     model_revision: str = field(
         default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+        metadata={
+            "help":
+            "The specific model version to use (can be a branch name, tag name or commit id)."
+        },
     )
-    image_processor_name: str = field(default=None, metadata={"help": "Name or path of preprocessor config."})
+    image_processor_name: str = field(
+        default=None,
+        metadata={"help": "Name or path of preprocessor config."})
     use_auth_token: bool = field(
         default=False,
         metadata={
-            "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
-            )
+            "help":
+            ("Will use the token generated when running `huggingface-cli login` (necessary to use this script "
+             "with private models).")
         },
     )
     mask_ratio: float = field(
-        default=0.75, metadata={"help": "The ratio of the number of masked tokens in the input sequence."}
-    )
+        default=0.75,
+        metadata={
+            "help":
+            "The ratio of the number of masked tokens in the input sequence."
+        })
     norm_pix_loss: bool = field(
-        default=True, metadata={"help": "Whether or not to train with normalized pixel values as target."}
-    )
+        default=True,
+        metadata={
+            "help":
+            "Whether or not to train with normalized pixel values as target."
+        })
 
 
 @dataclass
 class CustomTrainingArguments(TrainingArguments):
     base_learning_rate: float = field(
-        default=1e-3, metadata={"help": "Base learning rate: absolute_lr = base_lr * total_batch_size / 256."}
-    )
+        default=1e-3,
+        metadata={
+            "help":
+            "Base learning rate: absolute_lr = base_lr * total_batch_size / 256."
+        })
 
-class TBTrainerCallback(TrainerCallback):
-    "A callback log loss, learning rate, and throughput each logging step"
-    start_time = time.time()
 
-    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if args.logging_strategy == 'steps':
-            if state.global_step == 0 or state.global_step % args.logging_steps == 1:
-                self.start_time = time.time()
-
-    def on_epoch_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if args.logging_strategy == 'epoch':
-            self.start_time = time.time()
-
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        logging_runtime = time.time() - self.start_time
-        num_samples = args.per_device_train_batch_size * args.logging_steps
-        throughput = num_samples / logging_runtime
-        if 'loss' in state.log_history[-1]:
-            state.log_history[-1]["throughput"] = throughput
-            if args.logging_strategy == 'steps':   
-                state.log_history[-1]["step"] = state.global_step
-
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]},\
-                       throughput: {throughput}, step: {state.global_step}')       
-            if args.logging_strategy == 'epoch':
-                state.log_history[-1]["epoch"] = state.epoch
-
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.epoch)
-                mlflow.log_metric("throughput", throughput , step=state.epoch)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]},\
-                      throughput: {throughput}, epoch: {state.epoch}') 
-                
 def collate_fn(examples):
-    pixel_values = torch.stack([example["pixel_values"] for example in examples])
+    pixel_values = torch.stack(
+        [example["pixel_values"] for example in examples])
     return {"pixel_values": pixel_values}
 
-# Log number of parameters function
-def get_num_parameters(model):
-    num_params = 0
-    for param in model.parameters():
-        num_params += param.numel()
-    # in million
-    num_params /= 10**6
-    return num_params
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, CustomTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        model_args, data_args, training_args = parser.parse_json_file(
+            json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses(
+        )
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -244,19 +231,22 @@ def main():
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        +
+        f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Detecting last checkpoint.
     last_checkpoint = None
-    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
+    if os.path.isdir(
+            training_args.output_dir
+    ) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
+        if last_checkpoint is None and len(os.listdir(
+                training_args.output_dir)) > 0:
             raise ValueError(
                 f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-                "Use --overwrite_output_dir to overcome."
-            )
+                "Use --overwrite_output_dir to overcome.")
         elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
             logger.info(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
@@ -273,8 +263,10 @@ def main():
     )
 
     # If we don't have a validation split, split off a percentage of train as validation.
-    data_args.train_val_split = None if "validation" in ds.keys() else data_args.train_val_split
-    if isinstance(data_args.train_val_split, float) and data_args.train_val_split > 0.0:
+    data_args.train_val_split = None if "validation" in ds.keys(
+    ) else data_args.train_val_split
+    if isinstance(data_args.train_val_split,
+                  float) and data_args.train_val_split > 0.0:
         split = ds["train"].train_test_split(data_args.train_val_split)
         ds["train"] = split["train"]
         ds["validation"] = split["test"]
@@ -290,37 +282,38 @@ def main():
         "use_auth_token": True if model_args.use_auth_token else None,
     }
     if model_args.config_name:
-        config = ViTMAEConfig.from_pretrained(model_args.config_name, **config_kwargs)
+        config = ViTMAEConfig.from_pretrained(model_args.config_name,
+                                              **config_kwargs)
     elif model_args.model_name_or_path:
-        config = ViTMAEConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+        config = ViTMAEConfig.from_pretrained(model_args.model_name_or_path,
+                                              **config_kwargs)
     else:
         config = ViTMAEConfig()
-        logger.warning("You are instantiating a new config instance from scratch.")
+        logger.warning(
+            "You are instantiating a new config instance from scratch.")
         if model_args.config_overrides is not None:
             logger.info(f"Overriding config: {model_args.config_overrides}")
             config.update_from_string(model_args.config_overrides)
             logger.info(f"New config: {config}")
 
     # adapt config
-    config.update(
-        {
-            "mask_ratio": model_args.mask_ratio,
-            "norm_pix_loss": model_args.norm_pix_loss,
-        }
-    )
+    config.update({
+        "mask_ratio": model_args.mask_ratio,
+        "norm_pix_loss": model_args.norm_pix_loss,
+    })
 
     # create image processor
     if model_args.image_processor_name:
-        image_processor = ViTImageProcessor.from_pretrained(model_args.image_processor_name, **config_kwargs)
+        image_processor = ViTImageProcessor.from_pretrained(
+            model_args.image_processor_name, **config_kwargs)
     elif model_args.model_name_or_path:
-        image_processor = ViTImageProcessor.from_pretrained(model_args.model_name_or_path, **config_kwargs)
+        image_processor = ViTImageProcessor.from_pretrained(
+            model_args.model_name_or_path, **config_kwargs)
     else:
         image_processor = ViTImageProcessor()
-    config.update(
-        {
-            "image_size":image_processor.size["height"],
-        }
-    )
+    config.update({
+        "image_size": image_processor.size["height"],
+    })
     # create model
     if model_args.model_name_or_path:
         model = ViTMAEForPreTraining.from_pretrained(
@@ -359,27 +352,31 @@ def main():
         size = image_processor.size["shortest_edge"]
     else:
         size = (image_processor.size["height"], image_processor.size["width"])
-    transforms = Compose(
-        [
-            Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
-            RandomResizedCrop(size, scale=(0.2, 1.0), interpolation=InterpolationMode.BICUBIC),
-            RandomHorizontalFlip(),
-            ToTensor(),
-            Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
-        ]
-    )
+    transforms = Compose([
+        Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+        RandomResizedCrop(size,
+                          scale=(0.2, 1.0),
+                          interpolation=InterpolationMode.BICUBIC),
+        RandomHorizontalFlip(),
+        ToTensor(),
+        Normalize(mean=image_processor.image_mean,
+                  std=image_processor.image_std),
+    ])
 
     def preprocess_images(examples):
         """Preprocess a batch of images by applying transforms."""
 
-        examples["pixel_values"] = [transforms(image) for image in examples[image_column_name]]
+        examples["pixel_values"] = [
+            transforms(image) for image in examples[image_column_name]
+        ]
         return examples
 
     if training_args.do_train:
         if "train" not in ds:
             raise ValueError("--do_train requires a train dataset")
         if data_args.max_train_samples is not None:
-            ds["train"] = ds["train"].shuffle(seed=training_args.seed).select(range(data_args.max_train_samples))
+            ds["train"] = ds["train"].shuffle(seed=training_args.seed).select(
+                range(data_args.max_train_samples))
         # Set the training transforms
         ds["train"].set_transform(preprocess_images)
 
@@ -387,16 +384,16 @@ def main():
         if "validation" not in ds:
             raise ValueError("--do_eval requires a validation dataset")
         if data_args.max_eval_samples is not None:
-            ds["validation"] = (
-                ds["validation"].shuffle(seed=training_args.seed).select(range(data_args.max_eval_samples))
-            )
+            ds["validation"] = (ds["validation"].shuffle(
+                seed=training_args.seed).select(
+                    range(data_args.max_eval_samples)))
         # Set the validation transforms
         ds["validation"].set_transform(preprocess_images)
 
     # Compute absolute learning rate
-    total_train_batch_size = (
-        training_args.train_batch_size * training_args.gradient_accumulation_steps * training_args.world_size
-    )
+    total_train_batch_size = (training_args.train_batch_size *
+                              training_args.gradient_accumulation_steps *
+                              training_args.world_size)
     if training_args.base_learning_rate is not None:
         training_args.learning_rate = training_args.base_learning_rate * total_train_batch_size / 256
 

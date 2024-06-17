@@ -18,33 +18,26 @@ import os
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
-import time
 
+import mlflow
 import numpy as np
 import torch
-from datasets import load_dataset
-from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
-
 import transformers
-from transformers import (
-    CONFIG_MAPPING,
-    IMAGE_PROCESSOR_MAPPING,
-    MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING,
-    AutoConfig,
-    AutoImageProcessor,
-    AutoModelForMaskedImageModeling,
-    HfArgumentParser,
-    Trainer,
-    TrainingArguments,
-    TrainerCallback,
-    TrainerState,
-    TrainerControl,
-)
+from datasets import load_dataset
+from torchvision.transforms import (Compose, Lambda, Normalize,
+                                    RandomHorizontalFlip, RandomResizedCrop,
+                                    ToTensor)
+from transformers import (CONFIG_MAPPING, IMAGE_PROCESSOR_MAPPING,
+                          MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING, AutoConfig,
+                          AutoImageProcessor, AutoModelForMaskedImageModeling,
+                          HfArgumentParser, Trainer, TrainingArguments)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-import mlflow
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from custom_callback.tbtrainercallback import (TBTrainerCallback,
+                                               get_num_parameters)
 """ Pre-training a 🤗 Transformers model for simple masked image modeling (SimMIM).
 Any model supported by the AutoModelForMaskedImageModeling API can be used.
 """
@@ -54,8 +47,10 @@ logger = logging.getLogger(__name__)
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
 
-require_version("datasets>=1.8.0",
-                "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt")
+require_version(
+    "datasets>=1.8.0",
+    "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt"
+)
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -70,25 +65,35 @@ class DataTrainingArguments:
     """
 
     dataset_name: Optional[str] = field(
-        default="cifar10", metadata={"help": "Name of a dataset from the datasets package"}
-    )
+        default="cifar10",
+        metadata={"help": "Name of a dataset from the datasets package"})
     dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
+        default=None,
+        metadata={
+            "help":
+            "The configuration name of the dataset to use (via the datasets library)."
+        })
     image_column_name: Optional[str] = field(
         default=None,
         metadata={
-            "help": "The column name of the images in the files. If not set, will try to use 'image' or 'img'."},
+            "help":
+            "The column name of the images in the files. If not set, will try to use 'image' or 'img'."
+        },
     )
     train_dir: Optional[str] = field(
-        default=None, metadata={"help": "A folder containing the training data."})
+        default=None,
+        metadata={"help": "A folder containing the training data."})
     validation_dir: Optional[str] = field(
-        default=None, metadata={"help": "A folder containing the validation data."})
+        default=None,
+        metadata={"help": "A folder containing the validation data."})
     train_val_split: Optional[float] = field(
-        default=0.15, metadata={"help": "Percent to split off of train for validation."}
-    )
-    mask_patch_size: int = field(default=32, metadata={
-                                 "help": "The size of the square patches to use for masking."})
+        default=0.15,
+        metadata={"help": "Percent to split off of train for validation."})
+    mask_patch_size: int = field(
+        default=32,
+        metadata={
+            "help": "The size of the square patches to use for masking."
+        })
     mask_ratio: float = field(
         default=0.6,
         metadata={"help": "Percentage of patches to mask."},
@@ -96,19 +101,17 @@ class DataTrainingArguments:
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
+            "help":
+            ("For debugging purposes or quicker training, truncate the number of training examples to this "
+             "value if set.")
         },
     )
     max_eval_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
+            "help":
+            ("For debugging purposes or quicker training, truncate the number of evaluation examples to this "
+             "value if set.")
         },
     )
 
@@ -130,65 +133,74 @@ class ModelArguments:
     model_name_or_path: str = field(
         default=None,
         metadata={
-            "help": (
-                "The model checkpoint for weights initialization. Can be a local path to a pytorch_model.bin or a "
-                "checkpoint identifier on the hub. "
-                "Don't set if you want to train a model from scratch."
-            )
+            "help":
+            ("The model checkpoint for weights initialization. Can be a local path to a pytorch_model.bin or a "
+             "checkpoint identifier on the hub. "
+             "Don't set if you want to train a model from scratch.")
         },
     )
     model_type: Optional[str] = field(
         default=None,
         metadata={
-            "help": "If training from scratch, pass a model type from the list: " + ", ".join(MODEL_TYPES)},
+            "help":
+            "If training from scratch, pass a model type from the list: " +
+            ", ".join(MODEL_TYPES)
+        },
     )
     config_name_or_path: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
+        default=None,
+        metadata={
+            "help":
+            "Pretrained config name or path if not the same as model_name"
+        })
     config_overrides: Optional[str] = field(
         default=None,
         metadata={
-            "help": (
-                "Override some existing default config settings when a model is trained from scratch. Example: "
-                "n_embd=10,resid_pdrop=0.2,scale_attn_weights=false,summary_type=cls_index"
-            )
+            "help":
+            ("Override some existing default config settings when a model is trained from scratch. Example: "
+             "n_embd=10,resid_pdrop=0.2,scale_attn_weights=false,summary_type=cls_index"
+             )
         },
     )
     cache_dir: Optional[str] = field(
         default=None,
         metadata={
-            "help": "Where do you want to store (cache) the pretrained models/datasets downloaded from the hub"},
+            "help":
+            "Where do you want to store (cache) the pretrained models/datasets downloaded from the hub"
+        },
     )
     model_revision: str = field(
         default="main",
         metadata={
-            "help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+            "help":
+            "The specific model version to use (can be a branch name, tag name or commit id)."
+        },
     )
     image_processor_name: str = field(
-        default=None, metadata={"help": "Name or path of preprocessor config."})
+        default=None,
+        metadata={"help": "Name or path of preprocessor config."})
     use_auth_token: bool = field(
         default=False,
         metadata={
-            "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
-            )
+            "help":
+            ("Will use the token generated when running `huggingface-cli login` (necessary to use this script "
+             "with private models).")
         },
     )
     image_size: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "The size (resolution) of each image. If not specified, will use `image_size` of the configuration."
-            )
+            "help":
+            ("The size (resolution) of each image. If not specified, will use `image_size` of the configuration."
+             )
         },
     )
     patch_size: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "The size (resolution) of each patch. If not specified, will use `patch_size` of the configuration."
-            )
+            "help":
+            ("The size (resolution) of each patch. If not specified, will use `patch_size` of the configuration."
+             )
         },
     )
     encoder_stride: Optional[int] = field(
@@ -205,7 +217,11 @@ class MaskGenerator:
     where 1 indicates "masked".
     """
 
-    def __init__(self, input_size=192, mask_patch_size=32, model_patch_size=4, mask_ratio=0.6):
+    def __init__(self,
+                 input_size=192,
+                 mask_patch_size=32,
+                 model_patch_size=4,
+                 mask_ratio=0.6):
         self.input_size = input_size
         self.mask_patch_size = mask_patch_size
         self.model_patch_size = model_patch_size
@@ -224,7 +240,7 @@ class MaskGenerator:
         self.mask_count = int(np.ceil(self.token_count * self.mask_ratio))
 
     def __call__(self):
-        mask_idx = np.random.permutation(self.token_count)[: self.mask_count]
+        mask_idx = np.random.permutation(self.token_count)[:self.mask_count]
         mask = np.zeros(self.token_count, dtype=int)
         mask[mask_idx] = 1
 
@@ -233,56 +249,15 @@ class MaskGenerator:
 
         return torch.tensor(mask.flatten())
 
-class TBTrainerCallback(TrainerCallback):
-    "A callback log loss, learning rate, and throughput each logging step"
-    start_time = time.time()
 
-    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if args.logging_strategy == 'steps':
-            if state.global_step == 0 or state.global_step % args.logging_steps == 1:
-                self.start_time = time.time()
-
-    def on_epoch_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if args.logging_strategy == 'epoch':
-            self.start_time = time.time()
-
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        logging_runtime = time.time() - self.start_time
-        num_samples = args.per_device_train_batch_size * args.logging_steps
-        throughput = num_samples / logging_runtime
-        if 'loss' in state.log_history[-1]:
-            state.log_history[-1]["throughput"] = throughput
-            if args.logging_strategy == 'steps':   
-                state.log_history[-1]["step"] = state.global_step
-
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]},\
-                       throughput: {throughput}, step: {state.global_step}')       
-            if args.logging_strategy == 'epoch':
-                state.log_history[-1]["epoch"] = state.epoch
-
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.epoch)
-                mlflow.log_metric("throughput", throughput , step=state.epoch)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]},\
-                      throughput: {throughput}, epoch: {state.epoch}') 
-                
 def collate_fn(examples):
-    pixel_values = torch.stack([example["pixel_values"]
-                               for example in examples])
+    pixel_values = torch.stack(
+        [example["pixel_values"] for example in examples])
     mask = torch.stack([example["mask"] for example in examples])
     return {"pixel_values": pixel_values, "bool_masked_pos": mask}
 
+
 # Log number of parameters function
-
-
-def get_num_parameters(model):
-    num_params = 0
-    for param in model.parameters():
-        num_params += param.numel()
-    # in million
-    num_params /= 10**6
-    return num_params
 
 
 def main():
@@ -298,7 +273,8 @@ def main():
         model_args, data_args, training_args = parser.parse_json_file(
             json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses(
+        )
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -324,19 +300,22 @@ def main():
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        +
+        f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Detecting last checkpoint.
     last_checkpoint = None
-    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
+    if os.path.isdir(
+            training_args.output_dir
+    ) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
+        if last_checkpoint is None and len(os.listdir(
+                training_args.output_dir)) > 0:
             raise ValueError(
                 f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-                "Use --overwrite_output_dir to overcome."
-            )
+                "Use --overwrite_output_dir to overcome.")
         elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
             logger.info(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
@@ -355,7 +334,8 @@ def main():
     # If we don't have a validation split, split off a percentage of train as validation.
     data_args.train_val_split = None if "validation" in ds.keys(
     ) else data_args.train_val_split
-    if isinstance(data_args.train_val_split, float) and data_args.train_val_split > 0.0:
+    if isinstance(data_args.train_val_split,
+                  float) and data_args.train_val_split > 0.0:
         split = ds["train"].train_test_split(data_args.train_val_split)
         ds["train"] = split["train"]
         ds["validation"] = split["test"]
@@ -370,11 +350,11 @@ def main():
         "use_auth_token": True if model_args.use_auth_token else None,
     }
     if model_args.config_name_or_path:
-        config = AutoConfig.from_pretrained(
-            model_args.config_name_or_path, **config_kwargs)
+        config = AutoConfig.from_pretrained(model_args.config_name_or_path,
+                                            **config_kwargs)
     elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(
-            model_args.model_name_or_path, **config_kwargs)
+        config = AutoConfig.from_pretrained(model_args.model_name_or_path,
+                                            **config_kwargs)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
         logger.warning(
@@ -391,17 +371,15 @@ def main():
     # adapt config
     model_args.image_size = model_args.image_size if model_args.image_size is not None else config.image_size
     model_args.patch_size = model_args.patch_size if model_args.patch_size is not None else config.patch_size
-    model_args.encoder_stride = (
-        model_args.encoder_stride if model_args.encoder_stride is not None else config.encoder_stride
-    )
+    model_args.encoder_stride = (model_args.encoder_stride
+                                 if model_args.encoder_stride is not None else
+                                 config.encoder_stride)
 
-    config.update(
-        {
-            "image_size": model_args.image_size,
-            "patch_size": model_args.patch_size,
-            "encoder_stride": model_args.encoder_stride,
-        }
-    )
+    config.update({
+        "image_size": model_args.image_size,
+        "patch_size": model_args.patch_size,
+        "encoder_stride": model_args.encoder_stride,
+    })
 
     # create image processor
     if model_args.image_processor_name:
@@ -412,7 +390,8 @@ def main():
             model_args.model_name_or_path, **config_kwargs)
     else:
         IMAGE_PROCESSOR_TYPES = {
-            conf.model_type: image_processor_class for conf, image_processor_class in IMAGE_PROCESSOR_MAPPING.items()
+            conf.model_type: image_processor_class
+            for conf, image_processor_class in IMAGE_PROCESSOR_MAPPING.items()
         }
         image_processor = IMAGE_PROCESSOR_TYPES[model_args.model_type]()
 
@@ -449,18 +428,16 @@ def main():
 
     # transformations as done in original SimMIM paper
     # source: https://github.com/microsoft/SimMIM/blob/main/data/data_simmim.py
-    transforms = Compose(
-        [
-            Lambda(lambda img: img.convert("RGB")
-                   if img.mode != "RGB" else img),
-            RandomResizedCrop(model_args.image_size, scale=(
-                0.67, 1.0), ratio=(3.0 / 4.0, 4.0 / 3.0)),
-            RandomHorizontalFlip(),
-            ToTensor(),
-            Normalize(mean=image_processor.image_mean,
-                      std=image_processor.image_std),
-        ]
-    )
+    transforms = Compose([
+        Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+        RandomResizedCrop(model_args.image_size,
+                          scale=(0.67, 1.0),
+                          ratio=(3.0 / 4.0, 4.0 / 3.0)),
+        RandomHorizontalFlip(),
+        ToTensor(),
+        Normalize(mean=image_processor.image_mean,
+                  std=image_processor.image_std),
+    ])
 
     # create mask generator
     mask_generator = MaskGenerator(
@@ -474,10 +451,12 @@ def main():
         """Preprocess a batch of images by applying transforms + creating a corresponding mask, indicating
         which patches to mask."""
 
-        examples["pixel_values"] = [transforms(
-            image) for image in examples[image_column_name]]
-        examples["mask"] = [mask_generator()
-                            for i in range(len(examples[image_column_name]))]
+        examples["pixel_values"] = [
+            transforms(image) for image in examples[image_column_name]
+        ]
+        examples["mask"] = [
+            mask_generator() for i in range(len(examples[image_column_name]))
+        ]
 
         return examples
 
@@ -494,10 +473,9 @@ def main():
         if "validation" not in ds:
             raise ValueError("--do_eval requires a validation dataset")
         if data_args.max_eval_samples is not None:
-            ds["validation"] = (
-                ds["validation"].shuffle(seed=training_args.seed).select(
-                    range(data_args.max_eval_samples))
-            )
+            ds["validation"] = (ds["validation"].shuffle(
+                seed=training_args.seed).select(
+                    range(data_args.max_eval_samples)))
         # Set the validation transforms
         ds["validation"].set_transform(preprocess_images)
 

@@ -36,8 +36,8 @@ from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from custom_callback.tbtrainercallback import (TBTrainerCallback,
-                                               get_num_parameters)
+from utils.tbtrainercallback import TBTrainerCallback
+from utils.utils import get_num_parameters
 """ Pre-training a 🤗 Transformers model for simple masked image modeling (SimMIM).
 Any model supported by the AutoModelForMaskedImageModeling API can be used.
 """

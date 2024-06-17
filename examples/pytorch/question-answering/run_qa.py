@@ -29,6 +29,7 @@ import evaluate
 import mlflow
 import transformers
 from datasets import load_dataset
+from trainer_qa import QuestionAnsweringTrainer
 from transformers import (AutoConfig, AutoModelForQuestionAnswering,
                           AutoTokenizer, DataCollatorWithPadding,
                           EvalPrediction, HfArgumentParser,
@@ -37,13 +38,11 @@ from transformers import (AutoConfig, AutoModelForQuestionAnswering,
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-
-from trainer_qa import QuestionAnsweringTrainer
 from utils_qa import postprocess_qa_predictions
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from custom_callback.tbtrainercallback import (TBTrainerCallback,
-                                               get_num_parameters)
+from utils.tbtrainercallback import TBTrainerCallback
+from utils.utils import get_num_parameters
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")

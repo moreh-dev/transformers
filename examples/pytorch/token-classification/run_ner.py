@@ -35,10 +35,8 @@ from datasets import ClassLabel, load_dataset
 from transformers import (AutoConfig, AutoModelForTokenClassification,
                           AutoTokenizer, DataCollatorForTokenClassification,
                           HfArgumentParser, PretrainedConfig,
-                          PreTrainedTokenizerFast, Trainer, TrainerCallback,
-                          TrainerControl, TrainerState, TrainingArguments,
+                          PreTrainedTokenizerFast, Trainer, TrainingArguments,
                           set_seed)
-from transformers.trainer_callback import TrainerControl, TrainerState
 from transformers.trainer_utils import get_last_checkpoint, speed_metrics
 from transformers.training_args import TrainingArguments
 from transformers.utils import check_min_version, send_example_telemetry

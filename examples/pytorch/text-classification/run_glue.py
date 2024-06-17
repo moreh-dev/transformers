@@ -33,9 +33,8 @@ from datasets import load_dataset
 from transformers import (AutoConfig, AutoModelForSequenceClassification,
                           AutoTokenizer, DataCollatorWithPadding,
                           EvalPrediction, HfArgumentParser, PretrainedConfig,
-                          Trainer, TrainerCallback, TrainerControl,
-                          TrainerState, TrainingArguments,
-                          default_data_collator, set_seed)
+                          Trainer, TrainingArguments, default_data_collator,
+                          set_seed)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version

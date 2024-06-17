@@ -35,8 +35,7 @@ from transformers import (
     AutoConfig, AutoModelForSeq2SeqLM, AutoTokenizer, DataCollatorForSeq2Seq,
     HfArgumentParser, M2M100Tokenizer, MBart50Tokenizer, MBart50TokenizerFast,
     MBartTokenizer, MBartTokenizerFast, Seq2SeqTrainer,
-    Seq2SeqTrainingArguments, TrainerCallback, TrainerControl, TrainerState,
-    default_data_collator, set_seed)
+    Seq2SeqTrainingArguments, default_data_collator, set_seed)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version

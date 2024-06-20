@@ -20,36 +20,28 @@ import random
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
-import time
 
 import evaluate
+import mlflow
 import numpy as np
 import torch
+import transformers
 from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 from PIL import Image
 from torch import nn
 from torchvision import transforms
 from torchvision.transforms import functional
-
-import transformers
-from transformers import (
-    AutoConfig,
-    AutoImageProcessor,
-    AutoModelForSemanticSegmentation,
-    HfArgumentParser,
-    Trainer,
-    TrainingArguments,
-    TrainerCallback,
-    TrainerState,
-    TrainerControl,
-    default_data_collator,
-)
+from transformers import (AutoConfig, AutoImageProcessor,
+                          AutoModelForSemanticSegmentation, HfArgumentParser,
+                          Trainer, TrainingArguments, default_data_collator)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-import mlflow
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.tbtrainercallback import TBTrainerCallbackForSeq2Seq
+from utils.utils import get_num_parameters
 """ Finetuning any 🤗 Transformers model supported by AutoModelForSemanticSegmentation for semantic segmentation leveraging the Trainer API."""
 
 logger = logging.getLogger(__name__)
@@ -57,7 +49,10 @@ logger = logging.getLogger(__name__)
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
 
-require_version("datasets>=2.0.0", "To fix: pip install -r examples/pytorch/semantic-segmentation/requirements.txt")
+require_version(
+    "datasets>=2.0.0",
+    "To fix: pip install -r examples/pytorch/semantic-segmentation/requirements.txt"
+)
 
 
 def pad_if_smaller(img, size, fill=0):
@@ -70,6 +65,7 @@ def pad_if_smaller(img, size, fill=0):
 
 
 class Compose:
+
     def __init__(self, transforms):
         self.transforms = transforms
 
@@ -80,6 +76,7 @@ class Compose:
 
 
 class Identity:
+
     def __init__(self):
         pass
 
@@ -88,16 +85,21 @@ class Identity:
 
 
 class Resize:
+
     def __init__(self, size):
         self.size = size
 
     def __call__(self, image, target):
         image = functional.resize(image, self.size)
-        target = functional.resize(target, self.size, interpolation=transforms.InterpolationMode.NEAREST)
+        target = functional.resize(
+            target,
+            self.size,
+            interpolation=transforms.InterpolationMode.NEAREST)
         return image, target
 
 
 class RandomResize:
+
     def __init__(self, min_size, max_size=None):
         self.min_size = min_size
         if max_size is None:
@@ -107,11 +109,13 @@ class RandomResize:
     def __call__(self, image, target):
         size = random.randint(self.min_size, self.max_size)
         image = functional.resize(image, size)
-        target = functional.resize(target, size, interpolation=transforms.InterpolationMode.NEAREST)
+        target = functional.resize(
+            target, size, interpolation=transforms.InterpolationMode.NEAREST)
         return image, target
 
 
 class RandomCrop:
+
     def __init__(self, size):
         self.size = size if isinstance(size, tuple) else (size, size)
 
@@ -125,6 +129,7 @@ class RandomCrop:
 
 
 class RandomHorizontalFlip:
+
     def __init__(self, flip_prob):
         self.flip_prob = flip_prob
 
@@ -136,6 +141,7 @@ class RandomHorizontalFlip:
 
 
 class PILToTensor:
+
     def __call__(self, image, target):
         image = functional.pil_to_tensor(image)
         target = torch.as_tensor(np.array(target), dtype=torch.int64)
@@ -143,6 +149,7 @@ class PILToTensor:
 
 
 class ConvertImageDtype:
+
     def __init__(self, dtype):
         self.dtype = dtype
 
@@ -152,6 +159,7 @@ class ConvertImageDtype:
 
 
 class Normalize:
+
     def __init__(self, mean, std):
         self.mean = mean
         self.std = std
@@ -162,6 +170,7 @@ class Normalize:
 
 
 class ReduceLabels:
+
     def __call__(self, image, target):
         if not isinstance(target, np.ndarray):
             target = np.array(target).astype(np.uint8)
@@ -185,40 +194,46 @@ class DataTrainingArguments:
     dataset_name: Optional[str] = field(
         default="segments/sidewalk-semantic",
         metadata={
-            "help": "Name of a dataset from the hub (could be your own, possibly private dataset hosted on the hub)."
+            "help":
+            "Name of a dataset from the hub (could be your own, possibly private dataset hosted on the hub)."
         },
     )
     dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
+        default=None,
+        metadata={
+            "help":
+            "The configuration name of the dataset to use (via the datasets library)."
+        })
     train_val_split: Optional[float] = field(
-        default=0.15, metadata={"help": "Percent to split off of train for validation."}
-    )
+        default=0.15,
+        metadata={"help": "Percent to split off of train for validation."})
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
+            "help":
+            ("For debugging purposes or quicker training, truncate the number of training examples to this "
+             "value if set.")
         },
     )
     max_eval_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
+            "help":
+            ("For debugging purposes or quicker training, truncate the number of evaluation examples to this "
+             "value if set.")
         },
     )
     reduce_labels: Optional[bool] = field(
         default=False,
-        metadata={"help": "Whether or not to reduce all labels by 1 and replace background by 255."},
+        metadata={
+            "help":
+            "Whether or not to reduce all labels by 1 and replace background by 255."
+        },
     )
 
     def __post_init__(self):
-        if self.dataset_name is None and (self.train_dir is None and self.validation_dir is None):
+        if self.dataset_name is None and (self.train_dir is None
+                                          and self.validation_dir is None):
             raise ValueError(
                 "You must specify either a dataset name from the hub or a train and/or validation directory."
             )
@@ -232,84 +247,58 @@ class ModelArguments:
 
     model_name_or_path: str = field(
         default="nvidia/mit-b0",
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"},
+        metadata={
+            "help":
+            "Path to pretrained model or model identifier from huggingface.co/models"
+        },
     )
     config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
+        default=None,
+        metadata={
+            "help":
+            "Pretrained config name or path if not the same as model_name"
+        })
     cache_dir: Optional[str] = field(
-        default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
-    )
+        default=None,
+        metadata={
+            "help":
+            "Where do you want to store the pretrained models downloaded from s3"
+        })
     model_revision: str = field(
         default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+        metadata={
+            "help":
+            "The specific model version to use (can be a branch name, tag name or commit id)."
+        },
     )
-    image_processor_name: str = field(default=None, metadata={"help": "Name or path of preprocessor config."})
+    image_processor_name: str = field(
+        default=None,
+        metadata={"help": "Name or path of preprocessor config."})
     use_auth_token: bool = field(
         default=False,
         metadata={
-            "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
-            )
+            "help":
+            ("Will use the token generated when running `huggingface-cli login` (necessary to use this script "
+             "with private models).")
         },
     )
 
-class TBTrainerCallback(TrainerCallback):
-    "A callback log loss, learning rate, and throughput each logging step"
-    start_time = time.time()
-
-    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if args.logging_strategy == 'steps':
-            if state.global_step == 0 or state.global_step % args.logging_steps == 1:
-                self.start_time = time.time()
-
-    def on_epoch_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if args.logging_strategy == 'epoch':
-            self.start_time = time.time()
-
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        logging_runtime = time.time() - self.start_time
-        num_samples = args.per_device_train_batch_size * args.logging_steps
-        throughput = num_samples / logging_runtime
-        if 'loss' in state.log_history[-1]:
-            state.log_history[-1]["throughput"] = throughput
-            if args.logging_strategy == 'steps':   
-                state.log_history[-1]["step"] = state.global_step
-
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]},\
-                       throughput: {throughput}, step: {state.global_step}')       
-            if args.logging_strategy == 'epoch':
-                state.log_history[-1]["epoch"] = state.epoch
-
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.epoch)
-                mlflow.log_metric("throughput", throughput , step=state.epoch)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]},\
-                      throughput: {throughput}, epoch: {state.epoch}') 
-                
-# Log number of parameters function
-def get_num_parameters(model):
-    num_params = 0
-    for param in model.parameters():
-        num_params += param.numel()
-    # in million
-    num_params /= 10**6
-    return num_params
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        model_args, data_args, training_args = parser.parse_json_file(
+            json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses(
+        )
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -335,19 +324,22 @@ def main():
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        +
+        f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Detecting last checkpoint.
     last_checkpoint = None
-    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
+    if os.path.isdir(
+            training_args.output_dir
+    ) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
+        if last_checkpoint is None and len(os.listdir(
+                training_args.output_dir)) > 0:
             raise ValueError(
                 f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-                "Use --overwrite_output_dir to overcome."
-            )
+                "Use --overwrite_output_dir to overcome.")
         elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
             logger.info(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
@@ -358,7 +350,8 @@ def main():
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
     # TODO support datasets from local folders
-    dataset = load_dataset(data_args.dataset_name, cache_dir=model_args.cache_dir)
+    dataset = load_dataset(data_args.dataset_name,
+                           cache_dir=model_args.cache_dir)
 
     # Rename column names to standardized names (only "image" and "label" need to be present)
     if "pixel_values" in dataset["train"].column_names:
@@ -367,8 +360,10 @@ def main():
         dataset = dataset.rename_columns({"annotation": "label"})
 
     # If we don't have a validation split, split off a percentage of train as validation.
-    data_args.train_val_split = None if "validation" in dataset.keys() else data_args.train_val_split
-    if isinstance(data_args.train_val_split, float) and data_args.train_val_split > 0.0:
+    data_args.train_val_split = None if "validation" in dataset.keys(
+    ) else data_args.train_val_split
+    if isinstance(data_args.train_val_split,
+                  float) and data_args.train_val_split > 0.0:
         split = dataset["train"].train_test_split(data_args.train_val_split)
         dataset["train"] = split["train"]
         dataset["validation"] = split["test"]
@@ -381,7 +376,8 @@ def main():
     else:
         repo_id = data_args.dataset_name
         filename = "id2label.json"
-    id2label = json.load(open(hf_hub_download(repo_id, filename, repo_type="dataset"), "r"))
+    id2label = json.load(
+        open(hf_hub_download(repo_id, filename, repo_type="dataset"), "r"))
     id2label = {int(k): v for k, v in id2label.items()}
     label2id = {v: str(k) for k, v in id2label.items()}
 
@@ -414,8 +410,14 @@ def main():
         per_category_accuracy = metrics.pop("per_category_accuracy").tolist()
         per_category_iou = metrics.pop("per_category_iou").tolist()
 
-        metrics.update({f"accuracy_{id2label[i]}": v for i, v in enumerate(per_category_accuracy)})
-        metrics.update({f"iou_{id2label[i]}": v for i, v in enumerate(per_category_iou)})
+        metrics.update({
+            f"accuracy_{id2label[i]}": v
+            for i, v in enumerate(per_category_accuracy)
+        })
+        metrics.update({
+            f"iou_{id2label[i]}": v
+            for i, v in enumerate(per_category_iou)
+        })
 
         return metrics
 
@@ -439,7 +441,7 @@ def main():
     # Log number of parameters
     num_params = get_num_parameters(model)
     mlflow.log_param('num_params', num_params)
-    
+
     image_processor = AutoImageProcessor.from_pretrained(
         model_args.image_processor_name or model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -452,35 +454,35 @@ def main():
     # Currently based on official torchvision references: https://github.com/pytorch/vision/blob/main/references/segmentation/transforms.py
     if "shortest_edge" in image_processor.size:
         # We instead set the target size as (shortest_edge, shortest_edge) to here to ensure all images are batchable.
-        size = (image_processor.size["shortest_edge"], image_processor.size["shortest_edge"])
+        size = (image_processor.size["shortest_edge"],
+                image_processor.size["shortest_edge"])
     else:
         size = (image_processor.size["height"], image_processor.size["width"])
-    train_transforms = Compose(
-        [
-            ReduceLabels() if data_args.reduce_labels else Identity(),
-            RandomCrop(size=size),
-            RandomHorizontalFlip(flip_prob=0.5),
-            PILToTensor(),
-            ConvertImageDtype(torch.float),
-            Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
-        ]
-    )
+    train_transforms = Compose([
+        ReduceLabels() if data_args.reduce_labels else Identity(),
+        RandomCrop(size=size),
+        RandomHorizontalFlip(flip_prob=0.5),
+        PILToTensor(),
+        ConvertImageDtype(torch.float),
+        Normalize(mean=image_processor.image_mean,
+                  std=image_processor.image_std),
+    ])
     # Define torchvision transform to be applied to each image.
     # jitter = ColorJitter(brightness=0.25, contrast=0.25, saturation=0.25, hue=0.1)
-    val_transforms = Compose(
-        [
-            ReduceLabels() if data_args.reduce_labels else Identity(),
-            Resize(size=size),
-            PILToTensor(),
-            ConvertImageDtype(torch.float),
-            Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
-        ]
-    )
+    val_transforms = Compose([
+        ReduceLabels() if data_args.reduce_labels else Identity(),
+        Resize(size=size),
+        PILToTensor(),
+        ConvertImageDtype(torch.float),
+        Normalize(mean=image_processor.image_mean,
+                  std=image_processor.image_std),
+    ])
 
     def preprocess_train(example_batch):
         pixel_values = []
         labels = []
-        for image, target in zip(example_batch["image"], example_batch["label"]):
+        for image, target in zip(example_batch["image"],
+                                 example_batch["label"]):
             image, target = train_transforms(image.convert("RGB"), target)
             pixel_values.append(image)
             labels.append(target)
@@ -494,7 +496,8 @@ def main():
     def preprocess_val(example_batch):
         pixel_values = []
         labels = []
-        for image, target in zip(example_batch["image"], example_batch["label"]):
+        for image, target in zip(example_batch["image"],
+                                 example_batch["label"]):
             image, target = val_transforms(image.convert("RGB"), target)
             pixel_values.append(image)
             labels.append(target)
@@ -509,9 +512,9 @@ def main():
         if "train" not in dataset:
             raise ValueError("--do_train requires a train dataset")
         if data_args.max_train_samples is not None:
-            dataset["train"] = (
-                dataset["train"].shuffle(seed=training_args.seed).select(range(data_args.max_train_samples))
-            )
+            dataset["train"] = (dataset["train"].shuffle(
+                seed=training_args.seed).select(
+                    range(data_args.max_train_samples)))
         # Set the training transforms
         dataset["train"].set_transform(preprocess_train)
 
@@ -519,9 +522,9 @@ def main():
         if "validation" not in dataset:
             raise ValueError("--do_eval requires a validation dataset")
         if data_args.max_eval_samples is not None:
-            dataset["validation"] = (
-                dataset["validation"].shuffle(seed=training_args.seed).select(range(data_args.max_eval_samples))
-            )
+            dataset["validation"] = (dataset["validation"].shuffle(
+                seed=training_args.seed).select(
+                    range(data_args.max_eval_samples)))
         # Set the validation transforms
         dataset["validation"].set_transform(preprocess_val)
 
@@ -536,7 +539,7 @@ def main():
         data_collator=default_data_collator,
     )
     trainer.add_callback(TBTrainerCallback)
-    
+
     # Training
     if training_args.do_train:
         checkpoint = None

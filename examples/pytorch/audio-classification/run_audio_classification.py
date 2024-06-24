@@ -17,34 +17,33 @@
 import logging
 import os
 import sys
+import time
 import warnings
 from dataclasses import dataclass, field
 from random import randint
 from typing import Optional
-import time
 
 import datasets
 import evaluate
+import mlflow
 import numpy as np
-from datasets import DatasetDict, load_dataset
-
 import transformers
+from datasets import DatasetDict, load_dataset
 from transformers import (
     AutoConfig,
     AutoFeatureExtractor,
     AutoModelForAudioClassification,
     HfArgumentParser,
     Trainer,
-    TrainingArguments,
     TrainerCallback,
-    TrainerState,
     TrainerControl,
+    TrainerState,
+    TrainingArguments,
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-import mlflow
 
 logger = logging.getLogger(__name__)
 
@@ -188,26 +187,31 @@ class ModelArguments:
                 "Only make use of `--freeze_feature_encoder`."
             )
 
+
 class TBTrainerCallback(TrainerCallback):
     "A callback log loss, learning rate, and throughput each logging step"
     start_time = time.time()
+
     def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         # count the time after the logging step
         if state.global_step == 0 or state.global_step % args.logging_steps == 1:
             self.start_time = time.time()
-        
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        if args.logging_strategy == 'steps':
+
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if args.logging_strategy == "steps":
             logging_step_runtime = time.time() - self.start_time
             num_samples = args.per_device_train_batch_size * args.logging_steps
             throughput = num_samples / logging_step_runtime
-            if 'loss' in state.log_history[-1]:
+            if "loss" in state.log_history[-1]:
                 state.log_history[-1]["throughput"] = throughput
                 state.log_history[-1]["step"] = state.global_step
 
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"], step=state.global_step)
+                mlflow.log_metric("throughput", throughput, step=state.global_step)
+                print(
+                    f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}'
+                )
+
 
 # Log number of parameters function
 def get_num_parameters(model):
@@ -215,8 +219,9 @@ def get_num_parameters(model):
     for param in model.parameters():
         num_params += param.numel()
     # in million
-    num_params /= 10**6
+    num_params /= 10 ** 6
     return num_params
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -284,12 +289,14 @@ def main():
         data_args.dataset_config_name,
         split=data_args.train_split_name,
         use_auth_token=True if model_args.use_auth_token else None,
+        trust_remote_code=True,
     )
     raw_datasets["eval"] = load_dataset(
         data_args.dataset_name,
         data_args.dataset_config_name,
         split=data_args.eval_split_name,
         use_auth_token=True if model_args.use_auth_token else None,
+        trust_remote_code=True,
     )
 
     if data_args.audio_column_name not in raw_datasets["train"].column_names:
@@ -332,7 +339,13 @@ def main():
                 audio["array"], max_length=data_args.max_length_seconds, sample_rate=feature_extractor.sampling_rate
             )
             subsampled_wavs.append(wav)
-        inputs = feature_extractor(subsampled_wavs, sampling_rate=feature_extractor.sampling_rate, max_length=16000, truncation=True, padding=True)
+        inputs = feature_extractor(
+            subsampled_wavs,
+            sampling_rate=feature_extractor.sampling_rate,
+            max_length=16000,
+            truncation=True,
+            padding=True,
+        )
         output_batch = {model_input_name: inputs.get(model_input_name)}
         output_batch["labels"] = list(batch[data_args.label_column_name])
 
@@ -341,7 +354,9 @@ def main():
     def val_transforms(batch):
         """Apply val_transforms across a batch."""
         wavs = [audio["array"] for audio in batch[data_args.audio_column_name]]
-        inputs = feature_extractor(wavs, sampling_rate=feature_extractor.sampling_rate, max_length=16000, truncation=True, padding=True)
+        inputs = feature_extractor(
+            wavs, sampling_rate=feature_extractor.sampling_rate, max_length=16000, truncation=True, padding=True
+        )
         output_batch = {model_input_name: inputs.get(model_input_name)}
         output_batch["labels"] = list(batch[data_args.label_column_name])
 
@@ -386,7 +401,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # freeze the convolutional waveform encoder
     if model_args.freeze_feature_encoder:
@@ -419,10 +434,10 @@ def main():
     )
     trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
-    #set the os enviroment for MLflowCallback
+    # set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
-    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"    
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"] = "False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"] = "True"
 
     # Training
     if training_args.do_train:
@@ -433,7 +448,7 @@ def main():
             checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()
-        
+
         trainer.log_metrics("train", train_result.metrics)
         trainer.save_metrics("train", train_result.metrics)
         trainer.save_state()

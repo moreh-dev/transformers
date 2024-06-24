@@ -16,31 +16,30 @@
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
-import time
 
+import mlflow
 import torch
+import transformers
 from datasets import load_dataset
 from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
 from torchvision.transforms.functional import InterpolationMode
-
-import transformers
 from transformers import (
     HfArgumentParser,
     Trainer,
+    TrainerCallback,
+    TrainerControl,
+    TrainerState,
     TrainingArguments,
     ViTImageProcessor,
     ViTMAEConfig,
     ViTMAEForPreTraining,
-    TrainerCallback,
-    TrainerState,
-    TrainerControl,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-import mlflow
 
 """ Pre-training a 🤗 ViT model as an MAE (masked autoencoder), as proposed in https://arxiv.org/abs/2111.06377."""
 
@@ -160,6 +159,7 @@ class CustomTrainingArguments(TrainingArguments):
         default=1e-3, metadata={"help": "Base learning rate: absolute_lr = base_lr * total_batch_size / 256."}
     )
 
+
 class TBTrainerCallback(TrainerCallback):
     "A callback log loss, learning rate, and throughput each logging step"
     start_time = time.time()
@@ -168,23 +168,27 @@ class TBTrainerCallback(TrainerCallback):
         # count the time after the logging step
         if state.global_step == 0 or state.global_step % args.logging_steps == 1:
             self.start_time = time.time()
-        
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        if args.logging_strategy == 'steps':
+
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if args.logging_strategy == "steps":
             logging_step_runtime = time.time() - self.start_time
             num_samples = args.per_device_train_batch_size * args.logging_steps
             throughput = num_samples / logging_step_runtime
-            if 'loss' in state.log_history[-1]:
+            if "loss" in state.log_history[-1]:
                 state.log_history[-1]["throughput"] = throughput
                 state.log_history[-1]["step"] = state.global_step
 
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"], step=state.global_step)
+                mlflow.log_metric("throughput", throughput, step=state.global_step)
+                print(
+                    f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}'
+                )
+
 
 def collate_fn(examples):
     pixel_values = torch.stack([example["pixel_values"] for example in examples])
     return {"pixel_values": pixel_values}
+
 
 # Log number of parameters function
 def get_num_parameters(model):
@@ -192,8 +196,9 @@ def get_num_parameters(model):
     for param in model.parameters():
         num_params += param.numel()
     # in million
-    num_params /= 10**6
+    num_params /= 10 ** 6
     return num_params
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -258,6 +263,7 @@ def main():
         data_files=data_args.data_files,
         cache_dir=model_args.cache_dir,
         use_auth_token=True if model_args.use_auth_token else None,
+        trust_remote_code=True,
     )
 
     # If we don't have a validation split, split off a percentage of train as validation.
@@ -291,10 +297,7 @@ def main():
 
     # adapt config
     config.update(
-        {
-            "mask_ratio": model_args.mask_ratio,
-            "norm_pix_loss": model_args.norm_pix_loss,
-        }
+        {"mask_ratio": model_args.mask_ratio, "norm_pix_loss": model_args.norm_pix_loss,}
     )
 
     # create image processor
@@ -305,9 +308,7 @@ def main():
     else:
         image_processor = ViTImageProcessor()
     config.update(
-        {
-            "image_size":image_processor.size["height"],
-        }
+        {"image_size": image_processor.size["height"],}
     )
     # create model
     if model_args.model_name_or_path:
@@ -325,7 +326,7 @@ def main():
 
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     if training_args.do_train:
         column_names = ds["train"].column_names
@@ -399,10 +400,10 @@ def main():
     )
     trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
-    #set the os enviroment for MLflowCallback
+    # set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
-    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"] = "False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"] = "True"
 
     # Training
     if training_args.do_train:

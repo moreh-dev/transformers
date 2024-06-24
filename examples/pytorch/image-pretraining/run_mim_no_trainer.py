@@ -22,6 +22,7 @@ from pathlib import Path
 import datasets
 import numpy as np
 import torch
+import transformers
 from accelerate import Accelerator, DistributedType
 from accelerate.utils import set_seed
 from datasets import load_dataset
@@ -29,8 +30,6 @@ from huggingface_hub import Repository
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
 from tqdm.auto import tqdm
-
-import transformers
 from transformers import (
     CONFIG_MAPPING,
     IMAGE_PROCESSOR_MAPPING,
@@ -43,7 +42,6 @@ from transformers import (
 )
 from transformers.utils import check_min_version, get_full_repo_name, send_example_telemetry
 from transformers.utils.versions import require_version
-
 
 """ Pre-training a 🤗 Transformers model for simple masked image modeling (SimMIM)
 without using HuggingFace Trainer.
@@ -66,10 +64,7 @@ def parse_args():
         description="Finetune a transformers model on a simple Masked Image Modeling task"
     )
     parser.add_argument(
-        "--dataset_name",
-        type=str,
-        default="cifar10",
-        help="Name of a dataset from the datasets package",
+        "--dataset_name", type=str, default="cifar10", help="Name of a dataset from the datasets package",
     )
     parser.add_argument(
         "--dataset_config_name",
@@ -84,34 +79,19 @@ def parse_args():
         help="The column name of the images in the files. If not set, will try to use 'image' or 'img'.",
     )
     parser.add_argument(
-        "--train_dir",
-        type=str,
-        default=None,
-        help="A folder containing the training data.",
+        "--train_dir", type=str, default=None, help="A folder containing the training data.",
     )
     parser.add_argument(
-        "--validation_dir",
-        type=None,
-        default=None,
-        help="A folder containing the validation data.",
+        "--validation_dir", type=None, default=None, help="A folder containing the validation data.",
     )
     parser.add_argument(
-        "--train_val_split",
-        type=float,
-        default=0.15,
-        help="Percent to split off of train for validation.",
+        "--train_val_split", type=float, default=0.15, help="Percent to split off of train for validation.",
     )
     parser.add_argument(
-        "--mask_patch_size",
-        type=int,
-        default=32,
-        help="The size of the square patches to use for masking.",
+        "--mask_patch_size", type=int, default=32, help="The size of the square patches to use for masking.",
     )
     parser.add_argument(
-        "--mask_ratio",
-        type=float,
-        default=0.6,
-        help="Percentage of patches to mask.",
+        "--mask_ratio", type=float, default=0.6, help="Percentage of patches to mask.",
     )
     parser.add_argument(
         "--max_train_samples",
@@ -181,10 +161,7 @@ def parse_args():
         help="Number of updates steps to accumulate before performing a backward/update pass.",
     )
     parser.add_argument(
-        "--image_processor_name",
-        type=str,
-        default=None,
-        help="Name or path of preprocessor config.",
+        "--image_processor_name", type=str, default=None, help="Name or path of preprocessor config.",
     )
     parser.add_argument(
         "--use_auth_token",
@@ -208,20 +185,13 @@ def parse_args():
         help="The size (resolution) of each patch. If not specified, will use `patch_size` of the configuration.",
     )
     parser.add_argument(
-        "--encoder_stride",
-        type=int,
-        default=None,
-        help={"help": "Stride to use for the encoder."},
+        "--encoder_stride", type=int, default=None, help={"help": "Stride to use for the encoder."},
     )
     parser.add_argument(
-        "--push_to_hub",
-        action="store_true",
-        help="Whether or not to push the model to the Hub.",
+        "--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.",
     )
     parser.add_argument(
-        "--with_tracking",
-        action="store_true",
-        help="Whether to enable experiment trackers for logging.",
+        "--with_tracking", action="store_true", help="Whether to enable experiment trackers for logging.",
     )
     parser.add_argument(
         "--report_to",
@@ -234,10 +204,7 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--seed",
-        type=int,
-        default=None,
-        help="A seed for reproducible training.",
+        "--seed", type=int, default=None, help="A seed for reproducible training.",
     )
     parser.add_argument(
         "--per_device_train_batch_size",
@@ -246,16 +213,10 @@ def parse_args():
         help="Batch size (per device) for the training dataloader.",
     )
     parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=5e-5,
-        help="The initial learning rate for [`AdamW`] optimizer.",
+        "--learning_rate", type=float, default=5e-5, help="The initial learning rate for [`AdamW`] optimizer.",
     )
     parser.add_argument(
-        "--weight_decay",
-        type=float,
-        default=0.0,
-        help="Weight decay to use.",
+        "--weight_decay", type=float, default=0.0, help="Weight decay to use.",
     )
     parser.add_argument(
         "--num_train_epochs",
@@ -277,10 +238,7 @@ def parse_args():
         choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
     )
     parser.add_argument(
-        "--num_warmup_steps",
-        type=int,
-        default=0,
-        help="Number of steps for the warmup in the lr scheduler.",
+        "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler.",
     )
     parser.add_argument(
         "--checkpointing_steps",
@@ -301,10 +259,7 @@ def parse_args():
         help="Batch size (per device) for the evaluation dataloader.",
     )
     parser.add_argument(
-        "--output_dir",
-        type=str,
-        default=None,
-        help="Where to store the final model.",
+        "--output_dir", type=str, default=None, help="Where to store the final model.",
     )
     args = parser.parse_args()
 
@@ -344,7 +299,7 @@ class MaskGenerator:
         self.rand_size = self.input_size // self.mask_patch_size
         self.scale = self.mask_patch_size // self.model_patch_size
 
-        self.token_count = self.rand_size**2
+        self.token_count = self.rand_size ** 2
         self.mask_count = int(np.ceil(self.token_count * self.mask_ratio))
 
     def __call__(self):
@@ -380,16 +335,11 @@ def main():
         accelerator_log_kwargs["log_with"] = args.report_to
         accelerator_log_kwargs["logging_dir"] = args.output_dir
 
-    accelerator = Accelerator(
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        **accelerator_log_kwargs,
-    )
+    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, **accelerator_log_kwargs,)
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO,
     )
     logger.info(accelerator.state)
     if accelerator.is_local_main_process:
@@ -468,11 +418,7 @@ def main():
     args.encoder_stride = args.encoder_stride if args.encoder_stride is not None else config.encoder_stride
 
     config.update(
-        {
-            "image_size": args.image_size,
-            "patch_size": args.patch_size,
-            "encoder_stride": args.encoder_stride,
-        }
+        {"image_size": args.image_size, "patch_size": args.patch_size, "encoder_stride": args.encoder_stride,}
     )
 
     # create image processor
@@ -552,16 +498,9 @@ def main():
 
     # DataLoaders creation:
     train_dataloader = DataLoader(
-        ds["train"],
-        shuffle=True,
-        collate_fn=collate_fn,
-        batch_size=args.per_device_train_batch_size,
+        ds["train"], shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size,
     )
-    eval_dataloader = DataLoader(
-        ds["validation"],
-        collate_fn=collate_fn,
-        batch_size=args.per_device_eval_batch_size,
-    )
+    eval_dataloader = DataLoader(ds["validation"], collate_fn=collate_fn, batch_size=args.per_device_eval_batch_size,)
 
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
@@ -571,10 +510,7 @@ def main():
             "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
             "weight_decay": args.weight_decay,
         },
-        {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
-            "weight_decay": 0.0,
-        },
+        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0,},
     ]
     optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
 
@@ -597,11 +533,7 @@ def main():
 
     # Prepare everything with our `accelerator`.
     model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
-        model,
-        optimizer,
-        train_dataloader,
-        eval_dataloader,
-        lr_scheduler,
+        model, optimizer, train_dataloader, eval_dataloader, lr_scheduler,
     )
 
     # On TPU, the tie weights in our model have been disconnected, so we need to restore the ties.

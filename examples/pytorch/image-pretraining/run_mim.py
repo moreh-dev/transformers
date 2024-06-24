@@ -16,16 +16,16 @@
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
-import time
 
+import mlflow
 import numpy as np
 import torch
+import transformers
 from datasets import load_dataset
 from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
-
-import transformers
 from transformers import (
     CONFIG_MAPPING,
     IMAGE_PROCESSOR_MAPPING,
@@ -35,15 +35,14 @@ from transformers import (
     AutoModelForMaskedImageModeling,
     HfArgumentParser,
     Trainer,
-    TrainingArguments,
     TrainerCallback,
-    TrainerState,
     TrainerControl,
+    TrainerState,
+    TrainingArguments,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-import mlflow
 
 """ Pre-training a 🤗 Transformers model for simple masked image modeling (SimMIM).
 Any model supported by the AutoModelForMaskedImageModeling API can be used.
@@ -54,8 +53,7 @@ logger = logging.getLogger(__name__)
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
 
-require_version("datasets>=1.8.0",
-                "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt")
+require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt")
 
 MODEL_CONFIG_CLASSES = list(MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
@@ -77,21 +75,16 @@ class DataTrainingArguments:
     )
     image_column_name: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "The column name of the images in the files. If not set, will try to use 'image' or 'img'."},
+        metadata={"help": "The column name of the images in the files. If not set, will try to use 'image' or 'img'."},
     )
-    train_dir: Optional[str] = field(
-        default=None, metadata={"help": "A folder containing the training data."})
-    validation_dir: Optional[str] = field(
-        default=None, metadata={"help": "A folder containing the validation data."})
+    train_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the training data."})
+    validation_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the validation data."})
     train_val_split: Optional[float] = field(
         default=0.15, metadata={"help": "Percent to split off of train for validation."}
     )
-    mask_patch_size: int = field(default=32, metadata={
-                                 "help": "The size of the square patches to use for masking."})
+    mask_patch_size: int = field(default=32, metadata={"help": "The size of the square patches to use for masking."})
     mask_ratio: float = field(
-        default=0.6,
-        metadata={"help": "Percentage of patches to mask."},
+        default=0.6, metadata={"help": "Percentage of patches to mask."},
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -139,8 +132,7 @@ class ModelArguments:
     )
     model_type: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "If training from scratch, pass a model type from the list: " + ", ".join(MODEL_TYPES)},
+        metadata={"help": "If training from scratch, pass a model type from the list: " + ", ".join(MODEL_TYPES)},
     )
     config_name_or_path: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
@@ -156,16 +148,13 @@ class ModelArguments:
     )
     cache_dir: Optional[str] = field(
         default=None,
-        metadata={
-            "help": "Where do you want to store (cache) the pretrained models/datasets downloaded from the hub"},
+        metadata={"help": "Where do you want to store (cache) the pretrained models/datasets downloaded from the hub"},
     )
     model_revision: str = field(
         default="main",
-        metadata={
-            "help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    image_processor_name: str = field(
-        default=None, metadata={"help": "Name or path of preprocessor config."})
+    image_processor_name: str = field(default=None, metadata={"help": "Name or path of preprocessor config."})
     use_auth_token: bool = field(
         default=False,
         metadata={
@@ -192,8 +181,7 @@ class ModelArguments:
         },
     )
     encoder_stride: Optional[int] = field(
-        default=None,
-        metadata={"help": "Stride to use for the encoder."},
+        default=None, metadata={"help": "Stride to use for the encoder."},
     )
 
 
@@ -214,13 +202,12 @@ class MaskGenerator:
         if self.input_size % self.mask_patch_size != 0:
             raise ValueError("Input size must be divisible by mask patch size")
         if self.mask_patch_size % self.model_patch_size != 0:
-            raise ValueError(
-                "Mask patch size must be divisible by model patch size")
+            raise ValueError("Mask patch size must be divisible by model patch size")
 
         self.rand_size = self.input_size // self.mask_patch_size
         self.scale = self.mask_patch_size // self.model_patch_size
 
-        self.token_count = self.rand_size**2
+        self.token_count = self.rand_size ** 2
         self.mask_count = int(np.ceil(self.token_count * self.mask_ratio))
 
     def __call__(self):
@@ -233,6 +220,7 @@ class MaskGenerator:
 
         return torch.tensor(mask.flatten())
 
+
 class TBTrainerCallback(TrainerCallback):
     "A callback log loss, learning rate, and throughput each logging step"
     start_time = time.time()
@@ -241,26 +229,28 @@ class TBTrainerCallback(TrainerCallback):
         # count the time after the logging step
         if state.global_step == 0 or state.global_step % args.logging_steps == 1:
             self.start_time = time.time()
-        
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        if args.logging_strategy == 'steps':
+
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if args.logging_strategy == "steps":
             logging_step_runtime = time.time() - self.start_time
             num_samples = args.per_device_train_batch_size * args.logging_steps
             throughput = num_samples / logging_step_runtime
-            if 'loss' in state.log_history[-1]:
+            if "loss" in state.log_history[-1]:
                 state.log_history[-1]["throughput"] = throughput
                 state.log_history[-1]["step"] = state.global_step
 
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"], step=state.global_step)
+                mlflow.log_metric("throughput", throughput, step=state.global_step)
+                print(
+                    f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}'
+                )
 
 
 def collate_fn(examples):
-    pixel_values = torch.stack([example["pixel_values"]
-                               for example in examples])
+    pixel_values = torch.stack([example["pixel_values"] for example in examples])
     mask = torch.stack([example["mask"] for example in examples])
     return {"pixel_values": pixel_values, "bool_masked_pos": mask}
+
 
 # Log number of parameters function
 
@@ -270,7 +260,7 @@ def get_num_parameters(model):
     for param in model.parameters():
         num_params += param.numel()
     # in million
-    num_params /= 10**6
+    num_params /= 10 ** 6
     return num_params
 
 
@@ -279,13 +269,11 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser(
-        (ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(
-            json_file=os.path.abspath(sys.argv[1]))
+        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
@@ -339,11 +327,11 @@ def main():
         data_files=data_args.data_files,
         cache_dir=model_args.cache_dir,
         use_auth_token=True if model_args.use_auth_token else None,
+        trust_remote_code=True,
     )
 
     # If we don't have a validation split, split off a percentage of train as validation.
-    data_args.train_val_split = None if "validation" in ds.keys(
-    ) else data_args.train_val_split
+    data_args.train_val_split = None if "validation" in ds.keys() else data_args.train_val_split
     if isinstance(data_args.train_val_split, float) and data_args.train_val_split > 0.0:
         split = ds["train"].train_test_split(data_args.train_val_split)
         ds["train"] = split["train"]
@@ -359,15 +347,12 @@ def main():
         "use_auth_token": True if model_args.use_auth_token else None,
     }
     if model_args.config_name_or_path:
-        config = AutoConfig.from_pretrained(
-            model_args.config_name_or_path, **config_kwargs)
+        config = AutoConfig.from_pretrained(model_args.config_name_or_path, **config_kwargs)
     elif model_args.model_name_or_path:
-        config = AutoConfig.from_pretrained(
-            model_args.model_name_or_path, **config_kwargs)
+        config = AutoConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
-        logger.warning(
-            "You are instantiating a new config instance from scratch.")
+        logger.warning("You are instantiating a new config instance from scratch.")
         if model_args.config_overrides is not None:
             logger.info(f"Overriding config: {model_args.config_overrides}")
             config.update_from_string(model_args.config_overrides)
@@ -394,11 +379,9 @@ def main():
 
     # create image processor
     if model_args.image_processor_name:
-        image_processor = AutoImageProcessor.from_pretrained(
-            model_args.image_processor_name, **config_kwargs)
+        image_processor = AutoImageProcessor.from_pretrained(model_args.image_processor_name, **config_kwargs)
     elif model_args.model_name_or_path:
-        image_processor = AutoImageProcessor.from_pretrained(
-            model_args.model_name_or_path, **config_kwargs)
+        image_processor = AutoImageProcessor.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         IMAGE_PROCESSOR_TYPES = {
             conf.model_type: image_processor_class for conf, image_processor_class in IMAGE_PROCESSOR_MAPPING.items()
@@ -420,7 +403,7 @@ def main():
         model = AutoModelForMaskedImageModeling.from_config(config)
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     if training_args.do_train:
         column_names = ds["train"].column_names
@@ -440,14 +423,11 @@ def main():
     # source: https://github.com/microsoft/SimMIM/blob/main/data/data_simmim.py
     transforms = Compose(
         [
-            Lambda(lambda img: img.convert("RGB")
-                   if img.mode != "RGB" else img),
-            RandomResizedCrop(model_args.image_size, scale=(
-                0.67, 1.0), ratio=(3.0 / 4.0, 4.0 / 3.0)),
+            Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+            RandomResizedCrop(model_args.image_size, scale=(0.67, 1.0), ratio=(3.0 / 4.0, 4.0 / 3.0)),
             RandomHorizontalFlip(),
             ToTensor(),
-            Normalize(mean=image_processor.image_mean,
-                      std=image_processor.image_std),
+            Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
         ]
     )
 
@@ -463,10 +443,8 @@ def main():
         """Preprocess a batch of images by applying transforms + creating a corresponding mask, indicating
         which patches to mask."""
 
-        examples["pixel_values"] = [transforms(
-            image) for image in examples[image_column_name]]
-        examples["mask"] = [mask_generator()
-                            for i in range(len(examples[image_column_name]))]
+        examples["pixel_values"] = [transforms(image) for image in examples[image_column_name]]
+        examples["mask"] = [mask_generator() for i in range(len(examples[image_column_name]))]
 
         return examples
 
@@ -474,8 +452,7 @@ def main():
         if "train" not in ds:
             raise ValueError("--do_train requires a train dataset")
         if data_args.max_train_samples is not None:
-            ds["train"] = ds["train"].shuffle(seed=training_args.seed).select(
-                range(data_args.max_train_samples))
+            ds["train"] = ds["train"].shuffle(seed=training_args.seed).select(range(data_args.max_train_samples))
         # Set the training transforms
         ds["train"].set_transform(preprocess_images)
 
@@ -484,8 +461,7 @@ def main():
             raise ValueError("--do_eval requires a validation dataset")
         if data_args.max_eval_samples is not None:
             ds["validation"] = (
-                ds["validation"].shuffle(seed=training_args.seed).select(
-                    range(data_args.max_eval_samples))
+                ds["validation"].shuffle(seed=training_args.seed).select(range(data_args.max_eval_samples))
             )
         # Set the validation transforms
         ds["validation"].set_transform(preprocess_images)

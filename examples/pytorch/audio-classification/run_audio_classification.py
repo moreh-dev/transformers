@@ -29,37 +29,37 @@ import mlflow
 import numpy as np
 import transformers
 from datasets import DatasetDict, load_dataset
-from transformers import (
-    AutoConfig,
-    AutoFeatureExtractor,
-    AutoModelForAudioClassification,
-    HfArgumentParser,
-    Trainer,
-    TrainerCallback,
-    TrainerControl,
-    TrainerState,
-    TrainingArguments,
-    set_seed,
-)
+from transformers import (AutoConfig, AutoFeatureExtractor,
+                          AutoModelForAudioClassification, HfArgumentParser,
+                          Trainer, TrainingArguments, set_seed)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.tbtrainercallback import TBTrainerCallback
+from utils.utils import get_num_parameters
 
 logger = logging.getLogger(__name__)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
 
-require_version("datasets>=1.14.0", "To fix: pip install -r examples/pytorch/audio-classification/requirements.txt")
+require_version(
+    "datasets>=1.14.0",
+    "To fix: pip install -r examples/pytorch/audio-classification/requirements.txt"
+)
 
 
-def random_subsample(wav: np.ndarray, max_length: float, sample_rate: int = 16000):
+def random_subsample(wav: np.ndarray,
+                     max_length: float,
+                     sample_rate: int = 16000):
     """Randomly sample chunks of `max_length` seconds from the input audio"""
     sample_length = int(round(sample_rate * max_length))
     if len(wav) <= sample_length:
         return wav
     random_offset = randint(0, len(wav) - sample_length - 1)
-    return wav[random_offset : random_offset + sample_length]
+    return wav[random_offset:random_offset + sample_length]
 
 
 @dataclass
@@ -71,58 +71,75 @@ class DataTrainingArguments:
     the command line.
     """
 
-    dataset_name: Optional[str] = field(default=None, metadata={"help": "Name of a dataset from the datasets package"})
+    dataset_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "Name of a dataset from the datasets package"})
     dataset_config_name: Optional[str] = field(
-        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
-    )
+        default=None,
+        metadata={
+            "help":
+            "The configuration name of the dataset to use (via the datasets library)."
+        })
     train_file: Optional[str] = field(
-        default=None, metadata={"help": "A file containing the training audio paths and labels."}
-    )
+        default=None,
+        metadata={
+            "help": "A file containing the training audio paths and labels."
+        })
     eval_file: Optional[str] = field(
-        default=None, metadata={"help": "A file containing the validation audio paths and labels."}
-    )
+        default=None,
+        metadata={
+            "help": "A file containing the validation audio paths and labels."
+        })
     train_split_name: str = field(
         default="train",
         metadata={
-            "help": "The name of the training data set split to use (via the datasets library). Defaults to 'train'"
+            "help":
+            "The name of the training data set split to use (via the datasets library). Defaults to 'train'"
         },
     )
     eval_split_name: str = field(
         default="validation",
         metadata={
-            "help": (
-                "The name of the training data set split to use (via the datasets library). Defaults to 'validation'"
-            )
+            "help":
+            ("The name of the training data set split to use (via the datasets library). Defaults to 'validation'"
+             )
         },
     )
     audio_column_name: str = field(
         default="audio",
-        metadata={"help": "The name of the dataset column containing the audio data. Defaults to 'audio'"},
+        metadata={
+            "help":
+            "The name of the dataset column containing the audio data. Defaults to 'audio'"
+        },
     )
     label_column_name: str = field(
-        default="label", metadata={"help": "The name of the dataset column containing the labels. Defaults to 'label'"}
-    )
+        default="label",
+        metadata={
+            "help":
+            "The name of the dataset column containing the labels. Defaults to 'label'"
+        })
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of training examples to this "
-                "value if set."
-            )
+            "help":
+            ("For debugging purposes or quicker training, truncate the number of training examples to this "
+             "value if set.")
         },
     )
     max_eval_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help": (
-                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-                "value if set."
-            )
+            "help":
+            ("For debugging purposes or quicker training, truncate the number of evaluation examples to this "
+             "value if set.")
         },
     )
     max_length_seconds: float = field(
         default=20,
-        metadata={"help": "Audio clips will be randomly cut to this length during training if the value is set."},
+        metadata={
+            "help":
+            "Audio clips will be randomly cut to this length during training if the value is set."
+        },
     )
 
 
@@ -134,42 +151,65 @@ class ModelArguments:
 
     model_name_or_path: str = field(
         default="facebook/wav2vec2-base",
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"},
+        metadata={
+            "help":
+            "Path to pretrained model or model identifier from huggingface.co/models"
+        },
     )
     config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
+        default=None,
+        metadata={
+            "help":
+            "Pretrained config name or path if not the same as model_name"
+        })
     cache_dir: Optional[str] = field(
-        default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from the Hub"}
-    )
+        default=None,
+        metadata={
+            "help":
+            "Where do you want to store the pretrained models downloaded from the Hub"
+        })
     model_revision: str = field(
         default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
+        metadata={
+            "help":
+            "The specific model version to use (can be a branch name, tag name or commit id)."
+        },
     )
     feature_extractor_name: Optional[str] = field(
-        default=None, metadata={"help": "Name or path of preprocessor config."}
-    )
+        default=None,
+        metadata={"help": "Name or path of preprocessor config."})
     freeze_feature_encoder: bool = field(
-        default=True, metadata={"help": "Whether to freeze the feature encoder layers of the model."}
-    )
+        default=True,
+        metadata={
+            "help":
+            "Whether to freeze the feature encoder layers of the model."
+        })
     attention_mask: bool = field(
-        default=True, metadata={"help": "Whether to generate an attention mask in the feature extractor."}
-    )
+        default=True,
+        metadata={
+            "help":
+            "Whether to generate an attention mask in the feature extractor."
+        })
     use_auth_token: bool = field(
         default=False,
         metadata={
-            "help": (
-                "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-                "with private models)."
-            )
+            "help":
+            ("Will use the token generated when running `huggingface-cli login` (necessary to use this script "
+             "with private models).")
         },
     )
     freeze_feature_extractor: Optional[bool] = field(
-        default=None, metadata={"help": "Whether to freeze the feature extractor layers of the model."}
-    )
+        default=None,
+        metadata={
+            "help":
+            "Whether to freeze the feature extractor layers of the model."
+        })
     ignore_mismatched_sizes: bool = field(
         default=False,
-        metadata={"help": "Will enable to load a pretrained model whose head dimensions are different."},
+        metadata={
+            "help":
+            "Will enable to load a pretrained model whose head dimensions are different."
+        },
     )
 
     def __post_init__(self):
@@ -184,43 +224,8 @@ class ModelArguments:
             raise ValueError(
                 "The argument `--freeze_feature_extractor` is deprecated and "
                 "should not be used in combination with `--freeze_feature_encoder`."
-                "Only make use of `--freeze_feature_encoder`."
-            )
+                "Only make use of `--freeze_feature_encoder`.")
 
-
-class TBTrainerCallback(TrainerCallback):
-    "A callback log loss, learning rate, and throughput each logging step"
-    start_time = time.time()
-
-    def on_step_begin(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        # count the time after the logging step
-        if state.global_step == 0 or state.global_step % args.logging_steps == 1:
-            self.start_time = time.time()
-
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
-        if args.logging_strategy == "steps":
-            logging_step_runtime = time.time() - self.start_time
-            num_samples = args.per_device_train_batch_size * args.logging_steps
-            throughput = num_samples / logging_step_runtime
-            if "loss" in state.log_history[-1]:
-                state.log_history[-1]["throughput"] = throughput
-                state.log_history[-1]["step"] = state.global_step
-
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"], step=state.global_step)
-                mlflow.log_metric("throughput", throughput, step=state.global_step)
-                print(
-                    f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}'
-                )
-
-
-# Log number of parameters function
-def get_num_parameters(model):
-    num_params = 0
-    for param in model.parameters():
-        num_params += param.numel()
-    # in million
-    num_params /= 10 ** 6
-    return num_params
 
 
 def main():
@@ -228,13 +233,16 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser(
+        (ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
+        model_args, data_args, training_args = parser.parse_json_file(
+            json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses(
+        )
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
@@ -260,7 +268,8 @@ def main():
     # Log on each process the small summary:
     logger.warning(
         f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu} "
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        +
+        f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
@@ -269,13 +278,15 @@ def main():
 
     # Detecting last checkpoint.
     last_checkpoint = None
-    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
+    if os.path.isdir(
+            training_args.output_dir
+    ) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
+        if last_checkpoint is None and len(os.listdir(
+                training_args.output_dir)) > 0:
             raise ValueError(
                 f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-                "Use --overwrite_output_dir to train from scratch."
-            )
+                "Use --overwrite_output_dir to train from scratch.")
         elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
             logger.info(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
@@ -303,15 +314,13 @@ def main():
         raise ValueError(
             f"--audio_column_name {data_args.audio_column_name} not found in dataset '{data_args.dataset_name}'. "
             "Make sure to set `--audio_column_name` to the correct audio column - one of "
-            f"{', '.join(raw_datasets['train'].column_names)}."
-        )
+            f"{', '.join(raw_datasets['train'].column_names)}.")
 
     if data_args.label_column_name not in raw_datasets["train"].column_names:
         raise ValueError(
             f"--label_column_name {data_args.label_column_name} not found in dataset '{data_args.dataset_name}'. "
             "Make sure to set `--label_column_name` to the correct text column - one of "
-            f"{', '.join(raw_datasets['train'].column_names)}."
-        )
+            f"{', '.join(raw_datasets['train'].column_names)}.")
 
     # Setting `return_attention_mask=True` is the way to get a correctly masked mean-pooling over
     # transformer outputs in the classifier, but it doesn't always lead to better accuracy
@@ -326,8 +335,8 @@ def main():
     # `datasets` takes care of automatically loading and resampling the audio,
     # so we just need to set the correct target sampling rate.
     raw_datasets = raw_datasets.cast_column(
-        data_args.audio_column_name, datasets.features.Audio(sampling_rate=feature_extractor.sampling_rate)
-    )
+        data_args.audio_column_name,
+        datasets.features.Audio(sampling_rate=feature_extractor.sampling_rate))
 
     model_input_name = feature_extractor.model_input_names[0]
 
@@ -335,17 +344,16 @@ def main():
         """Apply train_transforms across a batch."""
         subsampled_wavs = []
         for audio in batch[data_args.audio_column_name]:
-            wav = random_subsample(
-                audio["array"], max_length=data_args.max_length_seconds, sample_rate=feature_extractor.sampling_rate
-            )
+            wav = random_subsample(audio["array"],
+                                   max_length=data_args.max_length_seconds,
+                                   sample_rate=feature_extractor.sampling_rate)
             subsampled_wavs.append(wav)
         inputs = feature_extractor(
             subsampled_wavs,
             sampling_rate=feature_extractor.sampling_rate,
             max_length=16000,
             truncation=True,
-            padding=True,
-        )
+            padding=True)
         output_batch = {model_input_name: inputs.get(model_input_name)}
         output_batch["labels"] = list(batch[data_args.label_column_name])
 
@@ -355,8 +363,11 @@ def main():
         """Apply val_transforms across a batch."""
         wavs = [audio["array"] for audio in batch[data_args.audio_column_name]]
         inputs = feature_extractor(
-            wavs, sampling_rate=feature_extractor.sampling_rate, max_length=16000, truncation=True, padding=True
-        )
+            wavs,
+            sampling_rate=feature_extractor.sampling_rate,
+            max_length=16000,
+            truncation=True,
+            padding=True)
         output_batch = {model_input_name: inputs.get(model_input_name)}
         output_batch["labels"] = list(batch[data_args.label_column_name])
 
@@ -378,7 +389,8 @@ def main():
     def compute_metrics(eval_pred):
         """Computes accuracy on a batch of predictions"""
         predictions = np.argmax(eval_pred.predictions, axis=1)
-        return metric.compute(predictions=predictions, references=eval_pred.label_ids)
+        return metric.compute(predictions=predictions,
+                              references=eval_pred.label_ids)
 
     config = AutoConfig.from_pretrained(
         model_args.config_name or model_args.model_name_or_path,
@@ -409,35 +421,33 @@ def main():
 
     if training_args.do_train:
         if data_args.max_train_samples is not None:
-            raw_datasets["train"] = (
-                raw_datasets["train"].shuffle(seed=training_args.seed).select(range(data_args.max_train_samples))
-            )
+            raw_datasets["train"] = (raw_datasets["train"].shuffle(
+                seed=training_args.seed).select(
+                    range(data_args.max_train_samples)))
         # Set the training transforms
-        raw_datasets["train"].set_transform(train_transforms, output_all_columns=False)
+        raw_datasets["train"].set_transform(train_transforms,
+                                            output_all_columns=False)
 
     if training_args.do_eval:
         if data_args.max_eval_samples is not None:
-            raw_datasets["eval"] = (
-                raw_datasets["eval"].shuffle(seed=training_args.seed).select(range(data_args.max_eval_samples))
-            )
+            raw_datasets["eval"] = (raw_datasets["eval"].shuffle(
+                seed=training_args.seed).select(
+                    range(data_args.max_eval_samples)))
         # Set the validation transforms
-        raw_datasets["eval"].set_transform(val_transforms, output_all_columns=False)
+        raw_datasets["eval"].set_transform(val_transforms,
+                                           output_all_columns=False)
 
     # Initialize our trainer
     trainer = Trainer(
         model=model,
         args=training_args,
-        train_dataset=raw_datasets["train"] if training_args.do_train else None,
+        train_dataset=raw_datasets["train"]
+        if training_args.do_train else None,
         eval_dataset=raw_datasets["eval"] if training_args.do_eval else None,
         compute_metrics=compute_metrics,
         tokenizer=feature_extractor,
     )
     trainer.add_callback(TBTrainerCallback)
-    # Mlflow initial
-    # set the os enviroment for MLflowCallback
-    os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"] = "False"
-    os.environ["MLFLOW_FLATTEN_PARAMS"] = "True"
 
     # Training
     if training_args.do_train:

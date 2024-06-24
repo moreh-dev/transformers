@@ -18,37 +18,36 @@ import logging
 import os
 import random
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
-import time
 
 import evaluate
+import mlflow
 import numpy as np
 import torch
+import transformers
 from datasets import load_dataset
 from huggingface_hub import hf_hub_download
 from PIL import Image
 from torch import nn
 from torchvision import transforms
 from torchvision.transforms import functional
-
-import transformers
 from transformers import (
     AutoConfig,
     AutoImageProcessor,
     AutoModelForSemanticSegmentation,
     HfArgumentParser,
     Trainer,
-    TrainingArguments,
     TrainerCallback,
-    TrainerState,
     TrainerControl,
+    TrainerState,
+    TrainingArguments,
     default_data_collator,
 )
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-import mlflow
 
 """ Finetuning any 🤗 Transformers model supported by AutoModelForSemanticSegmentation for semantic segmentation leveraging the Trainer API."""
 
@@ -213,8 +212,7 @@ class DataTrainingArguments:
         },
     )
     reduce_labels: Optional[bool] = field(
-        default=False,
-        metadata={"help": "Whether or not to reduce all labels by 1 and replace background by 255."},
+        default=False, metadata={"help": "Whether or not to reduce all labels by 1 and replace background by 255."},
     )
 
     def __post_init__(self):
@@ -255,6 +253,7 @@ class ModelArguments:
         },
     )
 
+
 class TBTrainerCallback(TrainerCallback):
     "A callback log loss, learning rate, and throughput each logging step"
     start_time = time.time()
@@ -263,19 +262,22 @@ class TBTrainerCallback(TrainerCallback):
         # count the time after the logging step
         if state.global_step == 0 or state.global_step % args.logging_steps == 1:
             self.start_time = time.time()
-        
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        if args.logging_strategy == 'steps':
+
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if args.logging_strategy == "steps":
             logging_step_runtime = time.time() - self.start_time
             num_samples = args.per_device_train_batch_size * args.logging_steps
             throughput = num_samples / logging_step_runtime
-            if 'loss' in state.log_history[-1]:
+            if "loss" in state.log_history[-1]:
                 state.log_history[-1]["throughput"] = throughput
                 state.log_history[-1]["step"] = state.global_step
 
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"], step=state.global_step)
+                mlflow.log_metric("throughput", throughput, step=state.global_step)
+                print(
+                    f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}'
+                )
+
 
 # Log number of parameters function
 def get_num_parameters(model):
@@ -283,8 +285,9 @@ def get_num_parameters(model):
     for param in model.parameters():
         num_params += param.numel()
     # in million
-    num_params /= 10**6
+    num_params /= 10 ** 6
     return num_params
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -346,7 +349,7 @@ def main():
     # In distributed training, the load_dataset function guarantees that only one local process can concurrently
     # download the dataset.
     # TODO support datasets from local folders
-    dataset = load_dataset(data_args.dataset_name, cache_dir=model_args.cache_dir)
+    dataset = load_dataset(data_args.dataset_name, cache_dir=model_args.cache_dir, trust_remote_code=True)
 
     # Rename column names to standardized names (only "image" and "label" need to be present)
     if "pixel_values" in dataset["train"].column_names:
@@ -384,10 +387,7 @@ def main():
         logits_tensor = torch.from_numpy(logits)
         # scale the logits to the size of the label
         logits_tensor = nn.functional.interpolate(
-            logits_tensor,
-            size=labels.shape[-2:],
-            mode="bilinear",
-            align_corners=False,
+            logits_tensor, size=labels.shape[-2:], mode="bilinear", align_corners=False,
         ).argmax(dim=1)
 
         pred_labels = logits_tensor.detach().cpu().numpy()
@@ -426,8 +426,8 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
-    
+    mlflow.log_param("num_params", num_params)
+
     image_processor = AutoImageProcessor.from_pretrained(
         model_args.image_processor_name or model_args.model_name_or_path,
         cache_dir=model_args.cache_dir,
@@ -525,10 +525,10 @@ def main():
     )
     trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
-    #set the os enviroment for MLflowCallback
+    # set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
-    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"] = "False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"] = "True"
 
     # Training
     if training_args.do_train:

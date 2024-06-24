@@ -21,33 +21,25 @@ Fine-tuning the library's seq2seq models for question answering using the 🤗 S
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
-import time
 
 import datasets
 import evaluate
+import mlflow
 import numpy as np
+import transformers
 from datasets import load_dataset
 from trainer_seq2seq_qa import QuestionAnsweringSeq2SeqTrainer
-
-import transformers
-from transformers import (
-    AutoConfig,
-    AutoModelForSeq2SeqLM,
-    AutoTokenizer,
-    DataCollatorForSeq2Seq,
-    HfArgumentParser,
-    Seq2SeqTrainingArguments,
-    TrainerCallback,
-    TrainerState,
-    TrainerControl,
-    set_seed,
-)
-from transformers.trainer_utils import EvalLoopOutput, EvalPrediction, get_last_checkpoint
+from transformers import (AutoConfig, AutoModelForSeq2SeqLM, AutoTokenizer,
+                          DataCollatorForSeq2Seq, HfArgumentParser,
+                          Seq2SeqTrainingArguments, TrainerCallback,
+                          TrainerControl, TrainerState, set_seed)
+from transformers.trainer_utils import (EvalLoopOutput, EvalPrediction,
+                                        get_last_checkpoint)
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-import mlflow
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
@@ -132,8 +124,7 @@ class DataTrainingArguments:
         default=False, metadata={"help": "Overwrite the cached training and evaluation sets"}
     )
     preprocessing_num_workers: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of processes to use for the preprocessing."},
+        default=None, metadata={"help": "The number of processes to use for the preprocessing."},
     )
     max_seq_length: int = field(
         default=384,
@@ -263,26 +254,31 @@ question_answering_column_name_mapping = {
     "squad_v2": ("question", "context", "answer"),
 }
 
+
 class TBTrainerCallback(TrainerCallback):
     "A callback log loss, learning rate, and throughput each logging step"
     start_time = time.time()
+
     def on_step_begin(self, args: Seq2SeqTrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
         # count the time after the logging step
         if state.global_step == 0 or state.global_step % args.logging_steps == 1:
             self.start_time = time.time()
-        
-    def on_log(self, args: Seq2SeqTrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        if args.logging_strategy == 'steps':
+
+    def on_log(self, args: Seq2SeqTrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if args.logging_strategy == "steps":
             logging_step_runtime = time.time() - self.start_time
             num_samples = args.per_device_train_batch_size * args.logging_steps
             throughput = num_samples / logging_step_runtime
-            if 'loss' in state.log_history[-1]:
+            if "loss" in state.log_history[-1]:
                 state.log_history[-1]["throughput"] = throughput
                 state.log_history[-1]["step"] = state.global_step
 
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"], step=state.global_step)
+                mlflow.log_metric("throughput", throughput, step=state.global_step)
+                print(
+                    f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}'
+                )
+
 
 # Log number of parameters function
 def get_num_parameters(model):
@@ -290,8 +286,9 @@ def get_num_parameters(model):
     for param in model.parameters():
         num_params += param.numel()
     # in million
-    num_params /= 10**6
+    num_params /= 10 ** 6
     return num_params
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -369,6 +366,7 @@ def main():
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     else:
         data_files = {}
@@ -387,6 +385,7 @@ def main():
             field="data",
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
@@ -419,7 +418,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -487,10 +486,7 @@ def main():
     max_seq_length = min(data_args.max_seq_length, tokenizer.model_max_length)
 
     def preprocess_squad_batch(
-        examples,
-        question_column: str,
-        context_column: str,
-        answer_column: str,
+        examples, question_column: str, context_column: str, answer_column: str,
     ) -> Tuple[List[str], List[str]]:
         questions = examples[question_column]
         contexts = examples[context_column]
@@ -690,10 +686,10 @@ def main():
     )
     trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
-    #set the os enviroment for MLflowCallback
+    # set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
-    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"    
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"] = "False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"] = "True"
 
     # Training
     if training_args.do_train:

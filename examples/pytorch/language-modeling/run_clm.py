@@ -25,17 +25,19 @@ import logging
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Optional
-import time
 
 import datasets
 import evaluate
-import torch
-from datasets import load_dataset
 
+# Initialize MLFlow
+import mlflow
+import torch
 import transformers
+from datasets import load_dataset
 from transformers import (
     CONFIG_MAPPING,
     MODEL_FOR_CAUSAL_LM_MAPPING,
@@ -44,10 +46,10 @@ from transformers import (
     AutoTokenizer,
     HfArgumentParser,
     Trainer,
-    TrainingArguments,
     TrainerCallback,
-    TrainerState,
     TrainerControl,
+    TrainerState,
+    TrainingArguments,
     default_data_collator,
     is_torch_tpu_available,
     set_seed,
@@ -56,8 +58,6 @@ from transformers.testing_utils import CaptureLogger
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
-# Initialize MLFlow
-import mlflow
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.29.0")
@@ -78,7 +78,7 @@ class ModelArguments:
     """
 
     model_name_or_path: Optional[str] = field(
-        default='microsoft/prophetnet-large-uncased',
+        default="microsoft/prophetnet-large-uncased",
         metadata={
             "help": (
                 "The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
@@ -162,7 +162,8 @@ class DataTrainingArguments:
         default="wikitext", metadata={"help": "The name of the dataset to use (via the datasets library)."}
     )
     dataset_config_name: Optional[str] = field(
-        default="wikitext-2-raw-v1", metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+        default="wikitext-2-raw-v1",
+        metadata={"help": "The configuration name of the dataset to use (via the datasets library)."},
     )
     train_file: Optional[str] = field(default=None, metadata={"help": "The input training data file (a text file)."})
     validation_file: Optional[str] = field(
@@ -208,8 +209,7 @@ class DataTrainingArguments:
         },
     )
     preprocessing_num_workers: Optional[int] = field(
-        default=None,
-        metadata={"help": "The number of processes to use for the preprocessing."},
+        default=None, metadata={"help": "The number of processes to use for the preprocessing."},
     )
     keep_linebreaks: bool = field(
         default=True, metadata={"help": "Whether to keep line breaks when using TXT files or not."}
@@ -229,6 +229,7 @@ class DataTrainingArguments:
                 extension = self.validation_file.split(".")[-1]
                 assert extension in ["csv", "json", "txt"], "`validation_file` should be a csv, a json or a txt file."
 
+
 class TBTrainerCallback(TrainerCallback):
     "A callback log loss, learning rate, and throughput each logging step"
     start_time = time.time()
@@ -237,19 +238,22 @@ class TBTrainerCallback(TrainerCallback):
         # count the time after the logging step
         if state.global_step == 0 or state.global_step % args.logging_steps == 1:
             self.start_time = time.time()
-        
-    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl,**kwargs):
-        if args.logging_strategy == 'steps':
+
+    def on_log(self, args: TrainingArguments, state: TrainerState, control: TrainerControl, **kwargs):
+        if args.logging_strategy == "steps":
             logging_step_runtime = time.time() - self.start_time
             num_samples = args.per_device_train_batch_size * args.logging_steps
             throughput = num_samples / logging_step_runtime
-            if 'loss' in state.log_history[-1]:
+            if "loss" in state.log_history[-1]:
                 state.log_history[-1]["throughput"] = throughput
                 state.log_history[-1]["step"] = state.global_step
 
-                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"] , step=state.global_step)
-                mlflow.log_metric("throughput", throughput , step=state.global_step)
-                print(f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}')       
+                mlflow.log_metric("lr", state.log_history[-1]["learning_rate"], step=state.global_step)
+                mlflow.log_metric("throughput", throughput, step=state.global_step)
+                print(
+                    f'loss: {state.log_history[-1]["loss"]}, lr: {state.log_history[-1]["learning_rate"]}, throughput: {throughput}, step: {state.global_step}'
+                )
+
 
 # Log number of parameters function
 def get_num_parameters(model):
@@ -257,8 +261,9 @@ def get_num_parameters(model):
     for param in model.parameters():
         num_params += param.numel()
     # in million
-    num_params /= 10**6
+    num_params /= 10 ** 6
     return num_params
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -337,6 +342,7 @@ def main():
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
             streaming=data_args.streaming,
+            trust_remote_code=True,
         )
         if "validation" not in raw_datasets.keys():
             raw_datasets["validation"] = load_dataset(
@@ -346,6 +352,7 @@ def main():
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
                 streaming=data_args.streaming,
+                trust_remote_code=True,
             )
             raw_datasets["train"] = load_dataset(
                 data_args.dataset_name,
@@ -354,6 +361,7 @@ def main():
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
                 streaming=data_args.streaming,
+                trust_remote_code=True,
             )
     else:
         data_files = {}
@@ -375,6 +383,7 @@ def main():
             data_files=data_files,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
             **dataset_args,
         )
         # If no validation data is there, validation_split_percentage will be used to divide the dataset.
@@ -385,6 +394,7 @@ def main():
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
                 **dataset_args,
             )
             raw_datasets["train"] = load_dataset(
@@ -393,6 +403,7 @@ def main():
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
                 **dataset_args,
             )
 
@@ -460,7 +471,7 @@ def main():
         logger.info(f"Training new model from scratch - Total size={n_params/2**20:.2f}M params")
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -501,11 +512,7 @@ def main():
                 desc="Running tokenizer on dataset",
             )
         else:
-            tokenized_datasets = raw_datasets.map(
-                tokenize_function,
-                batched=True,
-                remove_columns=column_names,
-            )
+            tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, remove_columns=column_names,)
 
     if data_args.block_size is None:
         block_size = tokenizer.model_max_length
@@ -558,10 +565,7 @@ def main():
                 desc=f"Grouping texts in chunks of {block_size}",
             )
         else:
-            lm_datasets = tokenized_datasets.map(
-                group_texts,
-                batched=True,
-            )
+            lm_datasets = tokenized_datasets.map(group_texts, batched=True,)
 
     if training_args.do_train:
         if "train" not in tokenized_datasets:
@@ -612,10 +616,10 @@ def main():
     )
     trainer.add_callback(TBTrainerCallback)
     # Mlflow initial
-    #set the os enviroment for MLflowCallback
+    # set the os enviroment for MLflowCallback
     os.environ["DISABLE_MLFLOW_INTEGRATION"] = "False"
-    os.environ["HF_MLFLOW_LOG_ARTIFACTS"]="False"
-    os.environ["MLFLOW_FLATTEN_PARAMS"]="True"
+    os.environ["HF_MLFLOW_LOG_ARTIFACTS"] = "False"
+    os.environ["MLFLOW_FLATTEN_PARAMS"] = "True"
 
     # Training
     if training_args.do_train:

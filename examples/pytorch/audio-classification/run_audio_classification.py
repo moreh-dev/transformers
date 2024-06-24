@@ -17,6 +17,7 @@
 import logging
 import os
 import sys
+import time
 import warnings
 from dataclasses import dataclass, field
 from random import randint
@@ -226,6 +227,7 @@ class ModelArguments:
                 "Only make use of `--freeze_feature_encoder`.")
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -298,12 +300,14 @@ def main():
         data_args.dataset_config_name,
         split=data_args.train_split_name,
         use_auth_token=True if model_args.use_auth_token else None,
+        trust_remote_code=True,
     )
     raw_datasets["eval"] = load_dataset(
         data_args.dataset_name,
         data_args.dataset_config_name,
         split=data_args.eval_split_name,
         use_auth_token=True if model_args.use_auth_token else None,
+        trust_remote_code=True,
     )
 
     if data_args.audio_column_name not in raw_datasets["train"].column_names:
@@ -409,7 +413,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # freeze the convolutional waveform encoder
     if model_args.freeze_feature_encoder:

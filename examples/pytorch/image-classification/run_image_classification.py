@@ -16,6 +16,7 @@
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -47,6 +48,7 @@ logger = logging.getLogger(__name__)
 # use relaxed_fp32 option
 try:
     from moreh.driver.common.config import set_backend_config
+
     set_backend_config("allow_relaxed_fp32", True)
     print("Setting `allow_relaxed_fp32` in the backend")
 except ImportError:
@@ -192,6 +194,7 @@ def collate_fn(examples):
     return {"pixel_values": pixel_values, "labels": labels}
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -264,6 +267,7 @@ def main():
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     else:
         data_files = {}
@@ -273,9 +277,7 @@ def main():
             data_files["validation"] = os.path.join(data_args.validation_dir,
                                                     "**")
         dataset = load_dataset(
-            "imagefolder",
-            data_files=data_files,
-            cache_dir=model_args.cache_dir,
+            "imagefolder", data_files=data_files, cache_dir=model_args.cache_dir, trust_remote_code=True,
         )
 
     # If we don't have a validation split, split off a percentage of train as validation.
@@ -332,7 +334,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # Define torchvision transforms to be applied to each image.
     if "shortest_edge" in image_processor.size:
@@ -420,7 +422,7 @@ def main():
     # Evaluation
     if training_args.do_eval:
         metrics = trainer.evaluate()
-        metrics['throughput'] = metrics['eval_samples_per_second']
+        metrics["throughput"] = metrics["eval_samples_per_second"]
         trainer.log_metrics("eval", metrics)
         trainer.save_metrics("eval", metrics)
 

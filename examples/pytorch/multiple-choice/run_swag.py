@@ -21,6 +21,7 @@ Fine-tuning the library models for multiple choice.
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Optional, Union
@@ -237,6 +238,7 @@ class DataCollatorForMultipleChoice:
         return batch
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -324,6 +326,7 @@ def main():
             data_files=data_files,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     else:
         # Downloading and loading the swag dataset from the hub.
@@ -332,6 +335,7 @@ def main():
             "regular",
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
@@ -366,7 +370,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # When using your own dataset or a different dataset from swag, you will probably need to change this.
     ending_names = [f"ending{i}" for i in range(4)]

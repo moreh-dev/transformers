@@ -16,6 +16,7 @@
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -95,8 +96,7 @@ class DataTrainingArguments:
             "help": "The size of the square patches to use for masking."
         })
     mask_ratio: float = field(
-        default=0.6,
-        metadata={"help": "Percentage of patches to mask."},
+        default=0.6, metadata={"help": "Percentage of patches to mask."},
     )
     max_train_samples: Optional[int] = field(
         default=None,
@@ -204,8 +204,7 @@ class ModelArguments:
         },
     )
     encoder_stride: Optional[int] = field(
-        default=None,
-        metadata={"help": "Stride to use for the encoder."},
+        default=None, metadata={"help": "Stride to use for the encoder."},
     )
 
 
@@ -230,13 +229,12 @@ class MaskGenerator:
         if self.input_size % self.mask_patch_size != 0:
             raise ValueError("Input size must be divisible by mask patch size")
         if self.mask_patch_size % self.model_patch_size != 0:
-            raise ValueError(
-                "Mask patch size must be divisible by model patch size")
+            raise ValueError("Mask patch size must be divisible by model patch size")
 
         self.rand_size = self.input_size // self.mask_patch_size
         self.scale = self.mask_patch_size // self.model_patch_size
 
-        self.token_count = self.rand_size**2
+        self.token_count = self.rand_size ** 2
         self.mask_count = int(np.ceil(self.token_count * self.mask_ratio))
 
     def __call__(self):
@@ -265,13 +263,11 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser(
-        (ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(
-            json_file=os.path.abspath(sys.argv[1]))
+        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses(
         )
@@ -329,6 +325,7 @@ def main():
         data_files=data_args.data_files,
         cache_dir=model_args.cache_dir,
         use_auth_token=True if model_args.use_auth_token else None,
+        trust_remote_code=True,
     )
 
     # If we don't have a validation split, split off a percentage of train as validation.
@@ -357,8 +354,7 @@ def main():
                                             **config_kwargs)
     else:
         config = CONFIG_MAPPING[model_args.model_type]()
-        logger.warning(
-            "You are instantiating a new config instance from scratch.")
+        logger.warning("You are instantiating a new config instance from scratch.")
         if model_args.config_overrides is not None:
             logger.info(f"Overriding config: {model_args.config_overrides}")
             config.update_from_string(model_args.config_overrides)
@@ -383,11 +379,9 @@ def main():
 
     # create image processor
     if model_args.image_processor_name:
-        image_processor = AutoImageProcessor.from_pretrained(
-            model_args.image_processor_name, **config_kwargs)
+        image_processor = AutoImageProcessor.from_pretrained(model_args.image_processor_name, **config_kwargs)
     elif model_args.model_name_or_path:
-        image_processor = AutoImageProcessor.from_pretrained(
-            model_args.model_name_or_path, **config_kwargs)
+        image_processor = AutoImageProcessor.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         IMAGE_PROCESSOR_TYPES = {
             conf.model_type: image_processor_class
@@ -410,7 +404,7 @@ def main():
         model = AutoModelForMaskedImageModeling.from_config(config)
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     if training_args.do_train:
         column_names = ds["train"].column_names
@@ -464,8 +458,7 @@ def main():
         if "train" not in ds:
             raise ValueError("--do_train requires a train dataset")
         if data_args.max_train_samples is not None:
-            ds["train"] = ds["train"].shuffle(seed=training_args.seed).select(
-                range(data_args.max_train_samples))
+            ds["train"] = ds["train"].shuffle(seed=training_args.seed).select(range(data_args.max_train_samples))
         # Set the training transforms
         ds["train"].set_transform(preprocess_images)
 

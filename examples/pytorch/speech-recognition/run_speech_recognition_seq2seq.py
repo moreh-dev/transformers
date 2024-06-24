@@ -22,6 +22,7 @@ Fine-tuning the library models for sequence to sequence speech recognition.
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
@@ -243,8 +244,7 @@ class DataTrainingArguments:
         },
     )
     do_lower_case: bool = field(
-        default=True,
-        metadata={"help": "Whether the target text should be lower cased."},
+        default=True, metadata={"help": "Whether the target text should be lower cased."},
     )
     language: str = field(
         default=None,
@@ -316,6 +316,7 @@ class DataCollatorSpeechSeq2SeqWithPadding:
         batch["labels"] = labels
 
         return batch
+
 
 
 def main():
@@ -398,6 +399,7 @@ def main():
             split=data_args.train_split_name,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
 
     if training_args.do_eval:
@@ -407,6 +409,7 @@ def main():
             split=data_args.eval_split_name,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
 
     if data_args.audio_column_name not in next(iter(
@@ -468,7 +471,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     if model.config.decoder_start_token_id is None:
         raise ValueError(
@@ -551,9 +554,7 @@ def main():
         return length > min_input_length and length < max_input_length
 
     vectorized_datasets = vectorized_datasets.filter(
-        is_audio_in_length_range,
-        num_proc=num_workers,
-        input_columns=["input_length"],
+        is_audio_in_length_range, num_proc=num_workers, input_columns=["input_length"],
     )
 
     # for large datasets it is advised to run the preprocessing on a

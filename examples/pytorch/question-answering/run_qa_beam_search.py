@@ -21,6 +21,7 @@ Fine-tuning XLNet for question answering with beam search using a slightly adapt
 import logging
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -247,6 +248,7 @@ class DataTrainingArguments:
                 ], "`test_file` should be a csv or a json file."
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -329,6 +331,7 @@ def main():
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     else:
         data_files = {}
@@ -347,6 +350,7 @@ def main():
             field="data",
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
@@ -380,7 +384,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # Preprocessing the datasets.
     # Preprocessing is slighlty different for training and evaluation.

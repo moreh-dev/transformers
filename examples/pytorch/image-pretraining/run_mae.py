@@ -191,6 +191,7 @@ def collate_fn(examples):
     return {"pixel_values": pixel_values}
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -260,6 +261,7 @@ def main():
         data_files=data_args.data_files,
         cache_dir=model_args.cache_dir,
         use_auth_token=True if model_args.use_auth_token else None,
+        trust_remote_code=True,
     )
 
     # If we don't have a validation split, split off a percentage of train as validation.
@@ -330,7 +332,7 @@ def main():
 
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     if training_args.do_train:
         column_names = ds["train"].column_names

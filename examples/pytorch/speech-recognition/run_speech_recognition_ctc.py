@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import sys
+import time
 import warnings
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Union
@@ -281,16 +282,13 @@ class DataTrainingArguments:
         },
     )
     unk_token: str = field(
-        default="[UNK]",
-        metadata={"help": "The unk token for the tokenizer"},
+        default="[UNK]", metadata={"help": "The unk token for the tokenizer"},
     )
     pad_token: str = field(
-        default="[PAD]",
-        metadata={"help": "The padding token for the tokenizer"},
+        default="[PAD]", metadata={"help": "The padding token for the tokenizer"},
     )
     word_delimiter_token: str = field(
-        default="|",
-        metadata={"help": "The word delimiter token for the tokenizer"},
+        default="|", metadata={"help": "The word delimiter token for the tokenizer"},
     )
     phoneme_language: Optional[str] = field(
         default=None,
@@ -347,10 +345,7 @@ class DataCollatorCTCWithPadding:
         } for feature in features]
 
         batch = self.processor.pad(
-            input_features,
-            padding=self.padding,
-            pad_to_multiple_of=self.pad_to_multiple_of,
-            return_tensors="pt",
+            input_features, padding=self.padding, pad_to_multiple_of=self.pad_to_multiple_of, return_tensors="pt",
         )
 
         labels_batch = self.processor.pad(
@@ -369,6 +364,7 @@ class DataCollatorCTCWithPadding:
             batch["attention_mask"] = batch["attention_mask"].to(torch.long)
 
         return batch
+
 
 
 def create_vocabulary_from_data(
@@ -482,6 +478,7 @@ def main():
             data_args.dataset_config_name,
             split=data_args.train_split_name,
             use_auth_token=data_args.use_auth_token,
+            trust_remote_code=True,
         )
 
         if data_args.audio_column_name not in raw_datasets[
@@ -508,6 +505,7 @@ def main():
             data_args.dataset_config_name,
             split=data_args.eval_split_name,
             use_auth_token=data_args.use_auth_token,
+            trust_remote_code=True,
         )
 
         if data_args.max_eval_samples is not None:
@@ -580,10 +578,7 @@ def main():
             if not os.path.isfile(vocab_file):
                 os.makedirs(tokenizer_name_or_path, exist_ok=True)
                 vocab_dict = create_vocabulary_from_data(
-                    raw_datasets,
-                    word_delimiter_token=word_delimiter_token,
-                    unk_token=unk_token,
-                    pad_token=pad_token,
+                    raw_datasets, word_delimiter_token=word_delimiter_token, unk_token=unk_token, pad_token=pad_token,
                 )
 
                 # save vocab dict to be loaded into tokenizer
@@ -611,9 +606,7 @@ def main():
 
     # load feature_extractor and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_name_or_path,
-        use_auth_token=data_args.use_auth_token,
-        **tokenizer_kwargs,
+        tokenizer_name_or_path, use_auth_token=data_args.use_auth_token, **tokenizer_kwargs,
     )
     feature_extractor = AutoFeatureExtractor.from_pretrained(
         model_args.model_name_or_path,
@@ -652,7 +645,7 @@ def main():
 
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # 6. Now we preprocess the datasets including loading the audio, resampling and normalization
     # Thankfully, `datasets` takes care of automatically loading and resampling the audio,
@@ -710,9 +703,7 @@ def main():
 
         # filter data that is shorter than min_input_length
         vectorized_datasets = vectorized_datasets.filter(
-            is_audio_in_length_range,
-            num_proc=num_workers,
-            input_columns=["input_length"],
+            is_audio_in_length_range, num_proc=num_workers, input_columns=["input_length"],
         )
 
     # 7. Next, we can prepare the training.

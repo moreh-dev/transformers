@@ -22,6 +22,7 @@ import logging
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Optional
@@ -252,6 +253,7 @@ class DataTrainingArguments:
                 ], "`validation_file` should be a csv, a json or a txt file."
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -334,6 +336,7 @@ def main():
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
         if "validation" not in raw_datasets.keys():
             raw_datasets["validation"] = load_dataset(
@@ -342,6 +345,7 @@ def main():
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
             raw_datasets["train"] = load_dataset(
                 data_args.dataset_name,
@@ -349,6 +353,7 @@ def main():
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
     else:
         data_files = {}
@@ -370,6 +375,7 @@ def main():
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
             raw_datasets["train"] = load_dataset(
                 extension,
@@ -377,6 +383,7 @@ def main():
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
 
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
@@ -441,7 +448,7 @@ def main():
 
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -563,9 +570,7 @@ def main():
 
     # Data collator
     data_collator = DataCollatorForPermutationLanguageModeling(
-        tokenizer=tokenizer,
-        plm_probability=data_args.plm_probability,
-        max_span_length=data_args.max_span_length,
+        tokenizer=tokenizer, plm_probability=data_args.plm_probability, max_span_length=data_args.max_span_length,
     )
 
     # Initialize our Trainer

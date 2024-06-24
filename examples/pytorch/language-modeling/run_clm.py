@@ -25,6 +25,7 @@ import logging
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Optional
@@ -71,7 +72,7 @@ class ModelArguments:
     """
 
     model_name_or_path: Optional[str] = field(
-        default='microsoft/prophetnet-large-uncased',
+        default="microsoft/prophetnet-large-uncased",
         metadata={
             "help":
             ("The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
@@ -263,6 +264,7 @@ class DataTrainingArguments:
                 ], "`validation_file` should be a csv, a json or a txt file."
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -346,6 +348,7 @@ def main():
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
             streaming=data_args.streaming,
+            trust_remote_code=True,
         )
         if "validation" not in raw_datasets.keys():
             raw_datasets["validation"] = load_dataset(
@@ -355,6 +358,7 @@ def main():
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
                 streaming=data_args.streaming,
+                trust_remote_code=True,
             )
             raw_datasets["train"] = load_dataset(
                 data_args.dataset_name,
@@ -363,6 +367,7 @@ def main():
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
                 streaming=data_args.streaming,
+                trust_remote_code=True,
             )
     else:
         data_files = {}
@@ -382,6 +387,7 @@ def main():
             data_files=data_files,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
             **dataset_args,
         )
         # If no validation data is there, validation_split_percentage will be used to divide the dataset.
@@ -392,6 +398,7 @@ def main():
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
                 **dataset_args,
             )
             raw_datasets["train"] = load_dataset(
@@ -400,6 +407,7 @@ def main():
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
                 **dataset_args,
             )
 
@@ -473,7 +481,7 @@ def main():
         )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.
@@ -514,11 +522,7 @@ def main():
                 desc="Running tokenizer on dataset",
             )
         else:
-            tokenized_datasets = raw_datasets.map(
-                tokenize_function,
-                batched=True,
-                remove_columns=column_names,
-            )
+            tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, remove_columns=column_names,)
 
     if data_args.block_size is None:
         block_size = tokenizer.model_max_length
@@ -574,10 +578,7 @@ def main():
                 desc=f"Grouping texts in chunks of {block_size}",
             )
         else:
-            lm_datasets = tokenized_datasets.map(
-                group_texts,
-                batched=True,
-            )
+            lm_datasets = tokenized_datasets.map(group_texts, batched=True,)
 
     if training_args.do_train:
         if "train" not in tokenized_datasets:

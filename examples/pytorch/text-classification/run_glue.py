@@ -240,6 +240,7 @@ class ModelArguments:
     )
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -325,6 +326,7 @@ def main():
             data_args.task_name,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     elif data_args.dataset_name is not None:
         # Downloading and loading a dataset from the hub.
@@ -333,6 +335,7 @@ def main():
             data_args.dataset_config_name,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     else:
         # Loading a dataset from your local files.
@@ -366,6 +369,7 @@ def main():
                 data_files=data_files,
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
         else:
             # Loading a dataset from local json files
@@ -374,6 +378,7 @@ def main():
                 data_files=data_files,
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
     # See more about loading any type of standard or custom dataset at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
@@ -432,7 +437,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # Preprocessing the raw_datasets
     if data_args.task_name is not None:

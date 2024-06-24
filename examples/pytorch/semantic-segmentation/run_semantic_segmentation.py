@@ -18,6 +18,7 @@ import logging
 import os
 import random
 import sys
+import time
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -284,6 +285,7 @@ class ModelArguments:
     )
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -392,10 +394,7 @@ def main():
         logits_tensor = torch.from_numpy(logits)
         # scale the logits to the size of the label
         logits_tensor = nn.functional.interpolate(
-            logits_tensor,
-            size=labels.shape[-2:],
-            mode="bilinear",
-            align_corners=False,
+            logits_tensor, size=labels.shape[-2:], mode="bilinear", align_corners=False,
         ).argmax(dim=1)
 
         pred_labels = logits_tensor.detach().cpu().numpy()

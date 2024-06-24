@@ -193,6 +193,7 @@ class ModelArguments:
     )
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -263,6 +264,7 @@ def main():
                 split="train",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
         else:
             train_dataset = load_dataset(
@@ -271,6 +273,7 @@ def main():
                 split="train",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
         label_list = train_dataset.features["label"].names
 
@@ -281,6 +284,7 @@ def main():
             split="validation",
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
         label_list = eval_dataset.features["label"].names
 
@@ -291,6 +295,7 @@ def main():
             split="test",
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
         label_list = predict_dataset.features["label"].names
 
@@ -337,7 +342,7 @@ def main():
     )
     # Log number of parameters
     num_params = get_num_parameters(model)
-    mlflow.log_param('num_params', num_params)
+    mlflow.log_param("num_params", num_params)
 
     # Preprocessing the datasets
     # Padding strategy

@@ -25,6 +25,7 @@ import logging
 import math
 import os
 import sys
+import time
 from dataclasses import dataclass, field
 from itertools import chain
 from typing import Optional
@@ -266,6 +267,7 @@ class DataTrainingArguments:
                     )
 
 
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -350,6 +352,7 @@ def main():
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
             streaming=data_args.streaming,
+            trust_remote_code=True,
         )
         if "validation" not in raw_datasets.keys():
             raw_datasets["validation"] = load_dataset(
@@ -359,6 +362,7 @@ def main():
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
                 streaming=data_args.streaming,
+                trust_remote_code=True,
             )
             raw_datasets["train"] = load_dataset(
                 data_args.dataset_name,
@@ -367,6 +371,7 @@ def main():
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
                 streaming=data_args.streaming,
+                trust_remote_code=True,
             )
     else:
         data_files = {}
@@ -383,6 +388,7 @@ def main():
             data_files=data_files,
             cache_dir=model_args.cache_dir,
             use_auth_token=True if model_args.use_auth_token else None,
+            trust_remote_code=True,
         )
 
         # If no validation data is there, validation_split_percentage will be used to divide the dataset.
@@ -393,6 +399,7 @@ def main():
                 split=f"train[:{data_args.validation_split_percentage}%]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
             raw_datasets["train"] = load_dataset(
                 extension,
@@ -400,6 +407,7 @@ def main():
                 split=f"train[{data_args.validation_split_percentage}%:]",
                 cache_dir=model_args.cache_dir,
                 use_auth_token=True if model_args.use_auth_token else None,
+                trust_remote_code=True,
             )
 
     # See more about loading any type of standard or custom dataset (from files, python dict, pandas DataFrame, etc) at
@@ -529,9 +537,7 @@ def main():
                 )
             else:
                 tokenized_datasets = raw_datasets.map(
-                    tokenize_function,
-                    batched=True,
-                    remove_columns=[text_column_name],
+                    tokenize_function, batched=True, remove_columns=[text_column_name],
                 )
     else:
         # Otherwise, we tokenize every text, then concatenate them together before splitting them in smaller parts.
@@ -552,11 +558,7 @@ def main():
                     desc="Running tokenizer on every text in dataset",
                 )
             else:
-                tokenized_datasets = raw_datasets.map(
-                    tokenize_function,
-                    batched=True,
-                    remove_columns=column_names,
-                )
+                tokenized_datasets = raw_datasets.map(tokenize_function, batched=True, remove_columns=column_names,)
 
         # Main data processing function that will concatenate all texts from our dataset and generate chunks of
         # max_seq_length.
@@ -599,10 +601,7 @@ def main():
                     desc=f"Grouping texts in chunks of {max_seq_length}",
                 )
             else:
-                tokenized_datasets = tokenized_datasets.map(
-                    group_texts,
-                    batched=True,
-                )
+                tokenized_datasets = tokenized_datasets.map(group_texts, batched=True,)
 
     if training_args.do_train:
         if "train" not in tokenized_datasets:

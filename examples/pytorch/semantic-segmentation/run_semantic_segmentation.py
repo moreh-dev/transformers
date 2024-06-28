@@ -537,7 +537,7 @@ def main():
         tokenizer=image_processor,
         data_collator=default_data_collator,
     )
-    trainer.add_callback(TBTrainerCallback)
+    trainer.add_callback(TBTrainerCallbackForSeq2Seq)
 
     # Training
     if training_args.do_train:

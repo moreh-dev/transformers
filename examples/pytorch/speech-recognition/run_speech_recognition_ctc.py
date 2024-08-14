@@ -781,7 +781,7 @@ def main():
         if training_args.do_eval else None,
         tokenizer=feature_extractor,
     )
-    trainer.add_callback(TBTrainerCallback)
+    trainer.add_callback(TBTrainerCallbackForSeq2Seq)
     # 8. Finally, we can start training
 
     # Training

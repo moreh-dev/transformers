@@ -4,6 +4,8 @@ pandas==2.0.3
 sacremoses==0.0.53
 sacrebleu==2.3.1
 sentencepiece==0.1.99
+seqeval==1.2.2
+setuptools==65.5.0
 scipy==1.10.1
 soundfile==0.12.1
 fsspec==2023.9.2

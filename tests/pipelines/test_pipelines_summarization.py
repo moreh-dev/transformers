@@ -21,13 +21,10 @@ from transformers import (
     TFPreTrainedModel,
     pipeline,
 )
-from transformers.testing_utils import get_gpu_count, is_pipeline_test, require_tf, require_torch, slow, torch_device
+from transformers.testing_utils import is_pipeline_test, require_tf, require_torch, slow, torch_device
 from transformers.tokenization_utils import TruncationStrategy
 
 from .test_pipelines_common import ANY
-
-
-DEFAULT_DEVICE_NUM = -1 if torch_device == "cpu" else 0
 
 
 @is_pipeline_test
@@ -35,8 +32,8 @@ class SummarizationPipelineTests(unittest.TestCase):
     model_mapping = MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING
     tf_model_mapping = TF_MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING
 
-    def get_test_pipeline(self, model, tokenizer, processor):
-        summarizer = SummarizationPipeline(model=model, tokenizer=tokenizer)
+    def get_test_pipeline(self, model, tokenizer, processor, torch_dtype="float32"):
+        summarizer = SummarizationPipeline(model=model, tokenizer=tokenizer, torch_dtype=torch_dtype)
         return summarizer, ["(CNN)The Palestinian Authority officially became", "Some other text"]
 
     def run_pipeline_test(self, summarizer, _):
@@ -70,8 +67,8 @@ class SummarizationPipelineTests(unittest.TestCase):
             # the embedding layer.
             if not (
                 isinstance(model, TFPreTrainedModel)
-                and get_gpu_count() > 0
                 and len(summarizer.model.trainable_weights) > 0
+                and "GPU" in summarizer.model.trainable_weights[0].device
             ):
                 with self.assertRaises(Exception):
                     outputs = summarizer("This " * 1000)
@@ -106,7 +103,7 @@ class SummarizationPipelineTests(unittest.TestCase):
     @require_torch
     @slow
     def test_integration_torch_summarization(self):
-        summarizer = pipeline(task="summarization", device=DEFAULT_DEVICE_NUM)
+        summarizer = pipeline(task="summarization", device=torch_device)
         cnn_article = (
             " (CNN)The Palestinian Authority officially became the 123rd member of the International Criminal Court on"
             " Wednesday, a step that gives the court jurisdiction over alleged crimes in Palestinian territories. The"

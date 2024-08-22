@@ -12,15 +12,21 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch MBART model. """
-
+"""Testing suite for the PyTorch MBART model."""
 
 import copy
 import tempfile
 import unittest
 
 from transformers import MBartConfig, is_torch_available
-from transformers.testing_utils import require_sentencepiece, require_tokenizers, require_torch, slow, torch_device
+from transformers.testing_utils import (
+    require_sentencepiece,
+    require_tokenizers,
+    require_torch,
+    require_torch_fp16,
+    slow,
+    torch_device,
+)
 from transformers.utils import cached_property
 
 from ...generation.test_utils import GenerationTesterMixin
@@ -234,7 +240,6 @@ class MBartModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixi
     all_generative_model_classes = (MBartForConditionalGeneration,) if is_torch_available() else ()
     pipeline_model_mapping = (
         {
-            "conversational": MBartForConditionalGeneration,
             "feature-extraction": MBartModel,
             "fill-mask": MBartForConditionalGeneration,
             "question-answering": MBartForQuestionAnswering,
@@ -317,15 +322,70 @@ class MBartModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixi
             with torch.no_grad():
                 model(**inputs)[0]
 
+    @require_torch_fp16
     def test_generate_fp16(self):
         config, input_dict = self.model_tester.prepare_config_and_inputs()
         input_ids = input_dict["input_ids"]
         attention_mask = input_ids.ne(1).to(torch_device)
         model = MBartForConditionalGeneration(config).eval().to(torch_device)
-        if torch_device == "cuda":
-            model.half()
+        model.half()
         model.generate(input_ids, attention_mask=attention_mask)
         model.generate(num_beams=4, do_sample=True, early_stopping=False, num_return_sequences=3)
+
+    def test_ensure_weights_are_shared(self):
+        config, inputs_dict = self.model_tester.prepare_config_and_inputs()
+
+        config.tie_word_embeddings = True
+        model = MBartForConditionalGeneration(config)
+
+        # MBart shares four weights.
+        # Not an issue to not have these correctly tied for torch.load, but it is an issue for safetensors.
+        self.assertEqual(
+            len(
+                {
+                    model.get_output_embeddings().weight.data_ptr(),
+                    model.get_input_embeddings().weight.data_ptr(),
+                    model.base_model.decoder.embed_tokens.weight.data_ptr(),
+                    model.base_model.encoder.embed_tokens.weight.data_ptr(),
+                }
+            ),
+            1,
+        )
+
+        config.tie_word_embeddings = False
+        model = MBartForConditionalGeneration(config)
+
+        # MBart shares four weights.
+        # Not an issue to not have these correctly tied for torch.load, but it is an issue for safetensors.
+        self.assertEqual(
+            len(
+                {
+                    model.get_output_embeddings().weight.data_ptr(),
+                    model.get_input_embeddings().weight.data_ptr(),
+                    model.base_model.decoder.embed_tokens.weight.data_ptr(),
+                    model.base_model.encoder.embed_tokens.weight.data_ptr(),
+                }
+            ),
+            2,
+        )
+
+    @unittest.skip(
+        reason="This architecure has tied weights by default and there is no way to remove it, check: https://github.com/huggingface/transformers/pull/31771#issuecomment-2210915245"
+    )
+    def test_load_save_without_tied_weights(self):
+        pass
+
+    def test_resize_embeddings_persists_embeddings_type(self):
+        config, inputs_dict = self.model_tester.prepare_config_and_inputs()
+
+        config.scale_embedding = True
+        model = MBartForConditionalGeneration(config)
+        old_type = type(model.model.decoder.embed_tokens)
+
+        model.resize_token_embeddings(new_num_tokens=config.vocab_size)
+
+        new_type = type(model.model.decoder.embed_tokens)
+        self.assertIs(old_type, new_type)
 
 
 def assert_tensors_close(a, b, atol=1e-12, prefix=""):
@@ -454,7 +514,7 @@ class MBartCC25IntegrationTest(AbstractSeq2SeqIntegrationTest):
     ]
     tgt_text = ["Şeful ONU declară că nu există o soluţie militară în Siria", "to be padded"]
 
-    @unittest.skip("This test is broken, still generates english")
+    @unittest.skip(reason="This test is broken, still generates english")
     def test_cc25_generate(self):
         inputs = self.tokenizer([self.src_text[0]], return_tensors="pt").to(torch_device)
         translated_tokens = self.model.generate(
@@ -491,7 +551,7 @@ class MBartStandaloneDecoderModelTester:
         use_labels=True,
         decoder_start_token_id=2,
         decoder_ffn_dim=32,
-        decoder_layers=4,
+        decoder_layers=2,
         encoder_attention_heads=4,
         decoder_attention_heads=4,
         max_position_embeddings=30,
@@ -689,6 +749,6 @@ class MBartStandaloneDecoderModelTest(ModelTesterMixin, GenerationTesterMixin, u
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_decoder_model_attention_mask_past(*config_and_inputs)
 
+    @unittest.skip(reason="Decoder cannot retain gradients")
     def test_retain_grad_hidden_states_attentions(self):
-        # decoder cannot keep gradients
         return

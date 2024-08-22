@@ -19,6 +19,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import transformers
 from transformers import (
     CONFIG_MAPPING,
     IMAGE_PROCESSOR_MAPPING,
@@ -26,8 +27,10 @@ from transformers import (
     AutoImageProcessor,
     CLIPConfig,
     CLIPImageProcessor,
+    ViTImageProcessor,
+    ViTImageProcessorFast,
 )
-from transformers.testing_utils import DUMMY_UNKNOWN_IDENTIFIER
+from transformers.testing_utils import DUMMY_UNKNOWN_IDENTIFIER, require_torchvision, require_vision
 
 
 sys.path.append(str(Path(__file__).parent.parent.parent.parent / "utils"))
@@ -37,6 +40,9 @@ from test_module.custom_image_processing import CustomImageProcessor  # noqa E40
 
 
 class AutoImageProcessorTest(unittest.TestCase):
+    def setUp(self):
+        transformers.dynamic_module_utils.TIME_OUT_REMOTE_CODE = 0
+
     def test_image_processor_from_model_shortcut(self):
         config = AutoImageProcessor.from_pretrained("openai/clip-vit-base-patch32")
         self.assertIsInstance(config, CLIPImageProcessor)
@@ -129,7 +135,33 @@ class AutoImageProcessorTest(unittest.TestCase):
         ):
             _ = AutoImageProcessor.from_pretrained("hf-internal-testing/config-no-model")
 
+    @require_vision
+    @require_torchvision
+    def test_use_fast_selection(self):
+        checkpoint = "hf-internal-testing/tiny-random-vit"
+
+        # Slow image processor is selected by default
+        image_processor = AutoImageProcessor.from_pretrained(checkpoint)
+        self.assertIsInstance(image_processor, ViTImageProcessor)
+
+        # Fast image processor is selected when use_fast=True
+        image_processor = AutoImageProcessor.from_pretrained(checkpoint, use_fast=True)
+        self.assertIsInstance(image_processor, ViTImageProcessorFast)
+
+        # Slow image processor is selected when use_fast=False
+        image_processor = AutoImageProcessor.from_pretrained(checkpoint, use_fast=False)
+        self.assertIsInstance(image_processor, ViTImageProcessor)
+
     def test_from_pretrained_dynamic_image_processor(self):
+        # If remote code is not set, we will time out when asking whether to load the model.
+        with self.assertRaises(ValueError):
+            image_processor = AutoImageProcessor.from_pretrained("hf-internal-testing/test_dynamic_image_processor")
+        # If remote code is disabled, we can't load this config.
+        with self.assertRaises(ValueError):
+            image_processor = AutoImageProcessor.from_pretrained(
+                "hf-internal-testing/test_dynamic_image_processor", trust_remote_code=False
+            )
+
         image_processor = AutoImageProcessor.from_pretrained(
             "hf-internal-testing/test_dynamic_image_processor", trust_remote_code=True
         )
@@ -165,6 +197,38 @@ class AutoImageProcessorTest(unittest.TestCase):
                 image_processor.save_pretrained(tmp_dir)
                 new_image_processor = AutoImageProcessor.from_pretrained(tmp_dir)
                 self.assertIsInstance(new_image_processor, CustomImageProcessor)
+
+        finally:
+            if "custom" in CONFIG_MAPPING._extra_content:
+                del CONFIG_MAPPING._extra_content["custom"]
+            if CustomConfig in IMAGE_PROCESSOR_MAPPING._extra_content:
+                del IMAGE_PROCESSOR_MAPPING._extra_content[CustomConfig]
+
+    def test_from_pretrained_dynamic_image_processor_conflict(self):
+        class NewImageProcessor(CLIPImageProcessor):
+            is_local = True
+
+        try:
+            AutoConfig.register("custom", CustomConfig)
+            AutoImageProcessor.register(CustomConfig, NewImageProcessor)
+            # If remote code is not set, the default is to use local
+            image_processor = AutoImageProcessor.from_pretrained("hf-internal-testing/test_dynamic_image_processor")
+            self.assertEqual(image_processor.__class__.__name__, "NewImageProcessor")
+            self.assertTrue(image_processor.is_local)
+
+            # If remote code is disabled, we load the local one.
+            image_processor = AutoImageProcessor.from_pretrained(
+                "hf-internal-testing/test_dynamic_image_processor", trust_remote_code=False
+            )
+            self.assertEqual(image_processor.__class__.__name__, "NewImageProcessor")
+            self.assertTrue(image_processor.is_local)
+
+            # If remote is enabled, we load from the Hub
+            image_processor = AutoImageProcessor.from_pretrained(
+                "hf-internal-testing/test_dynamic_image_processor", trust_remote_code=True
+            )
+            self.assertEqual(image_processor.__class__.__name__, "NewImageProcessor")
+            self.assertTrue(not hasattr(image_processor, "is_local"))
 
         finally:
             if "custom" in CONFIG_MAPPING._extra_content:

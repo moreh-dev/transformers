@@ -12,8 +12,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the TensorFlow MobileViT model. """
+"""Testing suite for the TensorFlow MobileViT model."""
 
+from __future__ import annotations
 
 import inspect
 import unittest
@@ -32,13 +33,12 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers import TFMobileViTForImageClassification, TFMobileViTForSemanticSegmentation, TFMobileViTModel
-    from transformers.models.mobilevit.modeling_tf_mobilevit import TF_MOBILEVIT_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 if is_vision_available():
     from PIL import Image
 
-    from transformers import MobileViTFeatureExtractor
+    from transformers import MobileViTImageProcessor
 
 
 class TFMobileViTConfigTester(ConfigTester):
@@ -57,7 +57,7 @@ class TFMobileViTModelTester:
         image_size=32,
         patch_size=2,
         num_channels=3,
-        last_hidden_size=640,
+        last_hidden_size=32,
         num_attention_heads=4,
         hidden_act="silu",
         conv_kernel_size=3,
@@ -116,6 +116,8 @@ class TFMobileViTModelTester:
             attention_probs_dropout_prob=self.attention_probs_dropout_prob,
             classifier_dropout_prob=self.classifier_dropout_prob,
             initializer_range=self.initializer_range,
+            hidden_sizes=[12, 16, 20],
+            neck_hidden_sizes=[8, 8, 16, 16, 32, 32, 32],
         )
 
     def create_and_check_model(self, config, pixel_values, labels, pixel_labels):
@@ -195,10 +197,6 @@ class TFMobileViTModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Tes
 
     @unittest.skip(reason="MobileViT does not output attentions")
     def test_attention_outputs(self):
-        pass
-
-    @unittest.skip("Test was written for TF 1.x and isn't really relevant here")
-    def test_compile_tf_model(self):
         pass
 
     def test_forward_signature(self):
@@ -366,9 +364,9 @@ class TFMobileViTModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Tes
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in TF_MOBILEVIT_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = TFMobileViTModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "apple/mobilevit-small"
+        model = TFMobileViTModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 # We will verify our results on an image of cute cats
@@ -383,9 +381,9 @@ class TFMobileViTModelIntegrationTest(unittest.TestCase):
     def test_inference_image_classification_head(self):
         model = TFMobileViTForImageClassification.from_pretrained("apple/mobilevit-xx-small")
 
-        feature_extractor = MobileViTFeatureExtractor.from_pretrained("apple/mobilevit-xx-small")
+        image_processor = MobileViTImageProcessor.from_pretrained("apple/mobilevit-xx-small")
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="tf")
+        inputs = image_processor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(**inputs, training=False)
@@ -403,10 +401,10 @@ class TFMobileViTModelIntegrationTest(unittest.TestCase):
         # `from_pt` will be removed
         model = TFMobileViTForSemanticSegmentation.from_pretrained("apple/deeplabv3-mobilevit-xx-small")
 
-        feature_extractor = MobileViTFeatureExtractor.from_pretrained("apple/deeplabv3-mobilevit-xx-small")
+        image_processor = MobileViTImageProcessor.from_pretrained("apple/deeplabv3-mobilevit-xx-small")
 
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="tf")
+        inputs = image_processor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(inputs.pixel_values, training=False)

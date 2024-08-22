@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import unittest
 
 from transformers import XGLMConfig, XGLMTokenizer, is_tf_available
@@ -27,7 +29,6 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers.models.xglm.modeling_tf_xglm import (
-        TF_XGLM_PRETRAINED_MODEL_ARCHIVE_LIST,
         TFXGLMForCausalLM,
         TFXGLMModel,
     )
@@ -49,7 +50,7 @@ class TFXGLMModelTester:
         use_labels=True,
         vocab_size=99,
         d_model=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         ffn_dim=37,
         activation_function="gelu",
@@ -157,29 +158,11 @@ class TFXGLMModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.TestCase
     def test_config(self):
         self.config_tester.run_common_tests()
 
-    def test_model_common_attributes(self):
-        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-
-        for model_class in self.all_model_classes:
-            model = model_class(config)
-            assert isinstance(model.get_input_embeddings(), tf.keras.layers.Layer)
-
-            if model_class in self.all_generative_model_classes:
-                x = model.get_output_embeddings()
-                assert isinstance(x, tf.keras.layers.Layer)
-                name = model.get_bias()
-                assert name is None
-            else:
-                x = model.get_output_embeddings()
-                assert x is None
-                name = model.get_bias()
-                assert name is None
-
     @slow
     def test_model_from_pretrained(self):
-        for model_name in TF_XGLM_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = TFXGLMModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "facebook/xglm-564M"
+        model = TFXGLMModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     @unittest.skip(reason="Currently, model embeddings are going to undergo a major refactor.")
     def test_resize_token_embeddings(self):
@@ -193,9 +176,7 @@ class TFXGLMModelLanguageGenerationTest(unittest.TestCase):
         model = TFXGLMForCausalLM.from_pretrained("facebook/xglm-564M")
         input_ids = tf.convert_to_tensor([[2, 268, 9865]], dtype=tf.int32)  # The dog
         # </s> The dog is a very friendly dog. He is very affectionate and loves to play with other
-        # fmt: off
-        expected_output_ids = [2, 268, 9865, 67, 11, 1988, 57252, 9865, 5, 984, 67, 1988, 213838, 1658, 53, 70446, 33, 6657, 278, 1581]
-        # fmt: on
+        expected_output_ids = [2, 268, 9865, 67, 11, 1988, 57252, 9865, 5, 984, 67, 1988, 213838, 1658, 53, 70446, 33, 6657, 278, 1581]  # fmt: skip
         output_ids = model.generate(input_ids, do_sample=False, num_beams=1)
         if verify_outputs:
             self.assertListEqual(output_ids[0].numpy().tolist(), expected_output_ids)

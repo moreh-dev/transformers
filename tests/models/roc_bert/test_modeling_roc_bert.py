@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch RoCBert model. """
+"""Testing suite for the PyTorch RoCBert model."""
 
 import unittest
 
@@ -39,7 +39,6 @@ if is_torch_available():
         RoCBertForTokenClassification,
         RoCBertModel,
     )
-    from transformers.models.roc_bert.modeling_roc_bert import ROC_BERT_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 class RoCBertModelTester:
@@ -58,7 +57,7 @@ class RoCBertModelTester:
         pronunciation_embed_dim=32,
         shape_embed_dim=32,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -718,9 +717,9 @@ class RoCBertModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in ROC_BERT_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = RoCBertModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "weiweishi/roc-bert-base-zh"
+        model = RoCBertModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 @require_torch

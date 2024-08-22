@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch LayoutLMv3 model. """
+"""Testing suite for the PyTorch LayoutLMv3 model."""
 
 import copy
 import unittest
@@ -40,12 +40,11 @@ if is_torch_available():
         LayoutLMv3ForTokenClassification,
         LayoutLMv3Model,
     )
-    from transformers.models.layoutlmv3.modeling_layoutlmv3 import LAYOUTLMV3_PRETRAINED_MODEL_ARCHIVE_LIST
 
 if is_vision_available():
     from PIL import Image
 
-    from transformers import LayoutLMv3FeatureExtractor
+    from transformers import LayoutLMv3ImageProcessor
 
 
 class LayoutLMv3ModelTester:
@@ -63,7 +62,7 @@ class LayoutLMv3ModelTester:
         use_labels=True,
         vocab_size=99,
         hidden_size=36,
-        num_hidden_layers=3,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -286,10 +285,7 @@ class LayoutLMv3ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
         else ()
     )
     pipeline_model_mapping = (
-        {
-            "document-question-answering": LayoutLMv3ForQuestionAnswering,
-            "feature-extraction": LayoutLMv3Model,
-        }
+        {"document-question-answering": LayoutLMv3ForQuestionAnswering, "feature-extraction": LayoutLMv3Model}
         if is_torch_available()
         else {}
     )
@@ -371,9 +367,9 @@ class LayoutLMv3ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in LAYOUTLMV3_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = LayoutLMv3Model.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "microsoft/layoutlmv3-base"
+        model = LayoutLMv3Model.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 # We will verify our results on an image of cute cats
@@ -385,16 +381,16 @@ def prepare_img():
 @require_torch
 class LayoutLMv3ModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
-        return LayoutLMv3FeatureExtractor(apply_ocr=False) if is_vision_available() else None
+    def default_image_processor(self):
+        return LayoutLMv3ImageProcessor(apply_ocr=False) if is_vision_available() else None
 
     @slow
     def test_inference_no_head(self):
         model = LayoutLMv3Model.from_pretrained("microsoft/layoutlmv3-base").to(torch_device)
 
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
         image = prepare_img()
-        pixel_values = feature_extractor(images=image, return_tensors="pt").pixel_values.to(torch_device)
+        pixel_values = image_processor(images=image, return_tensors="pt").pixel_values.to(torch_device)
 
         input_ids = torch.tensor([[1, 2]])
         bbox = torch.tensor([[1, 2, 3, 4], [5, 6, 7, 8]]).unsqueeze(0)

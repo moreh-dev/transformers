@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch BigBird model. """
-
+"""Testing suite for the PyTorch BigBird model."""
 
 import unittest
 
@@ -41,7 +40,6 @@ if is_torch_available():
         BigBirdForTokenClassification,
         BigBirdModel,
     )
-    from transformers.models.big_bird.modeling_big_bird import BIG_BIRD_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 class BigBirdModelTester:
@@ -561,9 +559,9 @@ class BigBirdModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in BIG_BIRD_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = BigBirdForPreTraining.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "google/bigbird-roberta-base"
+        model = BigBirdForPreTraining.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     def test_model_various_attn_type(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -608,6 +606,24 @@ class BigBirdModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
         self.model_tester.seq_length = 9
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_for_change_to_full_attn(*config_and_inputs)
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant_false(self):
+        pass
 
     # overwrite from common in order to skip the check on `attentions`
     def check_pt_flax_outputs(self, fx_outputs, pt_outputs, model_class, tol=1e-5, name="outputs", attributes=None):
@@ -700,7 +716,7 @@ class BigBirdModelIntegrationTest(unittest.TestCase):
         """
 
         if not self.test_attention_probs:
-            return
+            self.skipTest("test_attention_probs is set to False")
 
         model = BigBirdModel.from_pretrained(
             "google/bigbird-roberta-base", attention_type="block_sparse", num_random_blocks=3, block_size=16

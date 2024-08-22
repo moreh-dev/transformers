@@ -27,6 +27,7 @@ from ...test_tokenization_common import TokenizerTesterMixin
 
 @require_tokenizers
 class MgpstrTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
+    from_pretrained_id = "alibaba-damo/mgp-str-base"
     tokenizer_class = MgpstrTokenizer
     test_rust_tokenizer = False
     from_pretrained_kwargs = {}
@@ -35,9 +36,7 @@ class MgpstrTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
     def setUp(self):
         super().setUp()
 
-        # fmt: off
-        vocab = ['[GO]', '[s]', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']
-        # fmt: on
+        vocab = ['[GO]', '[s]', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z']  # fmt: skip
         vocab_tokens = dict(zip(vocab, range(len(vocab))))
 
         self.vocab_file = os.path.join(self.tmpdirname, VOCAB_FILES_NAMES["vocab_file"])
@@ -52,7 +51,7 @@ class MgpstrTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
         output_text = "tester"
         return input_text, output_text
 
-    @unittest.skip("MGP-STR always lower cases letters.")
+    @unittest.skip(reason="MGP-STR always lower cases letters.")
     def test_added_tokens_do_lower_case(self):
         pass
 
@@ -87,10 +86,10 @@ class MgpstrTokenizationTest(TokenizerTesterMixin, unittest.TestCase):
 
                 self.assertEqual(text_2.replace(" ", ""), output_text)
 
-    @unittest.skip("MGP-STR tokenizer only handles one sequence.")
+    @unittest.skip(reason="MGP-STR tokenizer only handles one sequence.")
     def test_maximum_encoding_length_pair_input(self):
         pass
 
-    @unittest.skip("inputs cannot be pretokenized in MgpstrTokenizer")
+    @unittest.skip(reason="inputs cannot be pretokenized in MgpstrTokenizer")
     def test_pretokenized_inputs(self):
         pass

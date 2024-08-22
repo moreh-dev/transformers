@@ -37,6 +37,9 @@ if is_torch_available():
         GPTBigCodeModel,
     )
     from transformers.models.gpt_bigcode.modeling_gpt_bigcode import GPTBigCodeAttention
+    from transformers.pytorch_utils import is_torch_greater_or_equal_than_1_12
+else:
+    is_torch_greater_or_equal_than_1_12 = False
 
 
 class GPTBigCodeModelTester:
@@ -52,7 +55,7 @@ class GPTBigCodeModelTester:
         use_mc_token_ids=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="relu",
@@ -455,24 +458,28 @@ class GPTBigCodeModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTeste
     def test_config(self):
         self.config_tester.run_common_tests()
 
-    @unittest.skip("MQA models does not support retain_grad")
+    @unittest.skip(reason="MQA models does not support retain_grad")
     def test_retain_grad_hidden_states_attentions(self):
         pass
 
-    @unittest.skip("Contrastive search not supported due to non-standard caching mechanism")
+    @unittest.skip(reason="Contrastive search not supported due to non-standard caching mechanism")
     def test_contrastive_generate(self):
         pass
 
-    @unittest.skip("Contrastive search not supported due to non-standard caching mechanism")
+    @unittest.skip(reason="Contrastive search not supported due to non-standard caching mechanism")
     def test_contrastive_generate_dict_outputs_use_cache(self):
         pass
 
-    @unittest.skip("CPU offload seems to be broken for some reason - tiny models keep hitting corner cases")
+    @unittest.skip(reason="CPU offload seems to be broken for some reason - tiny models keep hitting corner cases")
     def test_cpu_offload(self):
         pass
 
-    @unittest.skip("Disk offload seems to be broken for some reason - tiny models keep hitting corner cases")
+    @unittest.skip(reason="Disk offload seems to be broken for some reason - tiny models keep hitting corner cases")
     def test_disk_offload(self):
+        pass
+
+    @unittest.skip(reason="BigCodeGPT has a non-standard KV cache format.")
+    def test_past_key_values_format(self):
         pass
 
     def test_gpt_bigcode_model(self):
@@ -526,6 +533,10 @@ class GPTBigCodeMHAModelTest(GPTBigCodeModelTest):
     multi_query = False
 
 
+@unittest.skipIf(
+    not is_torch_greater_or_equal_than_1_12,
+    reason="`GPTBigCode` checkpoints use `PytorchGELUTanh` which requires `torch>=1.12.0`.",
+)
 @slow
 @require_torch
 class GPTBigCodeModelLanguageGenerationTest(unittest.TestCase):

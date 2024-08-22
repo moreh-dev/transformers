@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch VisionTextDualEncoder model. """
-
+"""Testing suite for the PyTorch VisionTextDualEncoder model."""
 
 import collections
 import tempfile
@@ -366,7 +365,7 @@ class FlaxCLIPVisionBertModelTest(VisionTextDualEncoderMixin, unittest.TestCase)
 class FlaxVisionTextDualEncoderIntegrationTest(unittest.TestCase):
     @slow
     def test_inference(self):
-        model = FlaxVisionTextDualEncoderModel.from_pretrained("clip-italian/clip-italian", logit_scale_init_value=1)
+        model = FlaxVisionTextDualEncoderModel.from_pretrained("clip-italian/clip-italian", logit_scale_init_value=1.0)
         processor = VisionTextDualEncoderProcessor.from_pretrained("clip-italian/clip-italian")
 
         image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")

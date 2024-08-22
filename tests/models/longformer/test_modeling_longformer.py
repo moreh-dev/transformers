@@ -50,7 +50,7 @@ class LongformerModelTester:
         use_labels=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -326,6 +326,9 @@ class LongformerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
         else {}
     )
 
+    # Need to use `0.6` instead of `0.5` for `test_disk_offload`
+    model_split_percents = [0.6, 0.7, 0.9]
+
     # TODO: Fix the failed tests
     def is_pipeline_test_to_skip(
         self, pipeline_test_casse_name, config_class, model_architecture, tokenizer_name, processor_name
@@ -381,8 +384,12 @@ class LongformerModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCa
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_for_multiple_choice(*config_and_inputs)
 
+    @unittest.skip(reason="Longformer cannot keep gradients in attention or hidden states")
     def test_retain_grad_hidden_states_attentions(self):
-        # longformer cannot keep gradients in attentions or hidden states
+        return
+
+    @unittest.skip(reason="LongFormer calculates global attn only when attn_mask has non-zero elements")
+    def test_batching_equivalence(self):
         return
 
 

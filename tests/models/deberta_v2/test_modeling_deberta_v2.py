@@ -33,10 +33,9 @@ if is_torch_available():
         DebertaV2ForTokenClassification,
         DebertaV2Model,
     )
-    from transformers.models.deberta_v2.modeling_deberta_v2 import DEBERTA_V2_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
-class DebertaV2ModelTester(object):
+class DebertaV2ModelTester:
     def __init__(
         self,
         parent,
@@ -48,7 +47,7 @@ class DebertaV2ModelTester(object):
         use_labels=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -292,9 +291,9 @@ class DebertaV2ModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCas
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in DEBERTA_V2_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = DebertaV2Model.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "microsoft/deberta-v2-xlarge"
+        model = DebertaV2Model.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 @require_torch

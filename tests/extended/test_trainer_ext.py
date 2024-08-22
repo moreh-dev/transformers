@@ -16,7 +16,6 @@ import math
 import os
 import re
 import sys
-import unittest
 from pathlib import Path
 from typing import Tuple
 from unittest.mock import patch
@@ -27,17 +26,17 @@ from transformers.testing_utils import (
     CaptureStderr,
     ExtendSysPath,
     TestCasePlus,
+    backend_device_count,
     execute_subprocess_async,
-    get_gpu_count,
     get_torch_dist_unique_port,
     require_apex,
     require_bitsandbytes,
-    require_fairscale,
     require_torch,
     require_torch_gpu,
-    require_torch_multi_gpu,
-    require_torch_non_multi_gpu,
+    require_torch_multi_accelerator,
+    require_torch_non_multi_accelerator,
     slow,
+    torch_device,
 )
 from transformers.trainer_callback import TrainerState
 from transformers.trainer_utils import set_seed
@@ -63,6 +62,7 @@ class TestTrainerExt(TestCasePlus):
         do_train=True,
         do_eval=True,
         do_predict=True,
+        n_gpus_to_use=None,
     ):
         output_dir = self.run_trainer(
             eval_steps=1,
@@ -75,11 +75,12 @@ class TestTrainerExt(TestCasePlus):
             do_train=do_train,
             do_eval=do_eval,
             do_predict=do_predict,
+            n_gpus_to_use=n_gpus_to_use,
         )
         logs = TrainerState.load_from_json(os.path.join(output_dir, "trainer_state.json")).log_history
 
         if not do_eval:
-            return
+            self.skipTest(reason="do_eval is False")
 
         eval_metrics = [log for log in logs if "eval_loss" in log.keys()]
 
@@ -91,49 +92,19 @@ class TestTrainerExt(TestCasePlus):
             assert isinstance(last_step_stats["eval_bleu"], float)
             assert not math.isnan(float(last_step_stats["eval_loss"])), "eval_loss must not be `nan`"
 
-    @require_torch_non_multi_gpu
+    @require_torch_non_multi_accelerator
     def test_run_seq2seq_no_dist(self):
         self.run_seq2seq_quick()
 
     # verify that the trainer can handle non-distributed with n_gpu > 1
-    @require_torch_multi_gpu
+    @require_torch_multi_accelerator
     def test_run_seq2seq_dp(self):
         self.run_seq2seq_quick(distributed=False)
 
     # verify that the trainer can handle distributed with n_gpu > 1
-    @require_torch_multi_gpu
+    @require_torch_multi_accelerator
     def test_run_seq2seq_ddp(self):
         self.run_seq2seq_quick(distributed=True)
-
-    # test --sharded_ddp w/o --fp16
-    @unittest.skip("Requires an update of the env running those tests")
-    @require_torch_multi_gpu
-    @require_fairscale
-    def test_run_seq2seq_sharded_ddp(self):
-        self.run_seq2seq_quick(distributed=True, extra_args_str="--sharded_ddp simple")
-
-    # test --sharded_ddp w/ --fp16
-    @unittest.skip("Requires an update of the env running those tests")
-    @require_torch_multi_gpu
-    @require_fairscale
-    def test_run_seq2seq_sharded_ddp_fp16(self):
-        self.run_seq2seq_quick(distributed=True, extra_args_str="--sharded_ddp simple --fp16")
-
-    # test --sharded_ddp zero_dp_2 w/o --fp16
-    @unittest.skip("Requires an update of the env running those tests")
-    @require_torch_multi_gpu
-    @require_fairscale
-    def test_run_seq2seq_fully_sharded_ddp(self):
-        self.run_seq2seq_quick(distributed=True, extra_args_str="--sharded_ddp zero_dp_2", predict_with_generate=False)
-
-    # test --sharded_ddp zero_dp_2 w/ --fp16
-    @unittest.skip("Requires an update of the env running those tests")
-    @require_torch_multi_gpu
-    @require_fairscale
-    def test_run_seq2seq_fully_sharded_ddp_fp16(self):
-        self.run_seq2seq_quick(
-            distributed=True, extra_args_str="--sharded_ddp zero_dp_2 --fp16", predict_with_generate=False
-        )
 
     @require_apex
     @require_torch_gpu
@@ -152,7 +123,7 @@ class TestTrainerExt(TestCasePlus):
         self.run_seq2seq_quick(distributed=True, extra_args_str="--fp16 --fp16_backend=apex")
 
     @parameterized.expand(["base", "low", "high", "mixed"])
-    @require_torch_multi_gpu
+    @require_torch_multi_accelerator
     def test_trainer_log_level_replica(self, experiment_id):
         # as each sub-test is slow-ish split into multiple sub-tests to avoid CI timeout
         experiments = {
@@ -169,7 +140,13 @@ class TestTrainerExt(TestCasePlus):
         }
 
         data = experiments[experiment_id]
-        kwargs = {"distributed": True, "predict_with_generate": False, "do_eval": False, "do_predict": False}
+        kwargs = {
+            "distributed": True,
+            "predict_with_generate": False,
+            "do_eval": False,
+            "do_predict": False,
+            "n_gpus_to_use": 2,
+        }
         log_info_string = "Running training"
         with CaptureStderr() as cl:
             self.run_seq2seq_quick(**kwargs, extra_args_str=data["extra_args_str"])
@@ -324,6 +301,7 @@ class TestTrainerExt(TestCasePlus):
             --label_smoothing_factor 0.1
             --target_lang ro_RO
             --source_lang en_XX
+            --report_to none
         """.split()
 
         args_eval = f"""
@@ -331,7 +309,7 @@ class TestTrainerExt(TestCasePlus):
             --per_device_eval_batch_size 4
             --max_eval_samples 8
             --val_max_target_length {max_len}
-            --evaluation_strategy steps
+            --eval_strategy steps
             --eval_steps {str(eval_steps)}
         """.split()
 
@@ -363,7 +341,7 @@ class TestTrainerExt(TestCasePlus):
 
         if distributed:
             if n_gpus_to_use is None:
-                n_gpus_to_use = get_gpu_count()
+                n_gpus_to_use = backend_device_count(torch_device)
             master_port = get_torch_dist_unique_port()
             distributed_args = f"""
                 -m torch.distributed.run

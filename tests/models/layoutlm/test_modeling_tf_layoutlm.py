@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import unittest
 
 import numpy as np
@@ -29,7 +31,6 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers.models.layoutlm.modeling_tf_layoutlm import (
-        TF_LAYOUTLM_PRETRAINED_MODEL_ARCHIVE_LIST,
         TFLayoutLMForMaskedLM,
         TFLayoutLMForQuestionAnswering,
         TFLayoutLMForSequenceClassification,
@@ -50,7 +51,7 @@ class TFLayoutLMModelTester:
         use_labels=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -263,9 +264,9 @@ class TFLayoutLMModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Test
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in TF_LAYOUTLM_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = TFLayoutLMModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "microsoft/layoutlm-base-uncased"
+        model = TFLayoutLMModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     # TODO (Joao): fix me
     @unittest.skip("Onnx compliancy broke with TF 2.10")

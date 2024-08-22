@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch TimeSeriesTransformer model. """
+"""Testing suite for the PyTorch TimeSeriesTransformer model."""
 
 import inspect
 import tempfile
@@ -104,6 +104,7 @@ class TimeSeriesTransformerModelTester:
             num_static_categorical_features=1,
             cardinality=[self.cardinality],
             embedding_dimension=[self.embedding_dimension],
+            scaling="std",  # we need std to get non-zero `loc`
         )
 
     def prepare_time_series_transformer_inputs_dict(self, config):
@@ -186,7 +187,6 @@ class TimeSeriesTransformerModelTest(ModelTesterMixin, PipelineTesterMixin, unit
     test_missing_keys = False
     test_torchscript = False
     test_inputs_embeds = False
-    test_model_common_attributes = False
 
     def setUp(self):
         self.model_tester = TimeSeriesTransformerModelTester(self)
@@ -214,7 +214,7 @@ class TimeSeriesTransformerModelTest(ModelTesterMixin, PipelineTesterMixin, unit
         config_and_inputs = self.model_tester.prepare_config_and_inputs_for_common()
         self.model_tester.check_encoder_decoder_model_standalone(*config_and_inputs)
 
-    # Ignore since we have no tokens embeddings
+    @unittest.skip(reason="Model has no tokens embeddings")
     def test_resize_tokens_embeddings(self):
         pass
 
@@ -369,6 +369,24 @@ class TimeSeriesTransformerModelTest(ModelTesterMixin, PipelineTesterMixin, unit
             [self.model_tester.num_attention_heads, encoder_seq_length, encoder_seq_length],
         )
 
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant_false(self):
+        pass
+
     @parameterized.expand(
         [
             (1, 5, [1]),
@@ -457,9 +475,13 @@ class TimeSeriesTransformerModelTest(ModelTesterMixin, PipelineTesterMixin, unit
     def test_retain_grad_hidden_states_attentions(self):
         super().test_retain_grad_hidden_states_attentions()
 
+    @unittest.skip(reason="Model does not have input embeddings")
+    def test_model_get_set_embeddings(self):
+        pass
+
 
 def prepare_batch(filename="train-batch.pt"):
-    file = hf_hub_download(repo_id="kashif/tourism-monthly-batch", filename=filename, repo_type="dataset")
+    file = hf_hub_download(repo_id="hf-internal-testing/tourism-monthly-batch", filename=filename, repo_type="dataset")
     batch = torch.load(file, map_location=torch_device)
     return batch
 

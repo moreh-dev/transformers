@@ -14,6 +14,7 @@
 
 import dataclasses
 import json
+import os
 import sys
 import types
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser, ArgumentTypeError
@@ -21,17 +22,9 @@ from copy import copy
 from enum import Enum
 from inspect import isclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, NewType, Optional, Tuple, Union, get_type_hints
+from typing import Any, Callable, Dict, Iterable, List, Literal, NewType, Optional, Tuple, Union, get_type_hints
 
 import yaml
-
-
-try:
-    # For Python versions <3.8, Literal is not in typing: https://peps.python.org/pep-0586/
-    from typing import Literal
-except ImportError:
-    # For Python 3.7
-    from typing_extensions import Literal
 
 
 DataClass = NewType("DataClass", Any)
@@ -130,8 +123,8 @@ class HfArgumentParser(ArgumentParser):
         Args:
             dataclass_types:
                 Dataclass type, or list of dataclass types for which we will "fill" instances with the parsed args.
-            kwargs:
-                (Optional) Passed to `argparse.ArgumentParser()` in the regular way.
+            kwargs (`Dict[str, Any]`, *optional*):
+                Passed to `argparse.ArgumentParser()` in the regular way.
         """
         # To make the default appear when using --help
         if "formatter_class" not in kwargs:
@@ -171,7 +164,7 @@ class HfArgumentParser(ArgumentParser):
                 )
             if type(None) not in field.type.__args__:
                 # filter `str` in Union
-                field.type = field.type.__args__[0] if field.type.__args__[1] == str else field.type.__args__[1]
+                field.type = field.type.__args__[0] if field.type.__args__[1] is str else field.type.__args__[1]
                 origin_type = getattr(field.type, "__origin__", field.type)
             elif bool not in field.type.__args__:
                 # filter `NoneType` in Union (except for `Union[bool, NoneType]`)
@@ -384,7 +377,9 @@ class HfArgumentParser(ArgumentParser):
             raise ValueError(f"Some keys are not used by the HfArgumentParser: {sorted(unused_keys)}")
         return tuple(outputs)
 
-    def parse_json_file(self, json_file: str, allow_extra_keys: bool = False) -> Tuple[DataClass, ...]:
+    def parse_json_file(
+        self, json_file: Union[str, os.PathLike], allow_extra_keys: bool = False
+    ) -> Tuple[DataClass, ...]:
         """
         Alternative helper method that does not use `argparse` at all, instead loading a json file and populating the
         dataclass types.
@@ -406,7 +401,9 @@ class HfArgumentParser(ArgumentParser):
         outputs = self.parse_dict(data, allow_extra_keys=allow_extra_keys)
         return tuple(outputs)
 
-    def parse_yaml_file(self, yaml_file: str, allow_extra_keys: bool = False) -> Tuple[DataClass, ...]:
+    def parse_yaml_file(
+        self, yaml_file: Union[str, os.PathLike], allow_extra_keys: bool = False
+    ) -> Tuple[DataClass, ...]:
         """
         Alternative helper method that does not use `argparse` at all, instead loading a yaml file and populating the
         dataclass types.

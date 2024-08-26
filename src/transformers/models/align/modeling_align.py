@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch ALIGN model."""
+"""PyTorch ALIGN model."""
 
 import math
 from dataclasses import dataclass
@@ -45,12 +45,6 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "kakaobrain/align-base"
 _CONFIG_FOR_DOC = "AlignConfig"
-
-
-ALIGN_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "kakaobrain/align-base",
-    # See all ALIGN models at https://huggingface.co/models?filter=align
-]
 
 
 ALIGN_START_DOCSTRING = r"""
@@ -286,7 +280,7 @@ def align_loss(similarity: torch.Tensor) -> torch.Tensor:
     return (caption_loss + image_loss) / 2.0
 
 
-# Copied from transformers.models.efficientnet.modeling_efficientnet.round_filters with EfficientNet -> AlignVision
+# Copied from transformers.models.efficientnet.modeling_efficientnet.round_filters with EfficientNet->AlignVision
 def round_filters(config: AlignVisionConfig, num_channels: int):
     r"""
     Round number of filters based on depth multiplier.
@@ -403,7 +397,7 @@ class AlignVisionExpansionLayer(nn.Module):
         return hidden_states
 
 
-# Copied from transformers.models.efficientnet.modeling_efficientnet.EfficientNetDepthwiseLayer with with EfficientNet->AlignVision
+# Copied from transformers.models.efficientnet.modeling_efficientnet.EfficientNetDepthwiseLayer with EfficientNet->AlignVision
 class AlignVisionDepthwiseLayer(nn.Module):
     r"""
     This corresponds to the depthwise convolution phase of each block in the original implementation.
@@ -443,7 +437,7 @@ class AlignVisionDepthwiseLayer(nn.Module):
         return hidden_states
 
 
-# Copied from transformers.models.efficientnet.modeling_efficientnet.EfficientNetSqueezeExciteLayer with with EfficientNet->AlignVision
+# Copied from transformers.models.efficientnet.modeling_efficientnet.EfficientNetSqueezeExciteLayer with EfficientNet->AlignVision
 class AlignVisionSqueezeExciteLayer(nn.Module):
     r"""
     This corresponds to the Squeeze and Excitement phase of each block in the original implementation.
@@ -687,7 +681,9 @@ class AlignTextEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
         )
@@ -884,11 +880,18 @@ class AlignTextSelfOutput(nn.Module):
         return hidden_states
 
 
-# Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->AlignText
+ALIGN_TEXT_SELF_ATTENTION_CLASSES = {
+    "eager": AlignTextSelfAttention,
+}
+
+
+# Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->AlignText,BERT->ALIGN_TEXT
 class AlignTextAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
-        self.self = AlignTextSelfAttention(config, position_embedding_type=position_embedding_type)
+        self.self = ALIGN_TEXT_SELF_ATTENTION_CLASSES[config._attn_implementation](
+            config, position_embedding_type=position_embedding_type
+        )
         self.output = AlignTextSelfOutput(config)
         self.pruned_heads = set()
 
@@ -1093,20 +1096,15 @@ class AlignTextEncoder(nn.Module):
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, past_key_value, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
                     encoder_hidden_states,
                     encoder_attention_mask,
+                    past_key_value,
+                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(
@@ -1176,7 +1174,6 @@ class AlignPreTrainedModel(PreTrainedModel):
     config_class = AlignConfig
     base_model_prefix = "align"
     supports_gradient_checkpointing = True
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -1196,10 +1193,6 @@ class AlignPreTrainedModel(PreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, (AlignTextModel, AlignVisionModel)):
-            module.gradient_checkpointing = value
-
 
 @add_start_docstrings(
     """The text model from ALIGN without any head or projection on top.""",
@@ -1207,6 +1200,7 @@ class AlignPreTrainedModel(PreTrainedModel):
 )
 class AlignTextModel(AlignPreTrainedModel):
     config_class = AlignTextConfig
+    _no_split_modules = ["AlignTextEmbeddings"]
 
     def __init__(self, config: AlignTextConfig, add_pooling_layer: bool = True):
         super().__init__(config)
@@ -1266,6 +1260,7 @@ class AlignTextModel(AlignPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -1333,6 +1328,7 @@ class AlignTextModel(AlignPreTrainedModel):
 class AlignVisionModel(AlignPreTrainedModel):
     config_class = AlignVisionConfig
     main_input_name = "pixel_values"
+    supports_gradient_checkpointing = False
 
     def __init__(self, config: AlignVisionConfig):
         super().__init__(config)
@@ -1422,13 +1418,13 @@ class AlignModel(AlignPreTrainedModel):
         super().__init__(config)
 
         if not isinstance(config.text_config, AlignTextConfig):
-            raise ValueError(
+            raise TypeError(
                 "config.text_config is expected to be of type AlignTextConfig but is of type"
                 f" {type(config.text_config)}."
             )
 
         if not isinstance(config.vision_config, AlignVisionConfig):
-            raise ValueError(
+            raise TypeError(
                 "config.vision_config is expected to be of type AlignVisionConfig but is of type"
                 f" {type(config.vision_config)}."
             )
@@ -1443,7 +1439,7 @@ class AlignModel(AlignPreTrainedModel):
         self.vision_model = AlignVisionModel(vision_config)
 
         self.text_projection = nn.Linear(self.text_embed_dim, self.projection_dim)
-        self.temperature = nn.Parameter(torch.ones([]) * self.config.temperature_init_value)
+        self.temperature = nn.Parameter(torch.tensor(self.config.temperature_init_value))
 
         # Initialize weights and apply final processing
         self.post_init()

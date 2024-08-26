@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License
-""" Tokenization classes for LayoutXLM model."""
-
+"""Tokenization classes for LayoutXLM model."""
 
 import os
 from shutil import copyfile
@@ -31,8 +30,6 @@ from ...tokenization_utils_base import (
 from ...tokenization_utils_fast import PreTrainedTokenizerFast
 from ...utils import PaddingStrategy, TensorType, add_end_docstrings, is_sentencepiece_available, logging
 from ..xlm_roberta.tokenization_xlm_roberta_fast import (
-    PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES,
-    PRETRAINED_VOCAB_FILES_MAP,
     VOCAB_FILES_NAMES,
 )
 
@@ -212,8 +209,6 @@ class LayoutXLMTokenizerFast(PreTrainedTokenizerFast):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
     slow_tokenizer_class = LayoutXLMTokenizer
 
@@ -257,7 +252,6 @@ class LayoutXLMTokenizerFast(PreTrainedTokenizerFast):
         )
 
         self.vocab_file = vocab_file
-        self.can_save_slow_tokenizer = False if not self.vocab_file else True
 
         # additional properties
         self.cls_token_box = cls_token_box
@@ -265,6 +259,10 @@ class LayoutXLMTokenizerFast(PreTrainedTokenizerFast):
         self.pad_token_box = pad_token_box
         self.pad_token_label = pad_token_label
         self.only_label_first_subword = only_label_first_subword
+
+    @property
+    def can_save_slow_tokenizer(self) -> bool:
+        return os.path.isfile(self.vocab_file) if self.vocab_file else False
 
     @add_end_docstrings(LAYOUTXLM_ENCODE_KWARGS_DOCSTRING)
     def __call__(
@@ -417,6 +415,11 @@ class LayoutXLMTokenizerFast(PreTrainedTokenizerFast):
 
     def tokenize(self, text: str, pair: Optional[str] = None, add_special_tokens: bool = False, **kwargs) -> List[str]:
         batched_input = [(text, pair)] if pair else [text]
+
+        self._tokenizer.encode_special_tokens = kwargs.pop(
+            "split_special_tokens", self._tokenizer.encode_special_tokens
+        )
+
         encodings = self._tokenizer.encode_batch(
             batched_input, add_special_tokens=add_special_tokens, is_pretokenized=False, **kwargs
         )

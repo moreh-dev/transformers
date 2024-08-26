@@ -17,14 +17,14 @@ from ...utils import (
     OptionalDependencyNotAvailable,
     _LazyModule,
     is_sentencepiece_available,
-    is_speech_available,
     is_tf_available,
     is_torch_available,
 )
 
 
 _import_structure = {
-    "configuration_speech_to_text": ["SPEECH_TO_TEXT_PRETRAINED_CONFIG_ARCHIVE_MAP", "Speech2TextConfig"],
+    "configuration_speech_to_text": ["Speech2TextConfig"],
+    "feature_extraction_speech_to_text": ["Speech2TextFeatureExtractor"],
     "processing_speech_to_text": ["Speech2TextProcessor"],
 }
 
@@ -37,21 +37,12 @@ else:
     _import_structure["tokenization_speech_to_text"] = ["Speech2TextTokenizer"]
 
 try:
-    if not is_speech_available():
-        raise OptionalDependencyNotAvailable()
-except OptionalDependencyNotAvailable:
-    pass
-else:
-    _import_structure["feature_extraction_speech_to_text"] = ["Speech2TextFeatureExtractor"]
-
-try:
     if not is_tf_available():
         raise OptionalDependencyNotAvailable()
 except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_tf_speech_to_text"] = [
-        "TF_SPEECH_TO_TEXT_PRETRAINED_MODEL_ARCHIVE_LIST",
         "TFSpeech2TextForConditionalGeneration",
         "TFSpeech2TextModel",
         "TFSpeech2TextPreTrainedModel",
@@ -64,7 +55,6 @@ except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_speech_to_text"] = [
-        "SPEECH_TO_TEXT_PRETRAINED_MODEL_ARCHIVE_LIST",
         "Speech2TextForConditionalGeneration",
         "Speech2TextModel",
         "Speech2TextPreTrainedModel",
@@ -72,7 +62,8 @@ else:
 
 
 if TYPE_CHECKING:
-    from .configuration_speech_to_text import SPEECH_TO_TEXT_PRETRAINED_CONFIG_ARCHIVE_MAP, Speech2TextConfig
+    from .configuration_speech_to_text import Speech2TextConfig
+    from .feature_extraction_speech_to_text import Speech2TextFeatureExtractor
     from .processing_speech_to_text import Speech2TextProcessor
 
     try:
@@ -84,21 +75,12 @@ if TYPE_CHECKING:
         from .tokenization_speech_to_text import Speech2TextTokenizer
 
     try:
-        if not is_speech_available():
-            raise OptionalDependencyNotAvailable()
-    except OptionalDependencyNotAvailable:
-        pass
-    else:
-        from .feature_extraction_speech_to_text import Speech2TextFeatureExtractor
-
-    try:
         if not is_tf_available():
             raise OptionalDependencyNotAvailable()
     except OptionalDependencyNotAvailable:
         pass
     else:
         from .modeling_tf_speech_to_text import (
-            TF_SPEECH_TO_TEXT_PRETRAINED_MODEL_ARCHIVE_LIST,
             TFSpeech2TextForConditionalGeneration,
             TFSpeech2TextModel,
             TFSpeech2TextPreTrainedModel,
@@ -111,7 +93,6 @@ if TYPE_CHECKING:
         pass
     else:
         from .modeling_speech_to_text import (
-            SPEECH_TO_TEXT_PRETRAINED_MODEL_ARCHIVE_LIST,
             Speech2TextForConditionalGeneration,
             Speech2TextModel,
             Speech2TextPreTrainedModel,

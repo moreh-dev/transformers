@@ -25,7 +25,7 @@ from ...utils import (
 
 _import_structure = {
     "auto_factory": ["get_values"],
-    "configuration_auto": ["ALL_PRETRAINED_CONFIG_ARCHIVE_MAP", "CONFIG_MAPPING", "MODEL_NAMES_MAPPING", "AutoConfig"],
+    "configuration_auto": ["CONFIG_MAPPING", "MODEL_NAMES_MAPPING", "AutoConfig"],
     "feature_extraction_auto": ["FEATURE_EXTRACTOR_MAPPING", "AutoFeatureExtractor"],
     "image_processing_auto": ["IMAGE_PROCESSOR_MAPPING", "AutoImageProcessor"],
     "processing_auto": ["PROCESSOR_MAPPING", "AutoProcessor"],
@@ -40,6 +40,7 @@ except OptionalDependencyNotAvailable:
 else:
     _import_structure["modeling_auto"] = [
         "MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING",
+        "MODEL_FOR_AUDIO_FRAME_CLASSIFICATION_MAPPING",
         "MODEL_FOR_AUDIO_XVECTOR_MAPPING",
         "MODEL_FOR_BACKBONE_MAPPING",
         "MODEL_FOR_CAUSAL_IMAGE_MODELING_MAPPING",
@@ -48,7 +49,10 @@ else:
         "MODEL_FOR_DOCUMENT_QUESTION_ANSWERING_MAPPING",
         "MODEL_FOR_DEPTH_ESTIMATION_MAPPING",
         "MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING",
+        "MODEL_FOR_IMAGE_MAPPING",
         "MODEL_FOR_IMAGE_SEGMENTATION_MAPPING",
+        "MODEL_FOR_IMAGE_TO_IMAGE_MAPPING",
+        "MODEL_FOR_KEYPOINT_DETECTION_MAPPING",
         "MODEL_FOR_INSTANCE_SEGMENTATION_MAPPING",
         "MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING",
         "MODEL_FOR_MASKED_LM_MAPPING",
@@ -63,6 +67,9 @@ else:
         "MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING",
         "MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING",
         "MODEL_FOR_TABLE_QUESTION_ANSWERING_MAPPING",
+        "MODEL_FOR_TEXT_ENCODING_MAPPING",
+        "MODEL_FOR_TEXT_TO_WAVEFORM_MAPPING",
+        "MODEL_FOR_TEXT_TO_SPECTROGRAM_MAPPING",
         "MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING",
         "MODEL_FOR_UNIVERSAL_SEGMENTATION_MAPPING",
         "MODEL_FOR_VIDEO_CLASSIFICATION_MAPPING",
@@ -72,6 +79,8 @@ else:
         "MODEL_WITH_LM_HEAD_MAPPING",
         "MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING",
         "MODEL_FOR_ZERO_SHOT_OBJECT_DETECTION_MAPPING",
+        "MODEL_FOR_TIME_SERIES_CLASSIFICATION_MAPPING",
+        "MODEL_FOR_TIME_SERIES_REGRESSION_MAPPING",
         "AutoModel",
         "AutoBackbone",
         "AutoModelForAudioClassification",
@@ -82,8 +91,11 @@ else:
         "AutoModelForDepthEstimation",
         "AutoModelForImageClassification",
         "AutoModelForImageSegmentation",
+        "AutoModelForImageToImage",
         "AutoModelForInstanceSegmentation",
+        "AutoModelForKeypointDetection",
         "AutoModelForMaskGeneration",
+        "AutoModelForTextEncoding",
         "AutoModelForMaskedImageModeling",
         "AutoModelForMaskedLM",
         "AutoModelForMultipleChoice",
@@ -96,6 +108,8 @@ else:
         "AutoModelForSequenceClassification",
         "AutoModelForSpeechSeq2Seq",
         "AutoModelForTableQuestionAnswering",
+        "AutoModelForTextToSpectrogram",
+        "AutoModelForTextToWaveform",
         "AutoModelForTokenClassification",
         "AutoModelForUniversalSegmentation",
         "AutoModelForVideoClassification",
@@ -114,8 +128,10 @@ except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_tf_auto"] = [
+        "TF_MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING",
         "TF_MODEL_FOR_CAUSAL_LM_MAPPING",
         "TF_MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING",
+        "TF_MODEL_FOR_MASK_GENERATION_MAPPING",
         "TF_MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING",
         "TF_MODEL_FOR_MASKED_LM_MAPPING",
         "TF_MODEL_FOR_MULTIPLE_CHOICE_MAPPING",
@@ -128,15 +144,19 @@ else:
         "TF_MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING",
         "TF_MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING",
         "TF_MODEL_FOR_TABLE_QUESTION_ANSWERING_MAPPING",
+        "TF_MODEL_FOR_TEXT_ENCODING_MAPPING",
         "TF_MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING",
         "TF_MODEL_FOR_VISION_2_SEQ_MAPPING",
         "TF_MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING",
         "TF_MODEL_MAPPING",
         "TF_MODEL_WITH_LM_HEAD_MAPPING",
         "TFAutoModel",
+        "TFAutoModelForAudioClassification",
         "TFAutoModelForCausalLM",
         "TFAutoModelForImageClassification",
+        "TFAutoModelForMaskedImageModeling",
         "TFAutoModelForMaskedLM",
+        "TFAutoModelForMaskGeneration",
         "TFAutoModelForMultipleChoice",
         "TFAutoModelForNextSentencePrediction",
         "TFAutoModelForPreTraining",
@@ -147,6 +167,7 @@ else:
         "TFAutoModelForSequenceClassification",
         "TFAutoModelForSpeechSeq2Seq",
         "TFAutoModelForTableQuestionAnswering",
+        "TFAutoModelForTextEncoding",
         "TFAutoModelForTokenClassification",
         "TFAutoModelForVision2Seq",
         "TFAutoModelForZeroShotImageClassification",
@@ -160,6 +181,7 @@ except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_flax_auto"] = [
+        "FLAX_MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING",
         "FLAX_MODEL_FOR_CAUSAL_LM_MAPPING",
         "FLAX_MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING",
         "FLAX_MODEL_FOR_MASKED_LM_MAPPING",
@@ -191,7 +213,7 @@ else:
 
 if TYPE_CHECKING:
     from .auto_factory import get_values
-    from .configuration_auto import ALL_PRETRAINED_CONFIG_ARCHIVE_MAP, CONFIG_MAPPING, MODEL_NAMES_MAPPING, AutoConfig
+    from .configuration_auto import CONFIG_MAPPING, MODEL_NAMES_MAPPING, AutoConfig
     from .feature_extraction_auto import FEATURE_EXTRACTOR_MAPPING, AutoFeatureExtractor
     from .image_processing_auto import IMAGE_PROCESSOR_MAPPING, AutoImageProcessor
     from .processing_auto import PROCESSOR_MAPPING, AutoProcessor
@@ -205,6 +227,7 @@ if TYPE_CHECKING:
     else:
         from .modeling_auto import (
             MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING,
+            MODEL_FOR_AUDIO_FRAME_CLASSIFICATION_MAPPING,
             MODEL_FOR_AUDIO_XVECTOR_MAPPING,
             MODEL_FOR_BACKBONE_MAPPING,
             MODEL_FOR_CAUSAL_IMAGE_MODELING_MAPPING,
@@ -213,8 +236,11 @@ if TYPE_CHECKING:
             MODEL_FOR_DEPTH_ESTIMATION_MAPPING,
             MODEL_FOR_DOCUMENT_QUESTION_ANSWERING_MAPPING,
             MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING,
+            MODEL_FOR_IMAGE_MAPPING,
             MODEL_FOR_IMAGE_SEGMENTATION_MAPPING,
+            MODEL_FOR_IMAGE_TO_IMAGE_MAPPING,
             MODEL_FOR_INSTANCE_SEGMENTATION_MAPPING,
+            MODEL_FOR_KEYPOINT_DETECTION_MAPPING,
             MODEL_FOR_MASK_GENERATION_MAPPING,
             MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING,
             MODEL_FOR_MASKED_LM_MAPPING,
@@ -228,6 +254,11 @@ if TYPE_CHECKING:
             MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING,
             MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING,
             MODEL_FOR_TABLE_QUESTION_ANSWERING_MAPPING,
+            MODEL_FOR_TEXT_ENCODING_MAPPING,
+            MODEL_FOR_TEXT_TO_SPECTROGRAM_MAPPING,
+            MODEL_FOR_TEXT_TO_WAVEFORM_MAPPING,
+            MODEL_FOR_TIME_SERIES_CLASSIFICATION_MAPPING,
+            MODEL_FOR_TIME_SERIES_REGRESSION_MAPPING,
             MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING,
             MODEL_FOR_UNIVERSAL_SEGMENTATION_MAPPING,
             MODEL_FOR_VIDEO_CLASSIFICATION_MAPPING,
@@ -248,7 +279,9 @@ if TYPE_CHECKING:
             AutoModelForDocumentQuestionAnswering,
             AutoModelForImageClassification,
             AutoModelForImageSegmentation,
+            AutoModelForImageToImage,
             AutoModelForInstanceSegmentation,
+            AutoModelForKeypointDetection,
             AutoModelForMaskedImageModeling,
             AutoModelForMaskedLM,
             AutoModelForMaskGeneration,
@@ -262,6 +295,9 @@ if TYPE_CHECKING:
             AutoModelForSequenceClassification,
             AutoModelForSpeechSeq2Seq,
             AutoModelForTableQuestionAnswering,
+            AutoModelForTextEncoding,
+            AutoModelForTextToSpectrogram,
+            AutoModelForTextToWaveform,
             AutoModelForTokenClassification,
             AutoModelForUniversalSegmentation,
             AutoModelForVideoClassification,
@@ -279,9 +315,11 @@ if TYPE_CHECKING:
         pass
     else:
         from .modeling_tf_auto import (
+            TF_MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING,
             TF_MODEL_FOR_CAUSAL_LM_MAPPING,
             TF_MODEL_FOR_DOCUMENT_QUESTION_ANSWERING_MAPPING,
             TF_MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING,
+            TF_MODEL_FOR_MASK_GENERATION_MAPPING,
             TF_MODEL_FOR_MASKED_IMAGE_MODELING_MAPPING,
             TF_MODEL_FOR_MASKED_LM_MAPPING,
             TF_MODEL_FOR_MULTIPLE_CHOICE_MAPPING,
@@ -293,16 +331,20 @@ if TYPE_CHECKING:
             TF_MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING,
             TF_MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING,
             TF_MODEL_FOR_TABLE_QUESTION_ANSWERING_MAPPING,
+            TF_MODEL_FOR_TEXT_ENCODING_MAPPING,
             TF_MODEL_FOR_TOKEN_CLASSIFICATION_MAPPING,
             TF_MODEL_FOR_VISION_2_SEQ_MAPPING,
             TF_MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING,
             TF_MODEL_MAPPING,
             TF_MODEL_WITH_LM_HEAD_MAPPING,
             TFAutoModel,
+            TFAutoModelForAudioClassification,
             TFAutoModelForCausalLM,
             TFAutoModelForDocumentQuestionAnswering,
             TFAutoModelForImageClassification,
+            TFAutoModelForMaskedImageModeling,
             TFAutoModelForMaskedLM,
+            TFAutoModelForMaskGeneration,
             TFAutoModelForMultipleChoice,
             TFAutoModelForNextSentencePrediction,
             TFAutoModelForPreTraining,
@@ -312,6 +354,7 @@ if TYPE_CHECKING:
             TFAutoModelForSequenceClassification,
             TFAutoModelForSpeechSeq2Seq,
             TFAutoModelForTableQuestionAnswering,
+            TFAutoModelForTextEncoding,
             TFAutoModelForTokenClassification,
             TFAutoModelForVision2Seq,
             TFAutoModelForZeroShotImageClassification,
@@ -325,6 +368,7 @@ if TYPE_CHECKING:
         pass
     else:
         from .modeling_flax_auto import (
+            FLAX_MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING,
             FLAX_MODEL_FOR_CAUSAL_LM_MAPPING,
             FLAX_MODEL_FOR_IMAGE_CLASSIFICATION_MAPPING,
             FLAX_MODEL_FOR_MASKED_LM_MAPPING,

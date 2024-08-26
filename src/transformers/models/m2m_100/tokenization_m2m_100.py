@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tokenization classes for M2M100."""
+
 import json
 import os
 from pathlib import Path
@@ -34,24 +35,6 @@ VOCAB_FILES_NAMES = {
     "tokenizer_config_file": "tokenizer_config.json",
 }
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "facebook/m2m100_418M": "https://huggingface.co/facebook/m2m100_418M/resolve/main/vocab.json",
-        "facebook/m2m100_1.2B": "https://huggingface.co/facebook/m2m100_1.2B/resolve/main/vocab.json",
-    },
-    "spm_file": {
-        "facebook/m2m100_418M": "https://huggingface.co/facebook/m2m100_418M/resolve/main/sentencepiece.bpe.model",
-        "facebook/m2m100_1.2B": "https://huggingface.co/facebook/m2m100_1.2B/resolve/main/sentencepiece.bpe.model",
-    },
-    "tokenizer_config_file": {
-        "facebook/m2m100_418M": "https://huggingface.co/facebook/m2m100_418M/resolve/main/tokenizer_config.json",
-        "facebook/m2m100_1.2B": "https://huggingface.co/facebook/m2m100_1.2B/resolve/main/tokenizer_config.json",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "facebook/m2m100_418M": 1024,
-}
 
 # fmt: off
 FAIRSEQ_LANGUAGE_CODES = {
@@ -121,8 +104,6 @@ class M2M100Tokenizer(PreTrainedTokenizer):
     ```"""
 
     vocab_files_names = VOCAB_FILES_NAMES
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
     model_input_names = ["input_ids", "attention_mask"]
 
     prefix_tokens: List[int] = []
@@ -150,26 +131,11 @@ class M2M100Tokenizer(PreTrainedTokenizer):
         fairseq_language_code = FAIRSEQ_LANGUAGE_CODES[language_codes]
         self.lang_code_to_token = {lang_code: f"__{lang_code}__" for lang_code in fairseq_language_code}
 
-        kwargs["additional_special_tokens"] = kwargs.get("additional_special_tokens", [])
-        kwargs["additional_special_tokens"] += [
-            self.get_lang_token(lang_code)
-            for lang_code in fairseq_language_code
-            if self.get_lang_token(lang_code) not in kwargs["additional_special_tokens"]
-        ]
-
-        super().__init__(
-            src_lang=src_lang,
-            tgt_lang=tgt_lang,
-            bos_token=bos_token,
-            eos_token=eos_token,
-            sep_token=sep_token,
-            unk_token=unk_token,
-            pad_token=pad_token,
-            language_codes=language_codes,
-            sp_model_kwargs=self.sp_model_kwargs,
-            num_madeup_words=num_madeup_words,
-            **kwargs,
-        )
+        additional_special_tokens = kwargs.pop("additional_special_tokens", [])
+        for lang_code in fairseq_language_code:
+            token = self.get_lang_token(lang_code)
+            if token not in additional_special_tokens and lang_code not in str(token) not in self.added_tokens_encoder:
+                additional_special_tokens.append(token)
 
         self.vocab_file = vocab_file
         self.encoder = load_json(vocab_file)
@@ -188,13 +154,33 @@ class M2M100Tokenizer(PreTrainedTokenizer):
         self._src_lang = src_lang if src_lang is not None else "en"
         self.tgt_lang = tgt_lang
         self.cur_lang_id = self.get_lang_id(self._src_lang)
-        self.set_src_lang_special_tokens(self._src_lang)
 
         self.num_madeup_words = num_madeup_words
 
+        super().__init__(
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            bos_token=bos_token,
+            eos_token=eos_token,
+            sep_token=sep_token,
+            unk_token=unk_token,
+            pad_token=pad_token,
+            language_codes=language_codes,
+            sp_model_kwargs=self.sp_model_kwargs,
+            additional_special_tokens=additional_special_tokens,
+            num_madeup_words=num_madeup_words,
+            **kwargs,
+        )
+        self.set_src_lang_special_tokens(self._src_lang)
+
     @property
     def vocab_size(self) -> int:
-        return len(self.encoder) + len(self.lang_token_to_id)
+        return len(self.encoder)
+
+    def get_vocab(self) -> Dict:
+        vocab = {self.convert_ids_to_tokens(i): i for i in range(self.vocab_size)}
+        vocab.update(self.added_tokens_encoder)
+        return vocab
 
     @property
     def src_lang(self) -> str:
@@ -289,11 +275,6 @@ class M2M100Tokenizer(PreTrainedTokenizer):
             return self.prefix_tokens + token_ids_0 + self.suffix_tokens
         # We don't expect to process pairs, but leave the pair logic for API consistency
         return self.prefix_tokens + token_ids_0 + token_ids_1 + self.suffix_tokens
-
-    def get_vocab(self) -> Dict:
-        vocab = {self.convert_ids_to_tokens(i): i for i in range(self.vocab_size)}
-        vocab.update(self.added_tokens_encoder)
-        return vocab
 
     def __getstate__(self) -> Dict:
         state = self.__dict__.copy()

@@ -12,34 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" DPR model configuration"""
+"""DPR model configuration"""
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-DPR_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "facebook/dpr-ctx_encoder-single-nq-base": (
-        "https://huggingface.co/facebook/dpr-ctx_encoder-single-nq-base/resolve/main/config.json"
-    ),
-    "facebook/dpr-question_encoder-single-nq-base": (
-        "https://huggingface.co/facebook/dpr-question_encoder-single-nq-base/resolve/main/config.json"
-    ),
-    "facebook/dpr-reader-single-nq-base": (
-        "https://huggingface.co/facebook/dpr-reader-single-nq-base/resolve/main/config.json"
-    ),
-    "facebook/dpr-ctx_encoder-multiset-base": (
-        "https://huggingface.co/facebook/dpr-ctx_encoder-multiset-base/resolve/main/config.json"
-    ),
-    "facebook/dpr-question_encoder-multiset-base": (
-        "https://huggingface.co/facebook/dpr-question_encoder-multiset-base/resolve/main/config.json"
-    ),
-    "facebook/dpr-reader-multiset-base": (
-        "https://huggingface.co/facebook/dpr-reader-multiset-base/resolve/main/config.json"
-    ),
-}
 
 
 class DPRConfig(PretrainedConfig):
@@ -83,6 +62,8 @@ class DPRConfig(PretrainedConfig):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
         layer_norm_eps (`float`, *optional*, defaults to 1e-12):
             The epsilon used by the layer normalization layers.
+        pad_token_id (`int`, *optional*, defaults to 0):
+            Padding token id.
         position_embedding_type (`str`, *optional*, defaults to `"absolute"`):
             Type of position embedding. Choose one of `"absolute"`, `"relative_key"`, `"relative_key_query"`. For
             positional embeddings use `"absolute"`. For more information on `"relative_key"`, please refer to
@@ -107,6 +88,7 @@ class DPRConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "dpr"
 
     def __init__(

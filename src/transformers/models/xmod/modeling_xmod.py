@@ -41,19 +41,6 @@ from .configuration_xmod import XmodConfig
 
 logger = logging.get_logger(__name__)
 
-XMOD_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "facebook/xmod-base",
-    "facebook/xmod-large-prenorm",
-    "facebook/xmod-base-13-125k",
-    "facebook/xmod-base-30-125k",
-    "facebook/xmod-base-30-195k",
-    "facebook/xmod-base-60-125k",
-    "facebook/xmod-base-60-265k",
-    "facebook/xmod-base-75-125k",
-    "facebook/xmod-base-75-269k",
-    # See all X-MOD models at https://huggingface.co/models?filter=xmod
-]
-
 
 # Copied from transformers.models.roberta.modeling_roberta.RobertaEmbeddings with Roberta->Xmod
 class XmodEmbeddings(nn.Module):
@@ -74,7 +61,9 @@ class XmodEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
         )
@@ -571,21 +560,16 @@ class XmodEncoder(nn.Module):
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, past_key_value, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                     lang_ids,
                     attention_mask,
                     layer_head_mask,
                     encoder_hidden_states,
                     encoder_attention_mask,
+                    past_key_value,
+                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(
@@ -676,21 +660,6 @@ class XmodPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    # Copied from transformers.models.roberta.modeling_roberta.RobertaPreTrainedModel._set_gradient_checkpointing with Roberta->Xmod
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, XmodEncoder):
-            module.gradient_checkpointing = value
-
-    # Copied from transformers.models.roberta.modeling_roberta.RobertaPreTrainedModel.update_keys_to_ignore
-    def update_keys_to_ignore(self, config, del_keys_to_ignore):
-        """Remove some keys from ignore list"""
-        if not config.tie_word_embeddings:
-            # must make a new list, or the class variable gets modified!
-            self._keys_to_ignore_on_save = [k for k in self._keys_to_ignore_on_save if k not in del_keys_to_ignore]
-            self._keys_to_ignore_on_load_missing = [
-                k for k in self._keys_to_ignore_on_load_missing if k not in del_keys_to_ignore
-            ]
 
     def set_default_language(self, language: str):
         """
@@ -811,9 +780,7 @@ class XmodModel(XmodPreTrainedModel):
 
     """
 
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
-    # Copied from transformers.models.bert.modeling_bert.BertModel.__init__ with Bert->Xmod
+    # Copied from transformers.models.clap.modeling_clap.ClapTextModel.__init__ with ClapText->Xmod
     def __init__(self, config, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
@@ -896,6 +863,7 @@ class XmodModel(XmodPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -989,9 +957,7 @@ class XmodModel(XmodPreTrainedModel):
     XMOD_START_DOCSTRING,
 )
 class XmodForCausalLM(XmodPreTrainedModel):
-    _keys_to_ignore_on_save = [r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
-    _keys_to_ignore_on_load_missing = [r"position_ids", r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+    _tied_weights_keys = ["lm_head.decoder.weight", "lm_head.decoder.bias"]
 
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForCausalLM.__init__ with Roberta->Xmod
     def __init__(self, config):
@@ -1002,9 +968,6 @@ class XmodForCausalLM(XmodPreTrainedModel):
 
         self.roberta = XmodModel(config, add_pooling_layer=False)
         self.lm_head = XmodLMHead(config)
-
-        # The LM head weights require special treatment only when they are tied with the word embeddings
-        self.update_keys_to_ignore(config, ["lm_head.decoder.weight"])
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1069,7 +1032,7 @@ class XmodForCausalLM(XmodPreTrainedModel):
         >>> from transformers import AutoTokenizer, XmodForCausalLM, AutoConfig
         >>> import torch
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("xlm-roberta-base")
+        >>> tokenizer = AutoTokenizer.from_pretrained("FacebookAI/xlm-roberta-base")
         >>> config = AutoConfig.from_pretrained("facebook/xmod-base")
         >>> config.is_decoder = True
         >>> model = XmodForCausalLM.from_pretrained("facebook/xmod-base", config=config)
@@ -1132,9 +1095,18 @@ class XmodForCausalLM(XmodPreTrainedModel):
         if attention_mask is None:
             attention_mask = input_ids.new_ones(input_shape)
 
-        # cut decoder_input_ids if past is used
+        # cut decoder_input_ids if past_key_values is used
         if past_key_values is not None:
-            input_ids = input_ids[:, -1:]
+            past_length = past_key_values[0][0].shape[2]
+
+            # Some generation methods already pass only the last input ID
+            if input_ids.shape[1] > past_length:
+                remove_prefix_length = past_length
+            else:
+                # Default to old behavior: keep only final ID
+                remove_prefix_length = input_ids.shape[1] - 1
+
+            input_ids = input_ids[:, remove_prefix_length:]
 
         return {"input_ids": input_ids, "attention_mask": attention_mask, "past_key_values": past_key_values}
 
@@ -1142,7 +1114,9 @@ class XmodForCausalLM(XmodPreTrainedModel):
     def _reorder_cache(self, past_key_values, beam_idx):
         reordered_past = ()
         for layer_past in past_key_values:
-            reordered_past += (tuple(past_state.index_select(0, beam_idx) for past_state in layer_past),)
+            reordered_past += (
+                tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
+            )
         return reordered_past
 
 
@@ -1151,9 +1125,7 @@ class XmodForCausalLM(XmodPreTrainedModel):
     XMOD_START_DOCSTRING,
 )
 class XmodForMaskedLM(XmodPreTrainedModel):
-    _keys_to_ignore_on_save = [r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
-    _keys_to_ignore_on_load_missing = [r"position_ids", r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+    _tied_weights_keys = ["lm_head.decoder.weight", "lm_head.decoder.bias"]
 
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForMaskedLM.__init__ with Roberta->Xmod
     def __init__(self, config):
@@ -1167,9 +1139,6 @@ class XmodForMaskedLM(XmodPreTrainedModel):
 
         self.roberta = XmodModel(config, add_pooling_layer=False)
         self.lm_head = XmodLMHead(config)
-
-        # The LM head weights require special treatment only when they are tied with the word embeddings
-        self.update_keys_to_ignore(config, ["lm_head.decoder.weight"])
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -1204,7 +1173,7 @@ class XmodForMaskedLM(XmodPreTrainedModel):
             Labels for computing the masked language modeling loss. Indices should be in `[-100, 0, ...,
             config.vocab_size]` (see `input_ids` docstring) Tokens with indices set to `-100` are ignored (masked), the
             loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`
-        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
+        kwargs (`Dict[str, any]`, *optional*, defaults to *{}*):
             Used to hide legacy arguments that have been deprecated.
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -1283,8 +1252,6 @@ class XmodLMHead(nn.Module):
     XMOD_START_DOCSTRING,
 )
 class XmodForSequenceClassification(XmodPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForSequenceClassification.__init__ with Roberta->Xmod
     def __init__(self, config):
         super().__init__(config)
@@ -1378,8 +1345,6 @@ class XmodForSequenceClassification(XmodPreTrainedModel):
     XMOD_START_DOCSTRING,
 )
 class XmodForMultipleChoice(XmodPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForMultipleChoice.__init__ with Roberta->Xmod
     def __init__(self, config):
         super().__init__(config)
@@ -1469,9 +1434,6 @@ class XmodForMultipleChoice(XmodPreTrainedModel):
     XMOD_START_DOCSTRING,
 )
 class XmodForTokenClassification(XmodPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForTokenClassification.__init__ with Roberta->Xmod
     def __init__(self, config):
         super().__init__(config)
@@ -1574,9 +1536,6 @@ class XmodClassificationHead(nn.Module):
     XMOD_START_DOCSTRING,
 )
 class XmodForQuestionAnswering(XmodPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     # Copied from transformers.models.roberta.modeling_roberta.RobertaForQuestionAnswering.__init__ with Roberta->Xmod
     def __init__(self, config):
         super().__init__(config)

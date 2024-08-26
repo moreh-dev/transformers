@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Tokenization classes for ALBERT model."""
-
+"""Tokenization classes for ALBERT model."""
 
 import os
 from shutil import copyfile
@@ -32,39 +31,6 @@ else:
 logger = logging.get_logger(__name__)
 VOCAB_FILES_NAMES = {"vocab_file": "spiece.model", "tokenizer_file": "tokenizer.json"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "albert-base-v1": "https://huggingface.co/albert-base-v1/resolve/main/spiece.model",
-        "albert-large-v1": "https://huggingface.co/albert-large-v1/resolve/main/spiece.model",
-        "albert-xlarge-v1": "https://huggingface.co/albert-xlarge-v1/resolve/main/spiece.model",
-        "albert-xxlarge-v1": "https://huggingface.co/albert-xxlarge-v1/resolve/main/spiece.model",
-        "albert-base-v2": "https://huggingface.co/albert-base-v2/resolve/main/spiece.model",
-        "albert-large-v2": "https://huggingface.co/albert-large-v2/resolve/main/spiece.model",
-        "albert-xlarge-v2": "https://huggingface.co/albert-xlarge-v2/resolve/main/spiece.model",
-        "albert-xxlarge-v2": "https://huggingface.co/albert-xxlarge-v2/resolve/main/spiece.model",
-    },
-    "tokenizer_file": {
-        "albert-base-v1": "https://huggingface.co/albert-base-v1/resolve/main/tokenizer.json",
-        "albert-large-v1": "https://huggingface.co/albert-large-v1/resolve/main/tokenizer.json",
-        "albert-xlarge-v1": "https://huggingface.co/albert-xlarge-v1/resolve/main/tokenizer.json",
-        "albert-xxlarge-v1": "https://huggingface.co/albert-xxlarge-v1/resolve/main/tokenizer.json",
-        "albert-base-v2": "https://huggingface.co/albert-base-v2/resolve/main/tokenizer.json",
-        "albert-large-v2": "https://huggingface.co/albert-large-v2/resolve/main/tokenizer.json",
-        "albert-xlarge-v2": "https://huggingface.co/albert-xlarge-v2/resolve/main/tokenizer.json",
-        "albert-xxlarge-v2": "https://huggingface.co/albert-xxlarge-v2/resolve/main/tokenizer.json",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "albert-base-v1": 512,
-    "albert-large-v1": 512,
-    "albert-xlarge-v1": 512,
-    "albert-xxlarge-v1": 512,
-    "albert-base-v2": 512,
-    "albert-large-v2": 512,
-    "albert-xlarge-v2": 512,
-    "albert-xxlarge-v2": 512,
-}
 
 SPIECE_UNDERLINE = "▁"
 
@@ -117,8 +83,6 @@ class AlbertTokenizerFast(PreTrainedTokenizerFast):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     slow_tokenizer_class = AlbertTokenizer
 
     def __init__(
@@ -165,7 +129,10 @@ class AlbertTokenizerFast(PreTrainedTokenizerFast):
         self.remove_space = remove_space
         self.keep_accents = keep_accents
         self.vocab_file = vocab_file
-        self.can_save_slow_tokenizer = False if not self.vocab_file else True
+
+    @property
+    def can_save_slow_tokenizer(self) -> bool:
+        return os.path.isfile(self.vocab_file) if self.vocab_file else False
 
     def build_inputs_with_special_tokens(
         self, token_ids_0: List[int], token_ids_1: Optional[List[int]] = None

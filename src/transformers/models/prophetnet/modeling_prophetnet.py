@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch ProphetNet model, ported from ProphetNet repo(fairsequery_states version)."""
+"""PyTorch ProphetNet model, ported from ProphetNet repo(fairsequery_states version)."""
 
 import copy
 import math
@@ -42,11 +42,6 @@ logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "ProphenetConfig"
 _CHECKPOINT_FOR_DOC = "microsoft/prophetnet-large-uncased"
-
-PROPHETNET_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "microsoft/prophetnet-large-uncased",
-    # See all ProphetNet models at https://huggingface.co/models?filter=prophetnet
-]
 
 
 PROPHETNET_START_DOCSTRING = r"""
@@ -556,10 +551,6 @@ class ProphetNetPreTrainedModel(PreTrainedModel):
             module.weight.data.normal_(mean=0.0, std=self.config.init_std)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, (ProphetNetDecoder, ProphetNetEncoder)):
-            module.gradient_checkpointing = value
 
     def _shift_right(self, input_ids):
         decoder_start_token_id = self.config.decoder_start_token_id
@@ -1329,18 +1320,12 @@ class ProphetNetEncoder(ProphetNetPreTrainedModel):
                 encoder_hidden_states = encoder_hidden_states + (hidden_states,)
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(encoder_layer),
+                layer_outputs = self._gradient_checkpointing_func(
+                    encoder_layer.__call__,
                     hidden_states,
                     extended_attention_mask,
                     (head_mask[idx] if head_mask is not None else None),
+                    output_attentions,
                 )
             else:
                 layer_outputs = encoder_layer(
@@ -1569,16 +1554,8 @@ class ProphetNetDecoder(ProphetNetPreTrainedModel):
             past_key_value = past_key_values[idx] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        # None for past_key_value
-                        return module(*inputs, use_cache, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(decoder_layer),
+                layer_outputs = self._gradient_checkpointing_func(
+                    decoder_layer.__call__,
                     hidden_states,
                     extended_attention_mask,
                     encoder_hidden_states,
@@ -1590,6 +1567,8 @@ class ProphetNetDecoder(ProphetNetPreTrainedModel):
                     predict_relative_position_buckets,
                     position_ids,
                     None,
+                    use_cache,
+                    output_attentions,
                 )
             else:
                 layer_outputs = decoder_layer(
@@ -1744,7 +1723,7 @@ class ProphetNetDecoder(ProphetNetPreTrainedModel):
     PROPHETNET_START_DOCSTRING,
 )
 class ProphetNetModel(ProphetNetPreTrainedModel):
-    _keys_to_ignore_on_load_missing = ["decoder.word_embeddings.weight", "encoder.word_embeddings.weight"]
+    _tied_weights_keys = ["encoder.word_embeddings.weight", "decoder.word_embeddings.weight"]
 
     def __init__(self, config: ProphetNetConfig):
         super().__init__(config)
@@ -1770,6 +1749,11 @@ class ProphetNetModel(ProphetNetPreTrainedModel):
         self.word_embeddings = value
         self.encoder.word_embeddings = self.word_embeddings
         self.decoder.word_embeddings = self.word_embeddings
+
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.encoder.word_embeddings, self.word_embeddings)
+            self._tie_or_clone_weights(self.decoder.word_embeddings, self.word_embeddings)
 
     def get_encoder(self):
         return self.encoder
@@ -1873,11 +1857,7 @@ class ProphetNetModel(ProphetNetPreTrainedModel):
     PROPHETNET_START_DOCSTRING,
 )
 class ProphetNetForConditionalGeneration(ProphetNetPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [
-        "decoder.word_embeddings.weight",
-        "encoder.word_embeddings.weight",
-        "lm_head.weight",
-    ]
+    _tied_weights_keys = ["encoder.word_embeddings.weight", "decoder.word_embeddings.weight", "lm_head.weight"]
 
     def __init__(self, config: ProphetNetConfig):
         super().__init__(config)
@@ -1895,6 +1875,10 @@ class ProphetNetForConditionalGeneration(ProphetNetPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
+
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.prophetnet.word_embeddings, self.lm_head)
 
     def get_input_embeddings(self):
         return self.prophetnet.word_embeddings
@@ -2072,7 +2056,8 @@ class ProphetNetForConditionalGeneration(ProphetNetPreTrainedModel):
         for layer_past in past_key_values:
             # cached cross_attention states don't have to be reordered -> they are always the same
             reordered_past += (
-                tuple(past_state.index_select(0, beam_idx) for past_state in layer_past[:2]) + layer_past[2:],
+                tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past[:2])
+                + layer_past[2:],
             )
         return reordered_past
 
@@ -2089,7 +2074,11 @@ class ProphetNetForConditionalGeneration(ProphetNetPreTrainedModel):
     PROPHETNET_START_DOCSTRING,
 )
 class ProphetNetForCausalLM(ProphetNetPreTrainedModel):
-    _keys_to_ignore_on_load_missing = ["lm_head.weight"]
+    _tied_weights_keys = [
+        "prophetnet.word_embeddings.weight",
+        "prophetnet.decoder.word_embeddings.weight",
+        "lm_head.weight",
+    ]
 
     def __init__(self, config: ProphetNetConfig):
         # set config for CLM
@@ -2118,6 +2107,10 @@ class ProphetNetForCausalLM(ProphetNetPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
+
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.prophetnet.decoder.word_embeddings, self.lm_head)
 
     def set_decoder(self, decoder):
         self.prophetnet.decoder = decoder
@@ -2194,10 +2187,10 @@ class ProphetNetForCausalLM(ProphetNetPreTrainedModel):
         >>> from transformers import BertTokenizer, EncoderDecoderModel, AutoTokenizer
         >>> import torch
 
-        >>> tokenizer_enc = BertTokenizer.from_pretrained("bert-large-uncased")
+        >>> tokenizer_enc = BertTokenizer.from_pretrained("google-bert/bert-large-uncased")
         >>> tokenizer_dec = AutoTokenizer.from_pretrained("microsoft/prophetnet-large-uncased")
         >>> model = EncoderDecoderModel.from_encoder_decoder_pretrained(
-        ...     "bert-large-uncased", "microsoft/prophetnet-large-uncased"
+        ...     "google-bert/bert-large-uncased", "microsoft/prophetnet-large-uncased"
         ... )
 
         >>> ARTICLE = (
@@ -2316,7 +2309,9 @@ class ProphetNetForCausalLM(ProphetNetPreTrainedModel):
     def _reorder_cache(past_key_values, beam_idx):
         reordered_past = ()
         for layer_past in past_key_values:
-            reordered_past += (tuple(past_state.index_select(0, beam_idx) for past_state in layer_past),)
+            reordered_past += (
+                tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
+            )
         return reordered_past
 
 
@@ -2328,7 +2323,15 @@ class ProphetNetDecoderWrapper(ProphetNetPreTrainedModel):
 
     def __init__(self, config: ProphetNetConfig):
         super().__init__(config)
-        self.decoder = ProphetNetDecoder(config)
+
+        self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.decoder = ProphetNetDecoder(config, word_embeddings=self.word_embeddings)
+
+        # Initialize weights and apply final processing
+        self.post_init()
+
+    def _tie_weights(self):
+        self._tie_or_clone_weights(self.word_embeddings, self.decoder.get_input_embeddings())
 
     def forward(self, *args, **kwargs):
         return self.decoder(*args, **kwargs)

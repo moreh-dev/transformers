@@ -12,11 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" TensorFlow Wav2Vec2 model."""
+"""TensorFlow Wav2Vec2 model."""
+
+from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Optional, Tuple, Union
 
 import numpy as np
 import tensorflow as tf
@@ -26,6 +28,7 @@ from ...modeling_tf_outputs import TFBaseModelOutput, TFCausalLMOutput, TFSequen
 from ...modeling_tf_utils import (
     TFPreTrainedModel,
     get_initializer,
+    keras,
     keras_serializable,
     unpack_inputs,
 )
@@ -48,13 +51,6 @@ _HIDDEN_STATES_START_POSITION = 2
 _CHECKPOINT_FOR_DOC = "facebook/wav2vec2-base-960h"
 _CONFIG_FOR_DOC = "Wav2Vec2Config"
 
-TF_WAV_2_VEC_2_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "facebook/wav2vec2-base-960h",
-    "facebook/wav2vec2-large-960h",
-    "facebook/wav2vec2-large-960h-lv60",
-    "facebook/wav2vec2-large-960h-lv60-self",
-    # See all Wav2Vec2 models at https://huggingface.co/models?filter=wav2vec2
-]
 
 LARGE_NEGATIVE = -1e8
 
@@ -84,8 +80,8 @@ class TFWav2Vec2BaseModelOutput(ModelOutput):
 
     last_hidden_state: tf.Tensor = None
     extract_features: tf.Tensor = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    hidden_states: Tuple[tf.Tensor] | None = None
+    attentions: Tuple[tf.Tensor] | None = None
 
 
 def _sample_without_replacement(distribution, num_samples):
@@ -201,7 +197,7 @@ def _expand_mask(mask: tf.Tensor, tgt_len: Optional[int] = None):
     return (one_cst - expanded_mask) * LARGE_NEGATIVE
 
 
-class TFWav2Vec2GroupNorm(tf.keras.layers.Layer):
+class TFWav2Vec2GroupNorm(keras.layers.Layer):
     """
     From tensorflow-addons https://www.tensorflow.org/addons/api_docs/python/tfa/layers/GroupNormalization
     """
@@ -213,12 +209,12 @@ class TFWav2Vec2GroupNorm(tf.keras.layers.Layer):
         epsilon: float = 1e-3,
         center: bool = True,
         scale: bool = True,
-        beta_initializer: tf.keras.initializers.Initializer = "zeros",
-        gamma_initializer: tf.keras.initializers.Initializer = "ones",
-        beta_regularizer: tf.keras.regularizers.Regularizer = None,
-        gamma_regularizer: tf.keras.regularizers.Regularizer = None,
-        beta_constraint: tf.keras.constraints.Constraint = None,
-        gamma_constraint: tf.keras.constraints.Constraint = None,
+        beta_initializer: keras.initializers.Initializer = "zeros",
+        gamma_initializer: keras.initializers.Initializer = "ones",
+        beta_regularizer: keras.regularizers.Regularizer = None,
+        gamma_regularizer: keras.regularizers.Regularizer = None,
+        beta_constraint: keras.constraints.Constraint = None,
+        gamma_constraint: keras.constraints.Constraint = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -228,12 +224,12 @@ class TFWav2Vec2GroupNorm(tf.keras.layers.Layer):
         self.epsilon = epsilon
         self.center = center
         self.scale = scale
-        self.beta_initializer = tf.keras.initializers.get(beta_initializer)
-        self.gamma_initializer = tf.keras.initializers.get(gamma_initializer)
-        self.beta_regularizer = tf.keras.regularizers.get(beta_regularizer)
-        self.gamma_regularizer = tf.keras.regularizers.get(gamma_regularizer)
-        self.beta_constraint = tf.keras.constraints.get(beta_constraint)
-        self.gamma_constraint = tf.keras.constraints.get(gamma_constraint)
+        self.beta_initializer = keras.initializers.get(beta_initializer)
+        self.gamma_initializer = keras.initializers.get(gamma_initializer)
+        self.beta_regularizer = keras.regularizers.get(beta_regularizer)
+        self.gamma_regularizer = keras.regularizers.get(gamma_regularizer)
+        self.beta_constraint = keras.constraints.get(beta_constraint)
+        self.gamma_constraint = keras.constraints.get(gamma_constraint)
         self._check_axis()
 
     def build(self, input_shape):
@@ -248,7 +244,7 @@ class TFWav2Vec2GroupNorm(tf.keras.layers.Layer):
         super().build(input_shape)
 
     def call(self, inputs):
-        input_shape = tf.keras.backend.int_shape(inputs)
+        input_shape = keras.backend.int_shape(inputs)
         tensor_input_shape = tf.shape(inputs)
 
         reshaped_inputs, group_shape = self._reshape_into_groups(inputs, input_shape, tensor_input_shape)
@@ -270,12 +266,12 @@ class TFWav2Vec2GroupNorm(tf.keras.layers.Layer):
             "epsilon": self.epsilon,
             "center": self.center,
             "scale": self.scale,
-            "beta_initializer": tf.keras.initializers.serialize(self.beta_initializer),
-            "gamma_initializer": tf.keras.initializers.serialize(self.gamma_initializer),
-            "beta_regularizer": tf.keras.regularizers.serialize(self.beta_regularizer),
-            "gamma_regularizer": tf.keras.regularizers.serialize(self.gamma_regularizer),
-            "beta_constraint": tf.keras.constraints.serialize(self.beta_constraint),
-            "gamma_constraint": tf.keras.constraints.serialize(self.gamma_constraint),
+            "beta_initializer": keras.initializers.serialize(self.beta_initializer),
+            "gamma_initializer": keras.initializers.serialize(self.gamma_initializer),
+            "beta_regularizer": keras.regularizers.serialize(self.beta_regularizer),
+            "gamma_regularizer": keras.regularizers.serialize(self.gamma_regularizer),
+            "beta_constraint": keras.constraints.serialize(self.beta_constraint),
+            "gamma_constraint": keras.constraints.serialize(self.gamma_constraint),
         }
         base_config = super().get_config()
         return {**base_config, **config}
@@ -296,7 +292,7 @@ class TFWav2Vec2GroupNorm(tf.keras.layers.Layer):
             return inputs, group_shape
 
     def _apply_normalization(self, reshaped_inputs, input_shape):
-        group_shape = tf.keras.backend.int_shape(reshaped_inputs)
+        group_shape = keras.backend.int_shape(reshaped_inputs)
         group_reduction_axes = list(range(1, len(group_shape)))
         is_instance_norm = (input_shape[self.axis] // self.groups) == 1
         if not is_instance_norm:
@@ -374,7 +370,7 @@ class TFWav2Vec2GroupNorm(tf.keras.layers.Layer):
 
     def _create_input_spec(self, input_shape):
         dim = input_shape[self.axis]
-        self.input_spec = tf.keras.layers.InputSpec(ndim=len(input_shape), axes={self.axis: dim})
+        self.input_spec = keras.layers.InputSpec(ndim=len(input_shape), axes={self.axis: dim})
 
     def _add_gamma_weight(self, input_shape):
         dim = input_shape[self.axis]
@@ -417,7 +413,7 @@ class TFWav2Vec2GroupNorm(tf.keras.layers.Layer):
         return broadcast_shape
 
 
-class TFWav2Vec2WeightNormConv1D(tf.keras.layers.Conv1D):
+class TFWav2Vec2WeightNormConv1D(keras.layers.Conv1D):
     """Adapted from https://www.tensorflow.org/probability/api_docs/python/tfp/layers/weight_norm/WeightNorm"""
 
     def __init__(self, filters, kernel_size, groups, explicit_padding, **kwargs):
@@ -432,7 +428,6 @@ class TFWav2Vec2WeightNormConv1D(tf.keras.layers.Conv1D):
         )
         self.explicit_padding = explicit_padding
         self.filter_axis = 2
-        self.initialized = False
         self.kernel_norm_axes = tf.constant([0, 1])
 
     def _init_norm(self):
@@ -447,9 +442,6 @@ class TFWav2Vec2WeightNormConv1D(tf.keras.layers.Conv1D):
 
     def build(self, input_shape):
         if not self.built:
-            input_shape = input_shape.as_list()
-            # Conv1D output shapes are checked at build time since TF 2.7, so we need to account for padding
-            input_shape[-2] += self.explicit_padding * 2
             super().build(input_shape)
 
             self.kernel = tf.Variable(tf.transpose(self.kernel), name="weight_v", trainable=True)
@@ -462,13 +454,13 @@ class TFWav2Vec2WeightNormConv1D(tf.keras.layers.Conv1D):
                 dtype=self.weight_v.dtype,
                 trainable=True,
             )
+            self._init_norm()
             self.bias = self.add_weight(name="bias", shape=(self.filters,), initializer="zeros", trainable=True)
 
     def call(self, inputs):
-        if not self.initialized:
-            self._init_norm()
-            self.initialized = True
-
+        # TODO Matt: Assigning to attributes in call() is deeply sinful in TensorFlow, as it should be idempotent.
+        #            This whole layer should be replaced by a layer that doesn't inherit from Conv1D, but instead calls
+        #            a functional 1d convolution with normalized weights that it generates (but does not store!)
         self._normalize_kernel()
 
         padded_inputs = tf.pad(inputs, ((0, 0), (self.explicit_padding, self.explicit_padding), (0, 0)))
@@ -477,13 +469,13 @@ class TFWav2Vec2WeightNormConv1D(tf.keras.layers.Conv1D):
         return output
 
 
-class TFWav2Vec2NoLayerNormConvLayer(tf.keras.layers.Layer):
+class TFWav2Vec2NoLayerNormConvLayer(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, layer_id: int = 0, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.in_conv_dim = config.conv_dim[layer_id] if layer_id > 0 else 1
         self.out_conv_dim = config.conv_dim[layer_id]
 
-        self.conv = tf.keras.layers.Conv1D(
+        self.conv = keras.layers.Conv1D(
             filters=self.out_conv_dim,
             kernel_size=config.conv_kernel[layer_id],
             strides=config.conv_stride[layer_id],
@@ -497,21 +489,29 @@ class TFWav2Vec2NoLayerNormConvLayer(tf.keras.layers.Layer):
         hidden_states = self.activation(hidden_states)
         return hidden_states
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "conv", None) is not None:
+            with tf.name_scope(self.conv.name):
+                self.conv.build([None, None, self.in_conv_dim])
 
-class TFWav2Vec2LayerNormConvLayer(tf.keras.layers.Layer):
+
+class TFWav2Vec2LayerNormConvLayer(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, layer_id: int = 0, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.in_conv_dim = config.conv_dim[layer_id] if layer_id > 0 else 1
         self.out_conv_dim = config.conv_dim[layer_id]
 
-        self.conv = tf.keras.layers.Conv1D(
+        self.conv = keras.layers.Conv1D(
             filters=self.out_conv_dim,
             kernel_size=config.conv_kernel[layer_id],
             strides=config.conv_stride[layer_id],
             use_bias=config.conv_bias,
             name="conv",
         )
-        self.layer_norm = tf.keras.layers.LayerNormalization(name="layer_norm", epsilon=config.layer_norm_eps)
+        self.layer_norm = keras.layers.LayerNormalization(name="layer_norm", epsilon=config.layer_norm_eps)
         self.activation = get_tf_activation(config.feat_extract_activation)
 
     def call(self, hidden_states: tf.Tensor) -> tf.Tensor:
@@ -520,14 +520,25 @@ class TFWav2Vec2LayerNormConvLayer(tf.keras.layers.Layer):
         hidden_states = self.activation(hidden_states)
         return hidden_states
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "conv", None) is not None:
+            with tf.name_scope(self.conv.name):
+                self.conv.build([None, None, self.in_conv_dim])
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.out_conv_dim])
 
-class TFWav2Vec2GroupNormConvLayer(tf.keras.layers.Layer):
+
+class TFWav2Vec2GroupNormConvLayer(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, layer_id: int = 0, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.in_conv_dim = config.conv_dim[layer_id] if layer_id > 0 else 1
         self.out_conv_dim = config.conv_dim[layer_id]
 
-        self.conv = tf.keras.layers.Conv1D(
+        self.conv = keras.layers.Conv1D(
             filters=self.out_conv_dim,
             kernel_size=config.conv_kernel[layer_id],
             strides=config.conv_stride[layer_id],
@@ -545,8 +556,19 @@ class TFWav2Vec2GroupNormConvLayer(tf.keras.layers.Layer):
         hidden_states = self.activation(hidden_states)
         return hidden_states
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "conv", None) is not None:
+            with tf.name_scope(self.conv.name):
+                self.conv.build([None, None, self.in_conv_dim])
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.out_conv_dim])
 
-class TFWav2Vec2PositionalConvEmbedding(tf.keras.layers.Layer):
+
+class TFWav2Vec2PositionalConvEmbedding(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.conv = TFWav2Vec2WeightNormConv1D(
@@ -558,6 +580,7 @@ class TFWav2Vec2PositionalConvEmbedding(tf.keras.layers.Layer):
         )
         self.padding = TFWav2Vec2SamePadLayer(config.num_conv_pos_embeddings)
         self.activation = get_tf_activation(config.feat_extract_activation)
+        self.config = config
 
     def call(self, hidden_states: tf.Tensor) -> tf.Tensor:
         hidden_states = self.conv(hidden_states)
@@ -565,8 +588,16 @@ class TFWav2Vec2PositionalConvEmbedding(tf.keras.layers.Layer):
         hidden_states = self.activation(hidden_states)
         return hidden_states
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "conv", None) is not None:
+            with tf.name_scope(self.conv.name):
+                self.conv.build([None, None, self.config.hidden_size])
 
-class TFWav2Vec2SamePadLayer(tf.keras.layers.Layer):
+
+class TFWav2Vec2SamePadLayer(keras.layers.Layer):
     def __init__(self, num_conv_pos_embeddings, **kwargs):
         super().__init__(**kwargs)
         self.num_pad_remove = 1 if num_conv_pos_embeddings % 2 == 0 else 0
@@ -577,7 +608,7 @@ class TFWav2Vec2SamePadLayer(tf.keras.layers.Layer):
         return hidden_states
 
 
-class TFWav2Vec2FeatureEncoder(tf.keras.layers.Layer):
+class TFWav2Vec2FeatureEncoder(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
@@ -603,6 +634,15 @@ class TFWav2Vec2FeatureEncoder(tf.keras.layers.Layer):
             hidden_states = conv_layer(hidden_states)
         return hidden_states
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "conv_layers", None) is not None:
+            for conv_layer in self.conv_layers:
+                with tf.name_scope(conv_layer.name):
+                    conv_layer.build(None)
+
 
 class TFWav2Vec2FeatureExtractor(TFWav2Vec2FeatureEncoder):
     def __init__(self, config, **kwargs):
@@ -615,18 +655,19 @@ class TFWav2Vec2FeatureExtractor(TFWav2Vec2FeatureEncoder):
         )
 
 
-class TFWav2Vec2FeatureProjection(tf.keras.layers.Layer):
+class TFWav2Vec2FeatureProjection(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, **kwargs):
         super().__init__(**kwargs)
 
-        self.layer_norm = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
-        self.projection = tf.keras.layers.Dense(
+        self.layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
+        self.projection = keras.layers.Dense(
             units=config.hidden_size,
             kernel_initializer=get_initializer(config.initializer_range),
             bias_initializer="zeros",
             name="projection",
         )
-        self.dropout = tf.keras.layers.Dropout(rate=config.feat_proj_dropout)
+        self.dropout = keras.layers.Dropout(rate=config.feat_proj_dropout)
+        self.config = config
 
     def call(self, hidden_states: tf.Tensor, training: bool = False) -> tf.Tensor:
         norm_hidden_states = self.layer_norm(hidden_states)
@@ -634,9 +675,20 @@ class TFWav2Vec2FeatureProjection(tf.keras.layers.Layer):
         hidden_states = self.dropout(hidden_states, training=training)
         return hidden_states, norm_hidden_states
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.config.conv_dim[-1]])
+        if getattr(self, "projection", None) is not None:
+            with tf.name_scope(self.projection.name):
+                self.projection.build([None, None, self.config.conv_dim[-1]])
+
 
 # Copied from transformers.models.bart.modeling_tf_bart.TFBartAttention with TFBart->TFWav2Vec2
-class TFWav2Vec2Attention(tf.keras.layers.Layer):
+class TFWav2Vec2Attention(keras.layers.Layer):
     """Multi-headed attention from "Attention Is All You Need"""
 
     def __init__(
@@ -652,7 +704,7 @@ class TFWav2Vec2Attention(tf.keras.layers.Layer):
         self.embed_dim = embed_dim
 
         self.num_heads = num_heads
-        self.dropout = tf.keras.layers.Dropout(dropout)
+        self.dropout = keras.layers.Dropout(dropout)
         self.head_dim = embed_dim // num_heads
         if (self.head_dim * num_heads) != self.embed_dim:
             raise ValueError(
@@ -662,10 +714,10 @@ class TFWav2Vec2Attention(tf.keras.layers.Layer):
         self.scaling = self.head_dim**-0.5
         self.is_decoder = is_decoder
 
-        self.k_proj = tf.keras.layers.Dense(embed_dim, use_bias=bias, name="k_proj")
-        self.q_proj = tf.keras.layers.Dense(embed_dim, use_bias=bias, name="q_proj")
-        self.v_proj = tf.keras.layers.Dense(embed_dim, use_bias=bias, name="v_proj")
-        self.out_proj = tf.keras.layers.Dense(embed_dim, use_bias=bias, name="out_proj")
+        self.k_proj = keras.layers.Dense(embed_dim, use_bias=bias, name="k_proj")
+        self.q_proj = keras.layers.Dense(embed_dim, use_bias=bias, name="q_proj")
+        self.v_proj = keras.layers.Dense(embed_dim, use_bias=bias, name="v_proj")
+        self.out_proj = keras.layers.Dense(embed_dim, use_bias=bias, name="out_proj")
 
     def _shape(self, tensor: tf.Tensor, seq_len: int, bsz: int):
         return tf.transpose(tf.reshape(tensor, (bsz, seq_len, self.num_heads, self.head_dim)), (0, 2, 1, 3))
@@ -673,12 +725,12 @@ class TFWav2Vec2Attention(tf.keras.layers.Layer):
     def call(
         self,
         hidden_states: tf.Tensor,
-        key_value_states: Optional[tf.Tensor] = None,
-        past_key_value: Optional[Tuple[Tuple[tf.Tensor]]] = None,
-        attention_mask: Optional[tf.Tensor] = None,
-        layer_head_mask: Optional[tf.Tensor] = None,
+        key_value_states: tf.Tensor | None = None,
+        past_key_value: Tuple[Tuple[tf.Tensor]] | None = None,
+        attention_mask: tf.Tensor | None = None,
+        layer_head_mask: tf.Tensor | None = None,
         training: Optional[bool] = False,
-    ) -> Tuple[tf.Tensor, Optional[tf.Tensor]]:
+    ) -> Tuple[tf.Tensor, tf.Tensor | None]:
         """Input shape: Batch x Time x Channel"""
 
         # if key_value_states are provided this layer is used as a cross-attention layer
@@ -788,14 +840,31 @@ class TFWav2Vec2Attention(tf.keras.layers.Layer):
 
         return attn_output, attn_weights, past_key_value
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "k_proj", None) is not None:
+            with tf.name_scope(self.k_proj.name):
+                self.k_proj.build([None, None, self.embed_dim])
+        if getattr(self, "q_proj", None) is not None:
+            with tf.name_scope(self.q_proj.name):
+                self.q_proj.build([None, None, self.embed_dim])
+        if getattr(self, "v_proj", None) is not None:
+            with tf.name_scope(self.v_proj.name):
+                self.v_proj.build([None, None, self.embed_dim])
+        if getattr(self, "out_proj", None) is not None:
+            with tf.name_scope(self.out_proj.name):
+                self.out_proj.build([None, None, self.embed_dim])
 
-class TFWav2Vec2FeedForward(tf.keras.layers.Layer):
+
+class TFWav2Vec2FeedForward(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, **kwargs):
         super().__init__(**kwargs)
 
-        self.intermediate_dropout = tf.keras.layers.Dropout(config.activation_dropout)
+        self.intermediate_dropout = keras.layers.Dropout(config.activation_dropout)
 
-        self.intermediate_dense = tf.keras.layers.Dense(
+        self.intermediate_dense = keras.layers.Dense(
             units=config.intermediate_size,
             kernel_initializer=get_initializer(config.initializer_range),
             bias_initializer="zeros",
@@ -803,13 +872,14 @@ class TFWav2Vec2FeedForward(tf.keras.layers.Layer):
         )
         self.intermediate_act_fn = get_tf_activation(config.hidden_act)
 
-        self.output_dense = tf.keras.layers.Dense(
+        self.output_dense = keras.layers.Dense(
             units=config.hidden_size,
             kernel_initializer=get_initializer(config.initializer_range),
             bias_initializer="zeros",
             name="output_dense",
         )
-        self.output_dropout = tf.keras.layers.Dropout(config.hidden_dropout)
+        self.output_dropout = keras.layers.Dropout(config.hidden_dropout)
+        self.config = config
 
     def call(self, hidden_states: tf.Tensor, training: bool = False) -> tf.Tensor:
         hidden_states = self.intermediate_dense(hidden_states)
@@ -820,8 +890,19 @@ class TFWav2Vec2FeedForward(tf.keras.layers.Layer):
         hidden_states = self.output_dropout(hidden_states, training=training)
         return hidden_states
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "intermediate_dense", None) is not None:
+            with tf.name_scope(self.intermediate_dense.name):
+                self.intermediate_dense.build([None, None, self.config.hidden_size])
+        if getattr(self, "output_dense", None) is not None:
+            with tf.name_scope(self.output_dense.name):
+                self.output_dense.build([None, None, self.config.intermediate_size])
 
-class TFWav2Vec2EncoderLayer(tf.keras.layers.Layer):
+
+class TFWav2Vec2EncoderLayer(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, **kwargs):
         super().__init__(**kwargs)
         self.attention = TFWav2Vec2Attention(
@@ -831,17 +912,16 @@ class TFWav2Vec2EncoderLayer(tf.keras.layers.Layer):
             is_decoder=False,
             name="attention",
         )
-        self.dropout = tf.keras.layers.Dropout(config.hidden_dropout)
-        self.layer_norm = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
+        self.dropout = keras.layers.Dropout(config.hidden_dropout)
+        self.layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
         self.feed_forward = TFWav2Vec2FeedForward(config, name="feed_forward")
-        self.final_layer_norm = tf.keras.layers.LayerNormalization(
-            epsilon=config.layer_norm_eps, name="final_layer_norm"
-        )
+        self.final_layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="final_layer_norm")
+        self.config = config
 
     def call(
         self,
         hidden_states: tf.Tensor,
-        attention_mask: Optional[tf.Tensor] = None,
+        attention_mask: tf.Tensor | None = None,
         output_attentions: Optional[bool] = False,
         training: bool = False,
     ) -> Tuple[tf.Tensor]:
@@ -863,8 +943,25 @@ class TFWav2Vec2EncoderLayer(tf.keras.layers.Layer):
 
         return outputs
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "attention", None) is not None:
+            with tf.name_scope(self.attention.name):
+                self.attention.build(None)
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.config.hidden_size])
+        if getattr(self, "feed_forward", None) is not None:
+            with tf.name_scope(self.feed_forward.name):
+                self.feed_forward.build(None)
+        if getattr(self, "final_layer_norm", None) is not None:
+            with tf.name_scope(self.final_layer_norm.name):
+                self.final_layer_norm.build([None, None, self.config.hidden_size])
 
-class TFWav2Vec2EncoderLayerStableLayerNorm(tf.keras.layers.Layer):
+
+class TFWav2Vec2EncoderLayerStableLayerNorm(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, **kwargs):
         super().__init__(**kwargs)
         self.attention = TFWav2Vec2Attention(
@@ -874,17 +971,16 @@ class TFWav2Vec2EncoderLayerStableLayerNorm(tf.keras.layers.Layer):
             is_decoder=False,
             name="attention",
         )
-        self.dropout = tf.keras.layers.Dropout(config.hidden_dropout)
-        self.layer_norm = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
+        self.dropout = keras.layers.Dropout(config.hidden_dropout)
+        self.layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
         self.feed_forward = TFWav2Vec2FeedForward(config, name="feed_forward")
-        self.final_layer_norm = tf.keras.layers.LayerNormalization(
-            epsilon=config.layer_norm_eps, name="final_layer_norm"
-        )
+        self.final_layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="final_layer_norm")
+        self.config = config
 
     def call(
         self,
         hidden_states: tf.Tensor,
-        attention_mask: Optional[tf.Tensor] = None,
+        attention_mask: tf.Tensor | None = None,
         output_attentions: Optional[bool] = False,
         training: bool = False,
     ) -> Tuple[tf.Tensor]:
@@ -904,20 +1000,37 @@ class TFWav2Vec2EncoderLayerStableLayerNorm(tf.keras.layers.Layer):
 
         return outputs
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "attention", None) is not None:
+            with tf.name_scope(self.attention.name):
+                self.attention.build(None)
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.config.hidden_size])
+        if getattr(self, "feed_forward", None) is not None:
+            with tf.name_scope(self.feed_forward.name):
+                self.feed_forward.build(None)
+        if getattr(self, "final_layer_norm", None) is not None:
+            with tf.name_scope(self.final_layer_norm.name):
+                self.final_layer_norm.build([None, None, self.config.hidden_size])
 
-class TFWav2Vec2Encoder(tf.keras.layers.Layer):
+
+class TFWav2Vec2Encoder(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, **kwargs):
         super().__init__(**kwargs)
         self.config = config
         self.pos_conv_embed = TFWav2Vec2PositionalConvEmbedding(config, name="pos_conv_embed")
-        self.layer_norm = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
-        self.dropout = tf.keras.layers.Dropout(config.hidden_dropout)
+        self.layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
+        self.dropout = keras.layers.Dropout(config.hidden_dropout)
         self.layer = [TFWav2Vec2EncoderLayer(config, name=f"layers.{i}") for i in range(config.num_hidden_layers)]
 
     def call(
         self,
         hidden_states: tf.Tensor,
-        attention_mask: Optional[tf.Tensor] = None,
+        attention_mask: tf.Tensor | None = None,
         output_attentions: Optional[bool] = False,
         output_hidden_states: Optional[bool] = False,
         return_dict: Optional[bool] = True,
@@ -969,14 +1082,29 @@ class TFWav2Vec2Encoder(tf.keras.layers.Layer):
             attentions=all_self_attentions,
         )
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "pos_conv_embed", None) is not None:
+            with tf.name_scope(self.pos_conv_embed.name):
+                self.pos_conv_embed.build(None)
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.config.hidden_size])
+        if getattr(self, "layer", None) is not None:
+            for layer in self.layer:
+                with tf.name_scope(layer.name):
+                    layer.build(None)
 
-class TFWav2Vec2EncoderStableLayerNorm(tf.keras.layers.Layer):
+
+class TFWav2Vec2EncoderStableLayerNorm(keras.layers.Layer):
     def __init__(self, config: Wav2Vec2Config, **kwargs):
         super().__init__(**kwargs)
         self.config = config
         self.pos_conv_embed = TFWav2Vec2PositionalConvEmbedding(config, name="pos_conv_embed")
-        self.layer_norm = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
-        self.dropout = tf.keras.layers.Dropout(config.hidden_dropout)
+        self.layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
+        self.dropout = keras.layers.Dropout(config.hidden_dropout)
         self.layer = [
             TFWav2Vec2EncoderLayerStableLayerNorm(config, name=f"layers.{i}") for i in range(config.num_hidden_layers)
         ]
@@ -984,7 +1112,7 @@ class TFWav2Vec2EncoderStableLayerNorm(tf.keras.layers.Layer):
     def call(
         self,
         hidden_states: tf.Tensor,
-        attention_mask: Optional[tf.Tensor] = None,
+        attention_mask: tf.Tensor | None = None,
         output_attentions: Optional[bool] = False,
         output_hidden_states: Optional[bool] = False,
         return_dict: Optional[bool] = True,
@@ -1036,9 +1164,24 @@ class TFWav2Vec2EncoderStableLayerNorm(tf.keras.layers.Layer):
             attentions=all_self_attentions,
         )
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "pos_conv_embed", None) is not None:
+            with tf.name_scope(self.pos_conv_embed.name):
+                self.pos_conv_embed.build(None)
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.config.hidden_size])
+        if getattr(self, "layer", None) is not None:
+            for layer in self.layer:
+                with tf.name_scope(layer.name):
+                    layer.build(None)
+
 
 @keras_serializable
-class TFWav2Vec2MainLayer(tf.keras.layers.Layer):
+class TFWav2Vec2MainLayer(keras.layers.Layer):
     config_class = Wav2Vec2Config
 
     def __init__(self, config: Wav2Vec2Config, **kwargs):
@@ -1052,12 +1195,23 @@ class TFWav2Vec2MainLayer(tf.keras.layers.Layer):
         else:
             self.encoder = TFWav2Vec2Encoder(config, name="encoder")
 
-    def build(self, input_shape: tf.TensorShape):
-        self.masked_spec_embed = self.add_weight(
-            shape=(self.config.hidden_size,), initializer="uniform", trainable=True, name="masked_spec_embed"
-        )
-
-        super().build(input_shape)
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if self.config.mask_time_prob > 0.0 or self.config.mask_feature_prob > 0.0:
+            self.masked_spec_embed = self.add_weight(
+                shape=(self.config.hidden_size,), initializer="uniform", trainable=True, name="masked_spec_embed"
+            )
+        if getattr(self, "feature_extractor", None) is not None:
+            with tf.name_scope(self.feature_extractor.name):
+                self.feature_extractor.build(None)
+        if getattr(self, "feature_projection", None) is not None:
+            with tf.name_scope(self.feature_projection.name):
+                self.feature_projection.build(None)
+        if getattr(self, "encoder", None) is not None:
+            with tf.name_scope(self.encoder.name):
+                self.encoder.build(None)
 
     def _get_feat_extract_output_lengths(self, input_lengths: tf.Tensor):
         """
@@ -1074,7 +1228,7 @@ class TFWav2Vec2MainLayer(tf.keras.layers.Layer):
 
         return input_lengths
 
-    def _mask_hidden_states(self, hidden_states: tf.Tensor, mask_time_indices: Optional[tf.Tensor] = None):
+    def _mask_hidden_states(self, hidden_states: tf.Tensor, mask_time_indices: tf.Tensor | None = None):
         """
         Masks extracted features along time axis and/or along feature axis according to
         [SpecAugment](https://arxiv.org/abs/1904.08779).
@@ -1122,11 +1276,11 @@ class TFWav2Vec2MainLayer(tf.keras.layers.Layer):
     def call(
         self,
         input_values: tf.Tensor,
-        attention_mask: Optional[tf.Tensor] = None,
-        token_type_ids: Optional[tf.Tensor] = None,
-        position_ids: Optional[tf.Tensor] = None,
-        head_mask: Optional[tf.Tensor] = None,
-        inputs_embeds: Optional[tf.Tensor] = None,
+        attention_mask: tf.Tensor | None = None,
+        token_type_ids: tf.Tensor | None = None,
+        position_ids: tf.Tensor | None = None,
+        head_mask: tf.Tensor | None = None,
+        inputs_embeds: tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -1182,35 +1336,25 @@ class TFWav2Vec2PreTrainedModel(TFPreTrainedModel):
     main_input_name = "input_values"
 
     @property
-    def dummy_inputs(self) -> Dict[str, tf.Tensor]:
-        pad_token = 0.0
-        input_values = tf.convert_to_tensor(np.random.rand(1, 16000), tf.float32)
-        dummy_inputs = {
-            "input_values": input_values,
-            "attention_mask": tf.cast(tf.not_equal(input_values, pad_token), tf.float32),
+    def input_signature(self):
+        return {
+            "input_values": tf.TensorSpec((None, None), tf.float32, name="input_values"),
+            "attention_mask": tf.TensorSpec((None, None), tf.float32, name="attention_mask"),
         }
-        return dummy_inputs
+
+    @property
+    def dummy_inputs(self):
+        return {
+            "input_values": tf.random.uniform(shape=(1, 500), dtype=tf.float32),
+            "attention_mask": tf.ones(shape=(1, 500), dtype=tf.float32),
+        }
 
     def __init__(self, config, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
         logger.warning(
             f"\n{self.__class__.__name__} has backpropagation operations that are NOT supported on CPU. If you wish "
-            "to train/fine-tine this model, you need a GPU or a TPU"
+            "to train/fine-tune this model, you need a GPU or a TPU"
         )
-
-    @tf.function(
-        input_signature=[
-            {
-                "input_values": tf.TensorSpec((None, None), tf.float32, name="input_values"),
-                "attention_mask": tf.TensorSpec((None, None), tf.int32, name="attention_mask"),
-                "token_type_ids": tf.TensorSpec((None, None), tf.int32, name="token_type_ids"),
-            }
-        ]
-    )
-    def serving(self, inputs):
-        output = self.call(input_values=inputs, training=False)
-
-        return self.serving_output(output)
 
     def _get_feat_extract_output_lengths(self, input_lengths, add_adapter=None):
         """
@@ -1259,7 +1403,7 @@ WAV_2_VEC_2_START_DOCSTRING = r"""
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
 
-    This model is also a [tf.keras.Model](https://www.tensorflow.org/api_docs/python/tf/keras/Model) subclass. Use it
+    This model is also a [keras.Model](https://www.tensorflow.org/api_docs/python/tf/keras/Model) subclass. Use it
     as a regular TF 2.0 Keras Model and refer to the TF 2.0 documentation for all matter related to general usage and
     behavior.
 
@@ -1367,11 +1511,11 @@ class TFWav2Vec2Model(TFWav2Vec2PreTrainedModel):
     def call(
         self,
         input_values: tf.Tensor,
-        attention_mask: Optional[tf.Tensor] = None,
-        token_type_ids: Optional[tf.Tensor] = None,
-        position_ids: Optional[tf.Tensor] = None,
-        head_mask: Optional[tf.Tensor] = None,
-        inputs_embeds: Optional[tf.Tensor] = None,
+        attention_mask: tf.Tensor | None = None,
+        token_type_ids: tf.Tensor | None = None,
+        position_ids: tf.Tensor | None = None,
+        head_mask: tf.Tensor | None = None,
+        inputs_embeds: tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -1424,16 +1568,13 @@ class TFWav2Vec2Model(TFWav2Vec2PreTrainedModel):
 
         return outputs
 
-    def serving_output(self, output):
-        hidden_states = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attentions = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFWav2Vec2BaseModelOutput(
-            last_hidden_state=output.last_hidden_state,
-            extract_features=output.extract_features,
-            hidden_states=hidden_states,
-            attentions=attentions,
-        )
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "wav2vec2", None) is not None:
+            with tf.name_scope(self.wav2vec2.name):
+                self.wav2vec2.build(None)
 
 
 @add_start_docstrings(
@@ -1445,8 +1586,11 @@ class TFWav2Vec2ForCTC(TFWav2Vec2PreTrainedModel):
         super().__init__(config, *inputs, **kwargs)
 
         self.wav2vec2 = TFWav2Vec2MainLayer(config, name="wav2vec2")
-        self.dropout = tf.keras.layers.Dropout(config.final_dropout)
-        self.lm_head = tf.keras.layers.Dense(config.vocab_size, name="lm_head")
+        self.dropout = keras.layers.Dropout(config.final_dropout)
+        self.lm_head = keras.layers.Dense(config.vocab_size, name="lm_head")
+        self.output_hidden_size = (
+            config.output_hidden_size if hasattr(config, "add_adapter") and config.add_adapter else config.hidden_size
+        )
 
     def freeze_feature_extractor(self):
         """
@@ -1454,7 +1598,7 @@ class TFWav2Vec2ForCTC(TFWav2Vec2PreTrainedModel):
         not be updated during training.
         """
         warnings.warn(
-            "The method `freeze_feature_extractor` is deprecated and will be removed in Transformers v5."
+            "The method `freeze_feature_extractor` is deprecated and will be removed in Transformers v5. "
             "Please use the equivalent `freeze_feature_encoder` method instead.",
             FutureWarning,
         )
@@ -1473,13 +1617,13 @@ class TFWav2Vec2ForCTC(TFWav2Vec2PreTrainedModel):
     def call(
         self,
         input_values: tf.Tensor,
-        attention_mask: Optional[tf.Tensor] = None,
-        token_type_ids: Optional[tf.Tensor] = None,
-        position_ids: Optional[tf.Tensor] = None,
-        head_mask: Optional[tf.Tensor] = None,
-        inputs_embeds: Optional[tf.Tensor] = None,
+        attention_mask: tf.Tensor | None = None,
+        token_type_ids: tf.Tensor | None = None,
+        position_ids: tf.Tensor | None = None,
+        head_mask: tf.Tensor | None = None,
+        inputs_embeds: tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
-        labels: Optional[tf.Tensor] = None,
+        labels: tf.Tensor | None = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         training: Optional[bool] = False,
@@ -1527,6 +1671,8 @@ class TFWav2Vec2ForCTC(TFWav2Vec2PreTrainedModel):
 
         >>> loss = model(input_values, labels=labels).loss
         ```"""
+        if labels is not None and tf.reduce_max(labels) >= self.config.vocab_size:
+            raise ValueError(f"Label values must be <= vocab_size: {self.config.vocab_size}")
 
         outputs = self.wav2vec2(
             input_values=input_values,
@@ -1546,9 +1692,6 @@ class TFWav2Vec2ForCTC(TFWav2Vec2PreTrainedModel):
         logits = self.lm_head(hidden_states)
 
         if labels is not None:
-            if tf.reduce_max(labels) >= self.config.vocab_size:
-                raise ValueError(f"Label values must be <= vocab_size: {self.config.vocab_size}")
-
             attention_mask = (
                 attention_mask if attention_mask is not None else tf.ones_like(input_values, dtype=tf.float32)
             )
@@ -1588,10 +1731,16 @@ class TFWav2Vec2ForCTC(TFWav2Vec2PreTrainedModel):
             attentions=outputs.attentions,
         )
 
-    def serving_output(self, output: TFCausalLMOutput) -> TFCausalLMOutput:
-        hidden_states = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attentions = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-        return TFCausalLMOutput(logits=output.logits, hidden_states=hidden_states, attentions=attentions)
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "wav2vec2", None) is not None:
+            with tf.name_scope(self.wav2vec2.name):
+                self.wav2vec2.build(None)
+        if getattr(self, "lm_head", None) is not None:
+            with tf.name_scope(self.lm_head.name):
+                self.lm_head.build([None, None, self.output_hidden_size])
 
 
 class TFWav2Vec2ForSequenceClassification(TFWav2Vec2PreTrainedModel):
@@ -1605,8 +1754,8 @@ class TFWav2Vec2ForSequenceClassification(TFWav2Vec2PreTrainedModel):
                     shape=(self.num_layers,), initializer="ones", trainable=True, name="layer_weights"
                 )
         self.config = config
-        self.projector = tf.keras.layers.Dense(units=config.classifier_proj_size, name="projector")
-        self.classifier = tf.keras.layers.Dense(units=config.num_labels, activation=None, name="classifier")
+        self.projector = keras.layers.Dense(units=config.classifier_proj_size, name="projector")
+        self.classifier = keras.layers.Dense(units=config.num_labels, activation=None, name="classifier")
 
     def freeze_feature_extractor(self):
         """
@@ -1614,7 +1763,7 @@ class TFWav2Vec2ForSequenceClassification(TFWav2Vec2PreTrainedModel):
         not be updated during training.
         """
         warnings.warn(
-            "The method `freeze_feature_extractor` is deprecated and will be removed in Transformers v5."
+            "The method `freeze_feature_extractor` is deprecated and will be removed in Transformers v5. "
             "Please use the equivalent `freeze_feature_encoder` method instead.",
             FutureWarning,
         )
@@ -1639,13 +1788,13 @@ class TFWav2Vec2ForSequenceClassification(TFWav2Vec2PreTrainedModel):
     def call(
         self,
         input_values: tf.Tensor,
-        attention_mask: Optional[tf.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        labels: Optional[tf.Tensor] = None,
+        attention_mask: tf.Tensor | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        labels: tf.Tensor | None = None,
         training: bool = False,
-    ):
+    ) -> TFSequenceClassifierOutput | Tuple[tf.Tensor]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         output_hidden_states = True if self.config.use_weighted_layer_sum else output_hidden_states
 
@@ -1669,7 +1818,7 @@ class TFWav2Vec2ForSequenceClassification(TFWav2Vec2PreTrainedModel):
         if attention_mask is None:
             pooled_output = tf.reduce_mean(hidden_states, axis=1)
         else:
-            padding_mask = self._get_feature_vector_attention_mask(hidden_states.shape[1], attention_mask)
+            padding_mask = self._get_feature_vector_attention_mask(shape_list(hidden_states)[1], attention_mask)
             padding_mask_float = tf.cast(padding_mask, hidden_states.dtype)
             hidden_states = tf.multiply(hidden_states, tf.expand_dims(padding_mask_float, axis=-1))
             pooled_output = tf.divide(
@@ -1678,7 +1827,7 @@ class TFWav2Vec2ForSequenceClassification(TFWav2Vec2PreTrainedModel):
         logits = self.classifier(pooled_output)
         loss = None
         if labels is not None:
-            loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+            loss_fn = keras.losses.SparseCategoricalCrossentropy(from_logits=True)
             loss = loss_fn(tf.reshape(labels, [-1]), tf.reshape(logits, [-1, self.config.num_labels]))
         if not return_dict:
             output = (logits,) + outputs[_HIDDEN_STATES_START_POSITION:]
@@ -1691,26 +1840,16 @@ class TFWav2Vec2ForSequenceClassification(TFWav2Vec2PreTrainedModel):
             attentions=outputs.attentions,
         )
 
-    def serving_output(self, output):
-        hidden_states = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attentions = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFSequenceClassifierOutput(
-            logits=output.logits,
-            hidden_states=hidden_states,
-            attentions=attentions,
-        )
-
-    @tf.function(
-        input_signature=[
-            {
-                "input_values": tf.TensorSpec((None, None), tf.float32, name="input_values"),
-                "attention_mask": tf.TensorSpec((None, None), tf.int32, name="attention_mask"),
-                "token_type_ids": tf.TensorSpec((None, None), tf.int32, name="token_type_ids"),
-            }
-        ]
-    )
-    def serving(self, inputs):
-        output = self.call(input_values=inputs)
-
-        return self.serving_output(output)
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "wav2vec2", None) is not None:
+            with tf.name_scope(self.wav2vec2.name):
+                self.wav2vec2.build(None)
+        if getattr(self, "projector", None) is not None:
+            with tf.name_scope(self.projector.name):
+                self.projector.build([None, None, self.config.hidden_size])
+        if getattr(self, "classifier", None) is not None:
+            with tf.name_scope(self.classifier.name):
+                self.classifier.build([None, None, self.config.classifier_proj_size])

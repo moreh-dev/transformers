@@ -14,8 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
- TF 2.0 XLNet model.
+TF 2.0 XLNet model.
 """
+
+from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
@@ -36,12 +38,12 @@ from ...modeling_tf_utils import (
     TFSharedEmbeddings,
     TFTokenClassificationLoss,
     get_initializer,
+    keras,
     keras_serializable,
     unpack_inputs,
 )
-from ...tf_utils import shape_list, stable_softmax
+from ...tf_utils import check_embeddings_within_bounds, shape_list, stable_softmax
 from ...utils import (
-    MULTIPLE_CHOICE_DUMMY_INPUTS,
     ModelOutput,
     add_code_sample_docstrings,
     add_start_docstrings,
@@ -54,17 +56,11 @@ from .configuration_xlnet import XLNetConfig
 
 logger = logging.get_logger(__name__)
 
-_CHECKPOINT_FOR_DOC = "xlnet-base-cased"
+_CHECKPOINT_FOR_DOC = "xlnet/xlnet-base-cased"
 _CONFIG_FOR_DOC = "XLNetConfig"
 
-TF_XLNET_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "xlnet-base-cased",
-    "xlnet-large-cased",
-    # See all XLNet models at https://huggingface.co/models?filter=xlnet
-]
 
-
-class TFXLNetRelativeAttention(tf.keras.layers.Layer):
+class TFXLNetRelativeAttention(keras.layers.Layer):
     def __init__(self, config, **kwargs):
         super().__init__(**kwargs)
 
@@ -81,10 +77,11 @@ class TFXLNetRelativeAttention(tf.keras.layers.Layer):
         self.initializer_range = config.initializer_range
         self.output_attentions = config.output_attentions
 
-        self.layer_norm = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
-        self.dropout = tf.keras.layers.Dropout(config.dropout)
+        self.layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
+        self.dropout = keras.layers.Dropout(config.dropout)
+        self.config = config
 
-    def build(self, input_shape):
+    def build(self, input_shape=None):
         initializer = get_initializer(self.initializer_range)
         self.q = self.add_weight(
             shape=(self.d_model, self.n_head, self.d_head), initializer=initializer, trainable=True, name="q"
@@ -113,7 +110,13 @@ class TFXLNetRelativeAttention(tf.keras.layers.Layer):
         self.seg_embed = self.add_weight(
             shape=(2, self.n_head, self.d_head), initializer=initializer, trainable=True, name="seg_embed"
         )
-        super().build(input_shape)
+
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.config.d_model])
 
     def prune_heads(self, heads):
         raise NotImplementedError
@@ -195,9 +198,9 @@ class TFXLNetRelativeAttention(tf.keras.layers.Layer):
         attn_mask_g,
         r,
         seg_mat,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = False,
         training: bool = False,
     ):
@@ -327,21 +330,22 @@ class TFXLNetRelativeAttention(tf.keras.layers.Layer):
         return outputs
 
 
-class TFXLNetFeedForward(tf.keras.layers.Layer):
+class TFXLNetFeedForward(keras.layers.Layer):
     def __init__(self, config, **kwargs):
         super().__init__(**kwargs)
-        self.layer_norm = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
-        self.layer_1 = tf.keras.layers.Dense(
+        self.layer_norm = keras.layers.LayerNormalization(epsilon=config.layer_norm_eps, name="layer_norm")
+        self.layer_1 = keras.layers.Dense(
             config.d_inner, kernel_initializer=get_initializer(config.initializer_range), name="layer_1"
         )
-        self.layer_2 = tf.keras.layers.Dense(
+        self.layer_2 = keras.layers.Dense(
             config.d_model, kernel_initializer=get_initializer(config.initializer_range), name="layer_2"
         )
-        self.dropout = tf.keras.layers.Dropout(config.dropout)
+        self.dropout = keras.layers.Dropout(config.dropout)
         if isinstance(config.ff_activation, str):
             self.activation_function = get_tf_activation(config.ff_activation)
         else:
             self.activation_function = config.ff_activation
+        self.config = config
 
     def call(self, inp, training=False):
         output = inp
@@ -353,13 +357,27 @@ class TFXLNetFeedForward(tf.keras.layers.Layer):
         output = self.layer_norm(output + inp)
         return output
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "layer_norm", None) is not None:
+            with tf.name_scope(self.layer_norm.name):
+                self.layer_norm.build([None, None, self.config.d_model])
+        if getattr(self, "layer_1", None) is not None:
+            with tf.name_scope(self.layer_1.name):
+                self.layer_1.build([None, None, self.config.d_model])
+        if getattr(self, "layer_2", None) is not None:
+            with tf.name_scope(self.layer_2.name):
+                self.layer_2.build([None, None, self.config.d_inner])
 
-class TFXLNetLayer(tf.keras.layers.Layer):
+
+class TFXLNetLayer(keras.layers.Layer):
     def __init__(self, config, **kwargs):
         super().__init__(**kwargs)
         self.rel_attn = TFXLNetRelativeAttention(config, name="rel_attn")
         self.ff = TFXLNetFeedForward(config, name="ff")
-        self.dropout = tf.keras.layers.Dropout(config.dropout)
+        self.dropout = keras.layers.Dropout(config.dropout)
 
     def call(
         self,
@@ -369,9 +387,9 @@ class TFXLNetLayer(tf.keras.layers.Layer):
         attn_mask,
         pos_emb,
         seg_mat,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = False,
         training: bool = False,
     ):
@@ -397,8 +415,19 @@ class TFXLNetLayer(tf.keras.layers.Layer):
         outputs = (output_h, output_g) + outputs[2:]  # Add again attentions if there are there
         return outputs
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "rel_attn", None) is not None:
+            with tf.name_scope(self.rel_attn.name):
+                self.rel_attn.build(None)
+        if getattr(self, "ff", None) is not None:
+            with tf.name_scope(self.ff.name):
+                self.ff.build(None)
 
-class TFXLNetLMHead(tf.keras.layers.Layer):
+
+class TFXLNetLMHead(keras.layers.Layer):
     def __init__(self, config, input_embeddings, **kwargs):
         super().__init__(**kwargs)
         self.config = config
@@ -431,7 +460,7 @@ class TFXLNetLMHead(tf.keras.layers.Layer):
 
 
 @keras_serializable
-class TFXLNetMainLayer(tf.keras.layers.Layer):
+class TFXLNetMainLayer(keras.layers.Layer):
     config_class = XLNetConfig
 
     def __init__(self, config, **kwargs):
@@ -457,7 +486,7 @@ class TFXLNetMainLayer(tf.keras.layers.Layer):
             config.vocab_size, config.d_model, initializer_range=config.initializer_range, name="word_embedding"
         )
         self.layer = [TFXLNetLayer(config, name=f"layer_._{i}") for i in range(config.n_layer)]
-        self.dropout = tf.keras.layers.Dropout(config.dropout)
+        self.dropout = keras.layers.Dropout(config.dropout)
 
         self.use_mems_eval = config.use_mems_eval
         self.use_mems_train = config.use_mems_train
@@ -469,11 +498,22 @@ class TFXLNetMainLayer(tf.keras.layers.Layer):
         self.word_embedding.weight = value
         self.word_embedding.vocab_size = shape_list(value)[0]
 
-    def build(self, input_shape):
+    def build(self, input_shape=None):
         initializer = get_initializer(self.initializer_range)
         self.mask_emb = self.add_weight(
             shape=(1, 1, self.d_model), initializer=initializer, trainable=True, name="mask_emb"
         )
+
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "word_embedding", None) is not None:
+            with tf.name_scope(self.word_embedding.name):
+                self.word_embedding.build(None)
+        if getattr(self, "layer", None) is not None:
+            for layer in self.layer:
+                with tf.name_scope(layer.name):
+                    layer.build(None)
 
     def _prune_heads(self, heads_to_prune):
         raise NotImplementedError
@@ -582,15 +622,15 @@ class TFXLNetMainLayer(tf.keras.layers.Layer):
     @unpack_inputs
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        perm_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        input_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        perm_mask: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        input_mask: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         use_mems: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -678,16 +718,7 @@ class TFXLNetMainLayer(tf.keras.layers.Layer):
         if inputs_embeds is not None:
             word_emb_k = inputs_embeds
         else:
-            # Note: tf.gather, on which the embedding layer is based, won't check positive out of bound
-            # indices on GPU, returning zeros instead. This is a dangerous silent behavior.
-            tf.debugging.assert_less(
-                input_ids,
-                tf.cast(self.word_embedding.vocab_size, dtype=input_ids.dtype),
-                message=(
-                    "input_ids must be smaller than the embedding layer's input dimension (got"
-                    f" {tf.math.reduce_max(input_ids)} >= {self.word_embedding.vocab_size})"
-                ),
-            )
+            check_embeddings_within_bounds(input_ids, self.word_embedding.vocab_size)
             word_emb_k = self.word_embedding(input_ids)
         output_h = self.dropout(word_emb_k, training=training)
         if target_mapping is not None:
@@ -833,9 +864,9 @@ class TFXLNetModelOutput(ModelOutput):
     """
 
     last_hidden_state: tf.Tensor = None
-    mems: Optional[List[tf.Tensor]] = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    mems: List[tf.Tensor] | None = None
+    hidden_states: Tuple[tf.Tensor, ...] | None = None
+    attentions: Tuple[tf.Tensor, ...] | None = None
 
 
 @dataclass
@@ -868,11 +899,11 @@ class TFXLNetLMHeadModelOutput(ModelOutput):
             heads.
     """
 
-    loss: Optional[tf.Tensor] = None
+    loss: tf.Tensor | None = None
     logits: tf.Tensor = None
-    mems: Optional[List[tf.Tensor]] = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    mems: List[tf.Tensor] | None = None
+    hidden_states: Tuple[tf.Tensor, ...] | None = None
+    attentions: Tuple[tf.Tensor, ...] | None = None
 
 
 @dataclass
@@ -902,11 +933,11 @@ class TFXLNetForSequenceClassificationOutput(ModelOutput):
             heads.
     """
 
-    loss: Optional[tf.Tensor] = None
+    loss: tf.Tensor | None = None
     logits: tf.Tensor = None
-    mems: Optional[List[tf.Tensor]] = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    mems: List[tf.Tensor] | None = None
+    hidden_states: Tuple[tf.Tensor, ...] | None = None
+    attentions: Tuple[tf.Tensor, ...] | None = None
 
 
 @dataclass
@@ -936,11 +967,11 @@ class TFXLNetForTokenClassificationOutput(ModelOutput):
             heads.
     """
 
-    loss: Optional[tf.Tensor] = None
+    loss: tf.Tensor | None = None
     logits: tf.Tensor = None
-    mems: Optional[List[tf.Tensor]] = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    mems: List[tf.Tensor] | None = None
+    hidden_states: Tuple[tf.Tensor, ...] | None = None
+    attentions: Tuple[tf.Tensor, ...] | None = None
 
 
 @dataclass
@@ -972,11 +1003,11 @@ class TFXLNetForMultipleChoiceOutput(ModelOutput):
             heads.
     """
 
-    loss: Optional[tf.Tensor] = None
+    loss: tf.Tensor | None = None
     logits: tf.Tensor = None
-    mems: Optional[List[tf.Tensor]] = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    mems: List[tf.Tensor] | None = None
+    hidden_states: Tuple[tf.Tensor, ...] | None = None
+    attentions: Tuple[tf.Tensor, ...] | None = None
 
 
 @dataclass
@@ -1008,12 +1039,12 @@ class TFXLNetForQuestionAnsweringSimpleOutput(ModelOutput):
             heads.
     """
 
-    loss: Optional[tf.Tensor] = None
+    loss: tf.Tensor | None = None
     start_logits: tf.Tensor = None
     end_logits: tf.Tensor = None
-    mems: Optional[List[tf.Tensor]] = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    mems: List[tf.Tensor] | None = None
+    hidden_states: Tuple[tf.Tensor, ...] | None = None
+    attentions: Tuple[tf.Tensor, ...] | None = None
 
 
 XLNET_START_DOCSTRING = r"""
@@ -1022,7 +1053,7 @@ XLNET_START_DOCSTRING = r"""
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
 
-    This model is also a [tf.keras.Model](https://www.tensorflow.org/api_docs/python/tf/keras/Model) subclass. Use it
+    This model is also a [keras.Model](https://www.tensorflow.org/api_docs/python/tf/keras/Model) subclass. Use it
     as a regular TF 2.0 Keras Model and refer to the TF 2.0 documentation for all matter related to general usage and
     behavior.
 
@@ -1149,15 +1180,15 @@ class TFXLNetModel(TFXLNetPreTrainedModel):
     )
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        perm_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        input_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        perm_mask: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        input_mask: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         use_mems: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -1183,14 +1214,13 @@ class TFXLNetModel(TFXLNetPreTrainedModel):
 
         return outputs
 
-    def serving_output(self, output):
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-        mems = tf.convert_to_tensor(output.mems) if output.mems is not None else None
-
-        return TFXLNetModelOutput(
-            last_hidden_state=output.last_hidden_state, mems=mems, hidden_states=hs, attentions=attns
-        )
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
 
 
 @add_start_docstrings(
@@ -1258,20 +1288,20 @@ class TFXLNetLMHeadModel(TFXLNetPreTrainedModel, TFCausalLanguageModelingLoss):
     @replace_return_docstrings(output_type=TFXLNetLMHeadModelOutput, config_class=_CONFIG_FOR_DOC)
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        perm_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        input_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        perm_mask: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        input_mask: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         use_mems: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        labels: np.ndarray | tf.Tensor | None = None,
         training: bool = False,
     ) -> Union[TFXLNetLMHeadModelOutput, Tuple[tf.Tensor]]:
         r"""
@@ -1288,8 +1318,8 @@ class TFXLNetLMHeadModel(TFXLNetPreTrainedModel, TFCausalLanguageModelingLoss):
         >>> import numpy as np
         >>> from transformers import AutoTokenizer, TFXLNetLMHeadModel
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("xlnet-large-cased")
-        >>> model = TFXLNetLMHeadModel.from_pretrained("xlnet-large-cased")
+        >>> tokenizer = AutoTokenizer.from_pretrained("xlnet/xlnet-large-cased")
+        >>> model = TFXLNetLMHeadModel.from_pretrained("xlnet/xlnet-large-cased")
 
         >>> # We show how to setup inputs to predict a next token using a bi-directional context.
         >>> input_ids = tf.constant(tokenizer.encode("Hello, my dog is very <mask>", add_special_tokens=True))[
@@ -1351,12 +1381,16 @@ class TFXLNetLMHeadModel(TFXLNetPreTrainedModel, TFCausalLanguageModelingLoss):
             attentions=transformer_outputs.attentions,
         )
 
-    def serving_output(self, output):
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-        mems = tf.convert_to_tensor(output.mems) if output.mems is not None else None
-
-        return TFXLNetLMHeadModelOutput(logits=output.logits, mems=mems, hidden_states=hs, attentions=attns)
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
+        if getattr(self, "lm_loss", None) is not None:
+            with tf.name_scope(self.lm_loss.name):
+                self.lm_loss.build(None)
 
 
 @add_start_docstrings(
@@ -1375,9 +1409,10 @@ class TFXLNetForSequenceClassification(TFXLNetPreTrainedModel, TFSequenceClassif
         self.sequence_summary = TFSequenceSummary(
             config, initializer_range=config.initializer_range, name="sequence_summary"
         )
-        self.logits_proj = tf.keras.layers.Dense(
+        self.logits_proj = keras.layers.Dense(
             config.num_labels, kernel_initializer=get_initializer(config.initializer_range), name="logits_proj"
         )
+        self.config = config
 
     @unpack_inputs
     @add_start_docstrings_to_model_forward(XLNET_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
@@ -1388,20 +1423,20 @@ class TFXLNetForSequenceClassification(TFXLNetPreTrainedModel, TFSequenceClassif
     )
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        perm_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        input_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        perm_mask: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        input_mask: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         use_mems: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        labels: np.ndarray | tf.Tensor | None = None,
         training: bool = False,
     ) -> Union[TFXLNetForSequenceClassificationOutput, Tuple[tf.Tensor]]:
         r"""
@@ -1445,14 +1480,19 @@ class TFXLNetForSequenceClassification(TFXLNetPreTrainedModel, TFSequenceClassif
             attentions=transformer_outputs.attentions,
         )
 
-    def serving_output(self, output):
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-        mems = tf.convert_to_tensor(output.mems) if output.mems is not None else None
-
-        return TFXLNetForSequenceClassificationOutput(
-            logits=output.logits, mems=mems, hidden_states=hs, attentions=attns
-        )
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
+        if getattr(self, "sequence_summary", None) is not None:
+            with tf.name_scope(self.sequence_summary.name):
+                self.sequence_summary.build(None)
+        if getattr(self, "logits_proj", None) is not None:
+            with tf.name_scope(self.logits_proj.name):
+                self.logits_proj.build([None, None, self.config.d_model])
 
 
 @add_start_docstrings(
@@ -1470,19 +1510,10 @@ class TFXLNetForMultipleChoice(TFXLNetPreTrainedModel, TFMultipleChoiceLoss):
         self.sequence_summary = TFSequenceSummary(
             config, initializer_range=config.initializer_range, name="sequence_summary"
         )
-        self.logits_proj = tf.keras.layers.Dense(
+        self.logits_proj = keras.layers.Dense(
             1, kernel_initializer=get_initializer(config.initializer_range), name="logits_proj"
         )
-
-    @property
-    def dummy_inputs(self):
-        """
-        Dummy inputs to build the network.
-
-        Returns:
-            tf.Tensor with dummy inputs
-        """
-        return {"input_ids": tf.constant(MULTIPLE_CHOICE_DUMMY_INPUTS, dtype=tf.int32)}
+        self.config = config
 
     @unpack_inputs
     @add_start_docstrings_to_model_forward(XLNET_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length"))
@@ -1493,20 +1524,20 @@ class TFXLNetForMultipleChoice(TFXLNetPreTrainedModel, TFMultipleChoiceLoss):
     )
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        input_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        perm_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        input_mask: np.ndarray | tf.Tensor | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        perm_mask: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         use_mems: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        labels: np.ndarray | tf.Tensor | None = None,
         training: bool = False,
     ) -> Union[TFXLNetForMultipleChoiceOutput, Tuple[tf.Tensor]]:
         r"""
@@ -1565,26 +1596,19 @@ class TFXLNetForMultipleChoice(TFXLNetPreTrainedModel, TFMultipleChoiceLoss):
             attentions=transformer_outputs.attentions,
         )
 
-    @tf.function(
-        input_signature=[
-            {
-                "input_ids": tf.TensorSpec((None, None, None), tf.int32, name="input_ids"),
-                "attention_mask": tf.TensorSpec((None, None, None), tf.int32, name="attention_mask"),
-                "token_type_ids": tf.TensorSpec((None, None, None), tf.int32, name="token_type_ids"),
-            }
-        ]
-    )
-    def serving(self, inputs):
-        output = self.call(inputs)
-
-        return self.serving_output(output)
-
-    def serving_output(self, output):
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-        mems = tf.convert_to_tensor(output.mems) if output.mems is not None else None
-
-        return TFXLNetForMultipleChoiceOutput(logits=output.logits, mems=mems, hidden_states=hs, attentions=attns)
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
+        if getattr(self, "sequence_summary", None) is not None:
+            with tf.name_scope(self.sequence_summary.name):
+                self.sequence_summary.build(None)
+        if getattr(self, "logits_proj", None) is not None:
+            with tf.name_scope(self.logits_proj.name):
+                self.logits_proj.build([None, None, self.config.d_model])
 
 
 @add_start_docstrings(
@@ -1600,9 +1624,10 @@ class TFXLNetForTokenClassification(TFXLNetPreTrainedModel, TFTokenClassificatio
         self.num_labels = config.num_labels
 
         self.transformer = TFXLNetMainLayer(config, name="transformer")
-        self.classifier = tf.keras.layers.Dense(
+        self.classifier = keras.layers.Dense(
             config.num_labels, kernel_initializer=get_initializer(config.initializer_range), name="classifier"
         )
+        self.config = config
 
     @unpack_inputs
     @add_start_docstrings_to_model_forward(XLNET_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
@@ -1613,20 +1638,20 @@ class TFXLNetForTokenClassification(TFXLNetPreTrainedModel, TFTokenClassificatio
     )
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        perm_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        input_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        perm_mask: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        input_mask: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         use_mems: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        labels: np.ndarray | tf.Tensor | None = None,
         training: bool = False,
     ) -> Union[TFXLNetForTokenClassificationOutput, Tuple[tf.Tensor]]:
         r"""
@@ -1666,12 +1691,16 @@ class TFXLNetForTokenClassification(TFXLNetPreTrainedModel, TFTokenClassificatio
             attentions=transformer_outputs.attentions,
         )
 
-    def serving_output(self, output):
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-        mems = tf.convert_to_tensor(output.mems) if output.mems is not None else None
-
-        return TFXLNetForTokenClassificationOutput(logits=output.logits, mems=mems, hidden_states=hs, attentions=attns)
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
+        if getattr(self, "classifier", None) is not None:
+            with tf.name_scope(self.classifier.name):
+                self.classifier.build([None, None, self.config.hidden_size])
 
 
 @add_start_docstrings(
@@ -1685,9 +1714,10 @@ class TFXLNetForQuestionAnsweringSimple(TFXLNetPreTrainedModel, TFQuestionAnswer
     def __init__(self, config, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
         self.transformer = TFXLNetMainLayer(config, name="transformer")
-        self.qa_outputs = tf.keras.layers.Dense(
+        self.qa_outputs = keras.layers.Dense(
             config.num_labels, kernel_initializer=get_initializer(config.initializer_range), name="qa_outputs"
         )
+        self.config = config
 
     @unpack_inputs
     @add_start_docstrings_to_model_forward(XLNET_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
@@ -1698,21 +1728,21 @@ class TFXLNetForQuestionAnsweringSimple(TFXLNetPreTrainedModel, TFQuestionAnswer
     )
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        mems: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        perm_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        target_mapping: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        input_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        mems: np.ndarray | tf.Tensor | None = None,
+        perm_mask: np.ndarray | tf.Tensor | None = None,
+        target_mapping: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        input_mask: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         use_mems: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        start_positions: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        end_positions: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        start_positions: np.ndarray | tf.Tensor | None = None,
+        end_positions: np.ndarray | tf.Tensor | None = None,
         training: bool = False,
     ) -> Union[TFXLNetForQuestionAnsweringSimpleOutput, Tuple[tf.Tensor]]:
         r"""
@@ -1767,15 +1797,13 @@ class TFXLNetForQuestionAnsweringSimple(TFXLNetPreTrainedModel, TFQuestionAnswer
             attentions=transformer_outputs.attentions,
         )
 
-    def serving_output(self, output):
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-        mems = tf.convert_to_tensor(output.mems) if output.mems is not None else None
-
-        return TFXLNetForQuestionAnsweringSimpleOutput(
-            start_logits=output.start_logits,
-            end_logits=output.end_logits,
-            mems=mems,
-            hidden_states=hs,
-            attentions=attns,
-        )
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
+        if getattr(self, "qa_outputs", None) is not None:
+            with tf.name_scope(self.qa_outputs.name):
+                self.qa_outputs.build([None, None, self.config.hidden_size])

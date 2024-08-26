@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Flax Marian model."""
+"""Flax Marian model."""
 
 import math
 import random
@@ -231,11 +231,11 @@ def shift_tokens_right(input_ids: jnp.ndarray, pad_token_id: int, decoder_start_
     """
     Shift input ids one token to the right.
     """
-    shifted_input_ids = np.zeros_like(input_ids)
-    shifted_input_ids[:, 1:] = input_ids[:, :-1]
-    shifted_input_ids[:, 0] = decoder_start_token_id
+    shifted_input_ids = jnp.zeros_like(input_ids)
+    shifted_input_ids = shifted_input_ids.at[:, 1:].set(input_ids[:, :-1])
+    shifted_input_ids = shifted_input_ids.at[:, 0].set(decoder_start_token_id)
 
-    shifted_input_ids = np.where(shifted_input_ids == -100, pad_token_id, shifted_input_ids)
+    shifted_input_ids = jnp.where(shifted_input_ids == -100, pad_token_id, shifted_input_ids)
     return shifted_input_ids
 
 
@@ -711,7 +711,7 @@ class FlaxMarianEncoder(nn.Module):
         inputs_embeds = self.embed_tokens(input_ids) * self.embed_scale
 
         positions = jnp.take(self.embed_positions, position_ids, axis=0)
-        # explictly cast the positions here, since self.embed_positions are not registered as parameters
+        # explicitly cast the positions here, since self.embed_positions are not registered as parameters
         positions = positions.astype(inputs_embeds.dtype)
 
         hidden_states = inputs_embeds + positions
@@ -771,7 +771,7 @@ class FlaxMarianDecoder(nn.Module):
 
         # embed positions
         positions = jnp.take(self.embed_positions, position_ids, axis=0)
-        # explictly cast the positions here, since self.embed_positions are not registered as parameters
+        # explicitly cast the positions here, since self.embed_positions are not registered as parameters
         positions = positions.astype(inputs_embeds.dtype)
 
         hidden_states = inputs_embeds + positions
@@ -1436,8 +1436,8 @@ class FlaxMarianMTModel(FlaxMarianPreTrainedModel):
         self,
         decoder_input_ids,
         max_length,
-        attention_mask: Optional[jnp.DeviceArray] = None,
-        decoder_attention_mask: Optional[jnp.DeviceArray] = None,
+        attention_mask: Optional[jax.Array] = None,
+        decoder_attention_mask: Optional[jax.Array] = None,
         encoder_outputs=None,
         **kwargs,
     ):

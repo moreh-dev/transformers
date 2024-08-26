@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch DeBERTa model."""
+"""PyTorch DeBERTa model."""
 
 from collections.abc import Sequence
 from typing import Optional, Tuple, Union
@@ -51,16 +51,6 @@ _QA_EXPECTED_OUTPUT = "' a nice puppet'"
 _QA_EXPECTED_LOSS = 0.14
 _QA_TARGET_START_INDEX = 12
 _QA_TARGET_END_INDEX = 14
-
-
-DEBERTA_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "microsoft/deberta-base",
-    "microsoft/deberta-large",
-    "microsoft/deberta-xlarge",
-    "microsoft/deberta-base-mnli",
-    "microsoft/deberta-large-mnli",
-    "microsoft/deberta-xlarge-mnli",
-]
 
 
 class ContextPooler(nn.Module):
@@ -114,20 +104,20 @@ class XSoftmax(torch.autograd.Function):
     ```"""
 
     @staticmethod
-    def forward(self, input, mask, dim):
-        self.dim = dim
+    def forward(ctx, input, mask, dim):
+        ctx.dim = dim
         rmask = ~(mask.to(torch.bool))
 
         output = input.masked_fill(rmask, torch.tensor(torch.finfo(input.dtype).min))
-        output = torch.softmax(output, self.dim)
+        output = torch.softmax(output, ctx.dim)
         output.masked_fill_(rmask, 0)
-        self.save_for_backward(output)
+        ctx.save_for_backward(output)
         return output
 
     @staticmethod
-    def backward(self, grad_output):
-        (output,) = self.saved_tensors
-        inputGrad = softmax_backward_data(self, grad_output, output, self.dim, output)
+    def backward(ctx, grad_output):
+        (output,) = ctx.saved_tensors
+        inputGrad = softmax_backward_data(ctx, grad_output, output, ctx.dim, output)
         return inputGrad, None, None
 
     @staticmethod
@@ -139,7 +129,7 @@ class XSoftmax(torch.autograd.Function):
         r_mask = g.op(
             "Cast",
             g.op("Sub", g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64)), mask_cast_value),
-            to_i=sym_help.cast_pytorch_to_onnx["Byte"],
+            to_i=sym_help.cast_pytorch_to_onnx["Bool"],
         )
         output = masked_fill(
             g, self, r_mask, g.op("Constant", value_t=torch.tensor(torch.finfo(self.type().dtype()).min))
@@ -148,7 +138,7 @@ class XSoftmax(torch.autograd.Function):
         return masked_fill(g, output, r_mask, g.op("Constant", value_t=torch.tensor(0, dtype=torch.bool)))
 
 
-class DropoutContext(object):
+class DropoutContext:
     def __init__(self):
         self.dropout = 0
         self.mask = None
@@ -420,7 +410,6 @@ class DebertaEncoder(nn.Module):
         if attention_mask.dim() <= 2:
             extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
             attention_mask = extended_attention_mask * extended_attention_mask.squeeze(-2).unsqueeze(-1)
-            attention_mask = attention_mask.byte()
         elif attention_mask.dim() == 3:
             attention_mask = attention_mask.unsqueeze(1)
 
@@ -458,20 +447,14 @@ class DebertaEncoder(nn.Module):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, output_attentions)
-
-                    return custom_forward
-
-                hidden_states = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                hidden_states = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     next_kv,
                     attention_mask,
                     query_states,
                     relative_pos,
                     rel_embeddings,
+                    output_attentions,
                 )
             else:
                 hidden_states = layer_module(
@@ -614,15 +597,15 @@ class DisentangledSelfAttention(nn.Module):
                 Input states to the module usually the output from previous layer, it will be the Q,K and V in
                 *Attention(Q,K,V)*
 
-            attention_mask (`torch.ByteTensor`):
+            attention_mask (`torch.BoolTensor`):
                 An attention mask matrix of shape [*B*, *N*, *N*] where *B* is the batch size, *N* is the maximum
                 sequence length in which element [i,j] = *1* means the *i* th token in the input can attend to the *j*
                 th token.
 
-            output_attentions (`bool`, optional):
+            output_attentions (`bool`, *optional*):
                 Whether return the attention matrix.
 
-            query_states (`torch.FloatTensor`, optional):
+            query_states (`torch.FloatTensor`, *optional*):
                 The *Q* state in *Attention(Q,K,V)*.
 
             relative_pos (`torch.LongTensor`):
@@ -765,7 +748,9 @@ class DebertaEmbeddings(nn.Module):
         self.config = config
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
 
     def forward(self, input_ids=None, token_type_ids=None, position_ids=None, mask=None, inputs_embeds=None):
         if input_ids is not None:
@@ -822,7 +807,6 @@ class DebertaPreTrainedModel(PreTrainedModel):
 
     config_class = DebertaConfig
     base_model_prefix = "deberta"
-    _keys_to_ignore_on_load_missing = ["position_ids"]
     _keys_to_ignore_on_load_unexpected = ["position_embeddings"]
     supports_gradient_checkpointing = True
 
@@ -838,10 +822,6 @@ class DebertaPreTrainedModel(PreTrainedModel):
             module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
             if module.padding_idx is not None:
                 module.weight.data[module.padding_idx].zero_()
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, DebertaEncoder):
-            module.gradient_checkpointing = value
 
 
 DEBERTA_START_DOCSTRING = r"""
@@ -959,6 +939,7 @@ class DebertaModel(DebertaPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -1021,8 +1002,7 @@ class DebertaModel(DebertaPreTrainedModel):
 
 @add_start_docstrings("""DeBERTa Model with a `language modeling` head on top.""", DEBERTA_START_DOCSTRING)
 class DebertaForMaskedLM(DebertaPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [r"position_ids", r"predictions.decoder.bias", "cls.predictions.decoder.weight"]
+    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1038,6 +1018,7 @@ class DebertaForMaskedLM(DebertaPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.cls.predictions.decoder = new_embeddings
+        self.cls.predictions.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(DEBERTA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
@@ -1100,16 +1081,17 @@ class DebertaForMaskedLM(DebertaPreTrainedModel):
         )
 
 
-# copied from transformers.models.bert.BertPredictionHeadTransform with bert -> deberta
 class DebertaPredictionHeadTransform(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.embedding_size = getattr(config, "embedding_size", config.hidden_size)
+
+        self.dense = nn.Linear(config.hidden_size, self.embedding_size)
         if isinstance(config.hidden_act, str):
             self.transform_act_fn = ACT2FN[config.hidden_act]
         else:
             self.transform_act_fn = config.hidden_act
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.LayerNorm = nn.LayerNorm(self.embedding_size, eps=config.layer_norm_eps)
 
     def forward(self, hidden_states):
         hidden_states = self.dense(hidden_states)
@@ -1118,19 +1100,22 @@ class DebertaPredictionHeadTransform(nn.Module):
         return hidden_states
 
 
-# copied from transformers.models.bert.BertLMPredictionHead with bert -> deberta
 class DebertaLMPredictionHead(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.transform = DebertaPredictionHeadTransform(config)
 
+        self.embedding_size = getattr(config, "embedding_size", config.hidden_size)
         # The output weights are the same as the input embeddings, but there is
         # an output-only bias for each token.
-        self.decoder = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.decoder = nn.Linear(self.embedding_size, config.vocab_size, bias=False)
 
         self.bias = nn.Parameter(torch.zeros(config.vocab_size))
 
         # Need a link between the two variables so that the bias is correctly resized with `resize_token_embeddings`
+        self.decoder.bias = self.bias
+
+    def _tie_weights(self):
         self.decoder.bias = self.bias
 
     def forward(self, hidden_states):
@@ -1276,8 +1261,6 @@ class DebertaForSequenceClassification(DebertaPreTrainedModel):
     DEBERTA_START_DOCSTRING,
 )
 class DebertaForTokenClassification(DebertaPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1351,8 +1334,6 @@ class DebertaForTokenClassification(DebertaPreTrainedModel):
     DEBERTA_START_DOCSTRING,
 )
 class DebertaForQuestionAnswering(DebertaPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels

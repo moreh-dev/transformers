@@ -13,7 +13,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" TF 2.0 OpenAI GPT model."""
+"""TF 2.0 OpenAI GPT model."""
+
+from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple, Union
@@ -32,10 +34,11 @@ from ...modeling_tf_utils import (
     TFSequenceSummary,
     TFSharedEmbeddings,
     get_initializer,
+    keras,
     keras_serializable,
     unpack_inputs,
 )
-from ...tf_utils import shape_list, stable_softmax
+from ...tf_utils import check_embeddings_within_bounds, shape_list, stable_softmax
 from ...utils import (
     ModelOutput,
     add_code_sample_docstrings,
@@ -49,16 +52,11 @@ from .configuration_openai import OpenAIGPTConfig
 
 logger = logging.get_logger(__name__)
 
-_CHECKPOINT_FOR_DOC = "openai-gpt"
+_CHECKPOINT_FOR_DOC = "openai-community/openai-gpt"
 _CONFIG_FOR_DOC = "OpenAIGPTConfig"
 
-TF_OPENAI_GPT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "openai-gpt",
-    # See all OpenAI GPT models at https://huggingface.co/models?filter=openai-gpt
-]
 
-
-class TFAttention(tf.keras.layers.Layer):
+class TFAttention(keras.layers.Layer):
     def __init__(self, nx, config, scale=False, **kwargs):
         super().__init__(**kwargs)
 
@@ -74,8 +72,9 @@ class TFAttention(tf.keras.layers.Layer):
 
         self.c_attn = TFConv1D(n_state * 3, nx, initializer_range=config.initializer_range, name="c_attn")
         self.c_proj = TFConv1D(n_state, nx, initializer_range=config.initializer_range, name="c_proj")
-        self.attn_dropout = tf.keras.layers.Dropout(config.attn_pdrop)
-        self.resid_dropout = tf.keras.layers.Dropout(config.resid_pdrop)
+        self.attn_dropout = keras.layers.Dropout(config.attn_pdrop)
+        self.resid_dropout = keras.layers.Dropout(config.resid_pdrop)
+        self.n_state = n_state
         self.pruned_heads = set()
 
     def prune_heads(self, heads):
@@ -151,15 +150,28 @@ class TFAttention(tf.keras.layers.Layer):
         outputs = [a] + attn_outputs[1:]
         return outputs  # a, (attentions)
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "c_attn", None) is not None:
+            with tf.name_scope(self.c_attn.name):
+                self.c_attn.build([None, None, self.n_state * 3])
+        if getattr(self, "c_proj", None) is not None:
+            with tf.name_scope(self.c_proj.name):
+                self.c_proj.build([None, None, self.n_state])
 
-class TFMLP(tf.keras.layers.Layer):
+
+class TFMLP(keras.layers.Layer):
     def __init__(self, n_state, config, **kwargs):
         super().__init__(**kwargs)
         nx = config.n_embd
         self.c_fc = TFConv1D(n_state, nx, initializer_range=config.initializer_range, name="c_fc")
         self.c_proj = TFConv1D(nx, n_state, initializer_range=config.initializer_range, name="c_proj")
         self.act = get_tf_activation("gelu")
-        self.dropout = tf.keras.layers.Dropout(config.resid_pdrop)
+        self.dropout = keras.layers.Dropout(config.resid_pdrop)
+        self.nx = nx
+        self.n_state = n_state
 
     def call(self, x, training=False):
         h = self.act(self.c_fc(x))
@@ -167,15 +179,27 @@ class TFMLP(tf.keras.layers.Layer):
         h2 = self.dropout(h2, training=training)
         return h2
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "c_fc", None) is not None:
+            with tf.name_scope(self.c_fc.name):
+                self.c_fc.build([None, None, self.n_state])
+        if getattr(self, "c_proj", None) is not None:
+            with tf.name_scope(self.c_proj.name):
+                self.c_proj.build([None, None, self.nx])
 
-class TFBlock(tf.keras.layers.Layer):
+
+class TFBlock(keras.layers.Layer):
     def __init__(self, config, scale=False, **kwargs):
         super().__init__(**kwargs)
         nx = config.n_embd
         self.attn = TFAttention(nx, config, scale, name="attn")
-        self.ln_1 = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_epsilon, name="ln_1")
+        self.ln_1 = keras.layers.LayerNormalization(epsilon=config.layer_norm_epsilon, name="ln_1")
         self.mlp = TFMLP(4 * nx, config, name="mlp")
-        self.ln_2 = tf.keras.layers.LayerNormalization(epsilon=config.layer_norm_epsilon, name="ln_2")
+        self.ln_2 = keras.layers.LayerNormalization(epsilon=config.layer_norm_epsilon, name="ln_2")
+        self.nx = nx
 
     def call(self, x, attention_mask, head_mask, output_attentions, training=False):
         output_attn = self.attn(x, attention_mask, head_mask, output_attentions, training=training)
@@ -188,9 +212,26 @@ class TFBlock(tf.keras.layers.Layer):
         outputs = [h] + output_attn[1:]
         return outputs  # x, (attentions)
 
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "attn", None) is not None:
+            with tf.name_scope(self.attn.name):
+                self.attn.build(None)
+        if getattr(self, "ln_1", None) is not None:
+            with tf.name_scope(self.ln_1.name):
+                self.ln_1.build([None, None, self.nx])
+        if getattr(self, "mlp", None) is not None:
+            with tf.name_scope(self.mlp.name):
+                self.mlp.build(None)
+        if getattr(self, "ln_2", None) is not None:
+            with tf.name_scope(self.ln_2.name):
+                self.ln_2.build([None, None, self.nx])
+
 
 @keras_serializable
-class TFOpenAIGPTMainLayer(tf.keras.layers.Layer):
+class TFOpenAIGPTMainLayer(keras.layers.Layer):
     config_class = OpenAIGPTConfig
 
     def __init__(self, config, *inputs, **kwargs):
@@ -208,10 +249,10 @@ class TFOpenAIGPTMainLayer(tf.keras.layers.Layer):
         self.tokens_embed = TFSharedEmbeddings(
             config.vocab_size, config.n_embd, initializer_range=config.initializer_range, name="tokens_embed"
         )
-        self.drop = tf.keras.layers.Dropout(config.embd_pdrop)
+        self.drop = keras.layers.Dropout(config.embd_pdrop)
         self.h = [TFBlock(config, scale=True, name=f"h_._{i}") for i in range(config.n_layer)]
 
-    def build(self, input_shape):
+    def build(self, input_shape=None):
         with tf.name_scope("positions_embed"):
             self.positions_embed = self.add_weight(
                 name="embeddings",
@@ -219,7 +260,16 @@ class TFOpenAIGPTMainLayer(tf.keras.layers.Layer):
                 initializer=get_initializer(self.initializer_range),
             )
 
-        super().build(input_shape)
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "tokens_embed", None) is not None:
+            with tf.name_scope(self.tokens_embed.name):
+                self.tokens_embed.build(None)
+        if getattr(self, "h", None) is not None:
+            for layer in self.h:
+                with tf.name_scope(layer.name):
+                    layer.build(None)
 
     def get_input_embeddings(self):
         return self.tokens_embed
@@ -237,12 +287,12 @@ class TFOpenAIGPTMainLayer(tf.keras.layers.Layer):
     @unpack_inputs
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -295,30 +345,12 @@ class TFOpenAIGPTMainLayer(tf.keras.layers.Layer):
         position_ids = tf.reshape(position_ids, [-1, shape_list(position_ids)[-1]])
 
         if inputs_embeds is None:
-            # Note: tf.gather, on which the embedding layer is based, won't check positive out of bound
-            # indices on GPU, returning zeros instead. This is a dangerous silent behavior.
-            tf.debugging.assert_less(
-                input_ids,
-                tf.cast(self.config.vocab_size, dtype=input_ids.dtype),
-                message=(
-                    "input_ids must be smaller than the embedding layer's input dimension (got"
-                    f" {tf.math.reduce_max(input_ids)} >= {self.config.vocab_size})"
-                ),
-            )
+            check_embeddings_within_bounds(input_ids, self.config.vocab_size)
             inputs_embeds = self.tokens_embed(input_ids, mode="embedding")
         position_embeds = tf.gather(self.positions_embed, position_ids)
         if token_type_ids is not None:
             token_type_ids = tf.reshape(token_type_ids, [-1, shape_list(token_type_ids)[-1]])
-            # Note: tf.gather, on which the embedding layer is based, won't check positive out of bound
-            # indices on GPU, returning zeros instead. This is a dangerous silent behavior.
-            tf.debugging.assert_less(
-                token_type_ids,
-                tf.cast(self.config.vocab_size, dtype=token_type_ids.dtype),
-                message=(
-                    "token_type_ids must be smaller than the embedding layer's input dimension (got"
-                    f" {tf.math.reduce_max(token_type_ids)} >= {self.config.vocab_size})"
-                ),
-            )
+            check_embeddings_within_bounds(token_type_ids, self.config.vocab_size, "token_type_ids")
             token_type_embeds = self.tokens_embed(token_type_ids, mode="embedding")
         else:
             token_type_embeds = 0
@@ -373,19 +405,6 @@ class TFOpenAIGPTPreTrainedModel(TFPreTrainedModel):
     config_class = OpenAIGPTConfig
     base_model_prefix = "transformer"
 
-    @tf.function(
-        input_signature=[
-            {
-                "input_ids": tf.TensorSpec((None, None), tf.int32, name="input_ids"),
-                "attention_mask": tf.TensorSpec((None, None), tf.int32, name="attention_mask"),
-            }
-        ]
-    )
-    def serving(self, inputs):
-        output = self.call(inputs)
-
-        return self.serving_output(output)
-
 
 @dataclass
 class TFOpenAIGPTDoubleHeadsModelOutput(ModelOutput):
@@ -412,8 +431,8 @@ class TFOpenAIGPTDoubleHeadsModelOutput(ModelOutput):
 
     logits: tf.Tensor = None
     mc_logits: tf.Tensor = None
-    hidden_states: Optional[Tuple[tf.Tensor]] = None
-    attentions: Optional[Tuple[tf.Tensor]] = None
+    hidden_states: Tuple[tf.Tensor] | None = None
+    attentions: Tuple[tf.Tensor] | None = None
 
 
 OPENAI_GPT_START_DOCSTRING = r"""
@@ -422,7 +441,7 @@ OPENAI_GPT_START_DOCSTRING = r"""
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
 
-    This model is also a [tf.keras.Model](https://www.tensorflow.org/api_docs/python/tf/keras/Model) subclass. Use it
+    This model is also a [keras.Model](https://www.tensorflow.org/api_docs/python/tf/keras/Model) subclass. Use it
     as a regular TF 2.0 Keras Model and refer to the TF 2.0 documentation for all matter related to general usage and
     behavior.
 
@@ -532,12 +551,12 @@ class TFOpenAIGPTModel(TFOpenAIGPTPreTrainedModel):
     )
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -557,12 +576,13 @@ class TFOpenAIGPTModel(TFOpenAIGPTPreTrainedModel):
         )
         return outputs
 
-    # Copied from transformers.models.distilbert.modeling_tf_distilbert.TFDistilBertModel.serving_output
-    def serving_output(self, output):
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFBaseModelOutput(last_hidden_state=output.last_hidden_state, hidden_states=hs, attentions=attns)
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
 
 
 @add_start_docstrings(
@@ -594,16 +614,16 @@ class TFOpenAIGPTLMHeadModel(TFOpenAIGPTPreTrainedModel, TFCausalLanguageModelin
     )
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        labels: np.ndarray | tf.Tensor | None = None,
         training: Optional[bool] = False,
     ) -> Union[Tuple, TFCausalLMOutput]:
         r"""
@@ -646,14 +666,16 @@ class TFOpenAIGPTLMHeadModel(TFOpenAIGPTPreTrainedModel, TFCausalLanguageModelin
             attentions=transformer_outputs.attentions,
         )
 
-    def serving_output(self, output: TFCausalLMOutput) -> TFCausalLMOutput:
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFCausalLMOutput(logits=output.logits, hidden_states=hs, attentions=attns)
-
     def prepare_inputs_for_generation(self, inputs, **kwargs):
         return {"input_ids": inputs}
+
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
 
 
 @add_start_docstrings(
@@ -679,13 +701,13 @@ class TFOpenAIGPTDoubleHeadsModel(TFOpenAIGPTPreTrainedModel):
     @replace_return_docstrings(output_type=TFOpenAIGPTDoubleHeadsModelOutput, config_class=_CONFIG_FOR_DOC)
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        mc_token_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
+        mc_token_ids: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -704,8 +726,8 @@ class TFOpenAIGPTDoubleHeadsModel(TFOpenAIGPTPreTrainedModel):
         >>> import tensorflow as tf
         >>> from transformers import AutoTokenizer, TFOpenAIGPTDoubleHeadsModel
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("openai-gpt")
-        >>> model = TFOpenAIGPTDoubleHeadsModel.from_pretrained("openai-gpt")
+        >>> tokenizer = AutoTokenizer.from_pretrained("openai-community/openai-gpt")
+        >>> model = TFOpenAIGPTDoubleHeadsModel.from_pretrained("openai-community/openai-gpt")
 
         >>> # Add a [CLS] to the vocabulary (we should train it also!)
         >>> tokenizer.add_special_tokens({"cls_token": "[CLS]"})
@@ -768,27 +790,24 @@ class TFOpenAIGPTDoubleHeadsModel(TFOpenAIGPTPreTrainedModel):
             attentions=transformer_outputs.attentions,
         )
 
-    @tf.function(
-        input_signature=[
-            {
-                "input_ids": tf.TensorSpec((None, None, None), tf.int32, name="input_ids"),
-                "attention_mask": tf.TensorSpec((None, None, None), tf.int32, name="attention_mask"),
-                "mc_token_ids": tf.TensorSpec((None, None), tf.int32, name="token_type_ids"),
-            }
-        ]
-    )
-    def serving(self, inputs):
-        output = self.call(inputs)
+    @property
+    def input_signature(self):
+        return {
+            "input_ids": tf.TensorSpec((None, None, None), tf.int32, name="input_ids"),
+            "attention_mask": tf.TensorSpec((None, None, None), tf.int32, name="attention_mask"),
+            "mc_token_ids": tf.TensorSpec((None, None), tf.int32, name="token_type_ids"),
+        }
 
-        return self.serving_output(output)
-
-    def serving_output(self, output):
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFOpenAIGPTDoubleHeadsModelOutput(
-            logits=output.logits, mc_logits=output.mc_logits, hidden_states=hs, attentions=attns
-        )
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)
+        if getattr(self, "multiple_choice_head", None) is not None:
+            with tf.name_scope(self.multiple_choice_head.name):
+                self.multiple_choice_head.build(None)
 
 
 @add_start_docstrings(
@@ -810,13 +829,14 @@ class TFOpenAIGPTForSequenceClassification(TFOpenAIGPTPreTrainedModel, TFSequenc
     def __init__(self, config, *inputs, **kwargs):
         super().__init__(config, *inputs, **kwargs)
         self.num_labels = config.num_labels
-        self.score = tf.keras.layers.Dense(
+        self.score = keras.layers.Dense(
             config.num_labels,
             kernel_initializer=get_initializer(config.initializer_range),
             name="score",
             use_bias=False,
         )
         self.transformer = TFOpenAIGPTMainLayer(config, name="transformer")
+        self.config = config
 
     @unpack_inputs
     @add_start_docstrings_to_model_forward(OPENAI_GPT_INPUTS_DOCSTRING)
@@ -827,16 +847,16 @@ class TFOpenAIGPTForSequenceClassification(TFOpenAIGPTPreTrainedModel, TFSequenc
     )
     def call(
         self,
-        input_ids: Optional[TFModelInputType] = None,
-        attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        token_type_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        position_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        head_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        input_ids: TFModelInputType | None = None,
+        attention_mask: np.ndarray | tf.Tensor | None = None,
+        token_type_ids: np.ndarray | tf.Tensor | None = None,
+        position_ids: np.ndarray | tf.Tensor | None = None,
+        head_mask: np.ndarray | tf.Tensor | None = None,
+        inputs_embeds: np.ndarray | tf.Tensor | None = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-        labels: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        labels: np.ndarray | tf.Tensor | None = None,
         training: Optional[bool] = False,
     ) -> Union[Tuple, TFSequenceClassifierOutput]:
         r"""
@@ -865,20 +885,14 @@ class TFOpenAIGPTForSequenceClassification(TFOpenAIGPTPreTrainedModel, TFSequenc
         else:
             if input_ids is not None:
                 sequence_lengths = (
-                    tf.reduce_sum(
-                        tf.cast(
-                            tf.math.not_equal(input_ids, self.config.pad_token_id),
-                            dtype=input_ids.dtype,
-                        ),
-                        -1,
-                        keepdims=False,
-                    )
+                    tf.argmax(tf.cast(tf.math.equal(input_ids, self.config.pad_token_id), input_ids.dtype), axis=-1)
                     - 1
                 )
+                sequence_lengths = tf.where(sequence_lengths >= 0, sequence_lengths, input_ids.shape[-1] - 1)
                 in_logits = tf.gather(logits, sequence_lengths, batch_dims=1, axis=1)
             else:
                 sequence_lengths = -1
-                logger.warning(
+                logger.warning_once(
                     f"{self.__class__.__name__} will not detect padding tokens in `inputs_embeds`. Results may be "
                     "unexpected if using padding tokens in conjunction with `inputs_embeds.`"
                 )
@@ -911,9 +925,13 @@ class TFOpenAIGPTForSequenceClassification(TFOpenAIGPTPreTrainedModel, TFSequenc
             attentions=transformer_outputs.attentions,
         )
 
-    # Copied from transformers.models.bert.modeling_tf_bert.TFBertForSequenceClassification.serving_output
-    def serving_output(self, output: TFSequenceClassifierOutput) -> TFSequenceClassifierOutput:
-        hs = tf.convert_to_tensor(output.hidden_states) if self.config.output_hidden_states else None
-        attns = tf.convert_to_tensor(output.attentions) if self.config.output_attentions else None
-
-        return TFSequenceClassifierOutput(logits=output.logits, hidden_states=hs, attentions=attns)
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "score", None) is not None:
+            with tf.name_scope(self.score.name):
+                self.score.build([None, None, self.config.n_embd])
+        if getattr(self, "transformer", None) is not None:
+            with tf.name_scope(self.transformer.name):
+                self.transformer.build(None)

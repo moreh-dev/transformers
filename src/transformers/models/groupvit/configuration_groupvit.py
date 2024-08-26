@@ -12,9 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" GroupViT model configuration"""
+"""GroupViT model configuration"""
 
-import copy
 import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
@@ -30,10 +29,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.get_logger(__name__)
-
-GROUPVIT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "nvidia/groupvit-gcc-yfcc": "https://huggingface.co/nvidia/groupvit-gcc-yfcc/resolve/main/config.json",
-}
 
 
 class GroupViTTextConfig(PretrainedConfig):
@@ -63,7 +58,7 @@ class GroupViTTextConfig(PretrainedConfig):
             just in case (e.g., 512 or 1024 or 2048).
         hidden_act (`str` or `function`, *optional*, defaults to `"quick_gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
-            `"relu"`, `"selu"` and `"gelu_new"` ``"quick_gelu"` are supported.
+            `"relu"`, `"selu"` and `"gelu_new"` `"quick_gelu"` are supported.
         layer_norm_eps (`float`, *optional*, defaults to 1e-5):
             The epsilon used by the layer normalization layers.
         attention_dropout (`float`, *optional*, defaults to 0.0):
@@ -89,6 +84,7 @@ class GroupViTTextConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "groupvit_text_model"
 
     def __init__(
@@ -106,8 +102,8 @@ class GroupViTTextConfig(PretrainedConfig):
         initializer_range=0.02,
         initializer_factor=1.0,
         pad_token_id=1,
-        bos_token_id=0,
-        eos_token_id=2,
+        bos_token_id=49406,
+        eos_token_id=49407,
         **kwargs,
     ):
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, eos_token_id=eos_token_id, **kwargs)
@@ -127,6 +123,8 @@ class GroupViTTextConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
+        cls._set_token_in_kwargs(kwargs)
+
         config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
 
         # get the text config dict if we are loading from GroupViTConfig
@@ -171,11 +169,11 @@ class GroupViTVisionConfig(PretrainedConfig):
             The size (resolution) of each patch.
         hidden_act (`str` or `function`, *optional*, defaults to `"gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
-            `"relu"`, `"selu"` and `"gelu_new"` ``"quick_gelu"` are supported.
+            `"relu"`, `"selu"` and `"gelu_new"` `"quick_gelu"` are supported.
         layer_norm_eps (`float`, *optional*, defaults to 1e-5):
             The epsilon used by the layer normalization layers.
         dropout (`float`, *optional*, defaults to 0.0):
-            The dropout probabilitiy for all fully connected layers in the embeddings, encoder, and pooler.
+            The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         initializer_range (`float`, *optional*, defaults to 0.02):
@@ -250,6 +248,8 @@ class GroupViTVisionConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
+        cls._set_token_in_kwargs(kwargs)
+
         config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
 
         # get the vision config dict if we are loading from GroupViTConfig
@@ -281,18 +281,17 @@ class GroupViTConfig(PretrainedConfig):
         vision_config (`dict`, *optional*):
             Dictionary of configuration options used to initialize [`GroupViTVisionConfig`].
         projection_dim (`int`, *optional*, defaults to 256):
-            Dimentionality of text and vision projection layers.
+            Dimensionality of text and vision projection layers.
         projection_intermediate_dim (`int`, *optional*, defaults to 4096):
-            Dimentionality of intermediate layer of text and vision projection layers.
+            Dimensionality of intermediate layer of text and vision projection layers.
         logit_scale_init_value (`float`, *optional*, defaults to 2.6592):
-            The inital value of the *logit_scale* parameter. Default is used as per the original GroupViT
+            The initial value of the *logit_scale* parameter. Default is used as per the original GroupViT
             implementation.
         kwargs (*optional*):
             Dictionary of keyword arguments.
     """
 
     model_type = "groupvit"
-    is_composition = True
 
     def __init__(
         self,
@@ -334,9 +333,9 @@ class GroupViTConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`text_config_dict` is provided which will be used to initialize `GroupViTTextConfig`. "
-                            f'The value `text_config["{key}"]` will be overriden.'
+                            f'The value `text_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `text_config` with the ones in `_text_config_dict`.
             text_config.update(_text_config_dict)
@@ -366,9 +365,9 @@ class GroupViTConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`vision_config_dict` is provided which will be used to initialize `GroupViTVisionConfig`."
-                            f' The value `vision_config["{key}"]` will be overriden.'
+                            f' The value `vision_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `vision_config` with the ones in `_vision_config_dict`.
             vision_config.update(_vision_config_dict)
@@ -402,19 +401,6 @@ class GroupViTConfig(PretrainedConfig):
         """
 
         return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
-
-    def to_dict(self):
-        """
-        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
-
-        Returns:
-            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
-        """
-        output = copy.deepcopy(self.__dict__)
-        output["text_config"] = self.text_config.to_dict()
-        output["vision_config"] = self.vision_config.to_dict()
-        output["model_type"] = self.__class__.model_type
-        return output
 
 
 class GroupViTOnnxConfig(OnnxConfig):
@@ -454,7 +440,7 @@ class GroupViTOnnxConfig(OnnxConfig):
             processor.tokenizer, batch_size=batch_size, seq_length=seq_length, framework=framework
         )
         image_input_dict = super().generate_dummy_inputs(
-            processor.feature_extractor, batch_size=batch_size, framework=framework
+            processor.image_processor, batch_size=batch_size, framework=framework
         )
         return {**text_input_dict, **image_input_dict}
 

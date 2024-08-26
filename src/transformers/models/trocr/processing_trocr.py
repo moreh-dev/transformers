@@ -15,6 +15,7 @@
 """
 Processor class for TrOCR.
 """
+
 import warnings
 from contextlib import contextmanager
 
@@ -30,16 +31,18 @@ class TrOCRProcessor(ProcessorMixin):
     more information.
 
     Args:
-        image_processor ([`ViTImageProcessor`/`DeiTImageProcessor`]):
+        image_processor ([`ViTImageProcessor`/`DeiTImageProcessor`], *optional*):
             An instance of [`ViTImageProcessor`/`DeiTImageProcessor`]. The image processor is a required input.
-        tokenizer ([`RobertaTokenizer`/`XLMRobertaTokenizer`]):
+        tokenizer ([`RobertaTokenizer`/`XLMRobertaTokenizer`], *optional*):
             An instance of [`RobertaTokenizer`/`XLMRobertaTokenizer`]. The tokenizer is a required input.
     """
+
     attributes = ["image_processor", "tokenizer"]
     image_processor_class = "AutoImageProcessor"
     tokenizer_class = "AutoTokenizer"
 
     def __init__(self, image_processor=None, tokenizer=None, **kwargs):
+        feature_extractor = None
         if "feature_extractor" in kwargs:
             warnings.warn(
                 "The `feature_extractor` argument is deprecated and will be removed in v5, use `image_processor`"

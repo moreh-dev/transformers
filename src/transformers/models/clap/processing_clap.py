@@ -33,6 +33,7 @@ class ClapProcessor(ProcessorMixin):
         tokenizer ([`RobertaTokenizerFast`]):
             The tokenizer is a required input.
     """
+
     feature_extractor_class = "ClapFeatureExtractor"
     tokenizer_class = ("RobertaTokenizer", "RobertaTokenizerFast")
 
@@ -88,7 +89,7 @@ class ClapProcessor(ProcessorMixin):
             )
 
         if text is not None and audios is not None:
-            encoding["input_features"] = audio_features.input_features
+            encoding.update(audio_features)
             return encoding
         elif text is not None:
             return encoding

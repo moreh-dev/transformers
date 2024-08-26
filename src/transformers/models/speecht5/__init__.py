@@ -17,18 +17,16 @@ from ...utils import (
     OptionalDependencyNotAvailable,
     _LazyModule,
     is_sentencepiece_available,
-    is_speech_available,
     is_torch_available,
 )
 
 
 _import_structure = {
     "configuration_speecht5": [
-        "SPEECHT5_PRETRAINED_CONFIG_ARCHIVE_MAP",
-        "SPEECHT5_PRETRAINED_HIFIGAN_CONFIG_ARCHIVE_MAP",
         "SpeechT5Config",
         "SpeechT5HifiGanConfig",
     ],
+    "feature_extraction_speecht5": ["SpeechT5FeatureExtractor"],
     "processing_speecht5": ["SpeechT5Processor"],
 }
 
@@ -41,21 +39,12 @@ else:
     _import_structure["tokenization_speecht5"] = ["SpeechT5Tokenizer"]
 
 try:
-    if not is_speech_available():
-        raise OptionalDependencyNotAvailable()
-except OptionalDependencyNotAvailable:
-    pass
-else:
-    _import_structure["feature_extraction_speecht5"] = ["SpeechT5FeatureExtractor"]
-
-try:
     if not is_torch_available():
         raise OptionalDependencyNotAvailable()
 except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_speecht5"] = [
-        "SPEECHT5_PRETRAINED_MODEL_ARCHIVE_LIST",
         "SpeechT5ForSpeechToText",
         "SpeechT5ForSpeechToSpeech",
         "SpeechT5ForTextToSpeech",
@@ -66,11 +55,10 @@ else:
 
 if TYPE_CHECKING:
     from .configuration_speecht5 import (
-        SPEECHT5_PRETRAINED_CONFIG_ARCHIVE_MAP,
-        SPEECHT5_PRETRAINED_HIFIGAN_CONFIG_ARCHIVE_MAP,
         SpeechT5Config,
         SpeechT5HifiGanConfig,
     )
+    from .feature_extraction_speecht5 import SpeechT5FeatureExtractor
     from .processing_speecht5 import SpeechT5Processor
 
     try:
@@ -82,21 +70,12 @@ if TYPE_CHECKING:
         from .tokenization_speecht5 import SpeechT5Tokenizer
 
     try:
-        if not is_speech_available():
-            raise OptionalDependencyNotAvailable()
-    except OptionalDependencyNotAvailable:
-        pass
-    else:
-        from .feature_extraction_speecht5 import SpeechT5FeatureExtractor
-
-    try:
         if not is_torch_available():
             raise OptionalDependencyNotAvailable()
     except OptionalDependencyNotAvailable:
         pass
     else:
         from .modeling_speecht5 import (
-            SPEECHT5_PRETRAINED_MODEL_ARCHIVE_LIST,
             SpeechT5ForSpeechToSpeech,
             SpeechT5ForSpeechToText,
             SpeechT5ForTextToSpeech,

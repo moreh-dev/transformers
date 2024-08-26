@@ -47,12 +47,6 @@ logger = logging.get_logger(__name__)
 _CHECKPOINT_FOR_DOC = "kssteven/ibert-roberta-base"
 _CONFIG_FOR_DOC = "IBertConfig"
 
-IBERT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "kssteven/ibert-roberta-base",
-    "kssteven/ibert-roberta-large",
-    "kssteven/ibert-roberta-large-mnli",
-]
-
 
 class IBertEmbeddings(nn.Module):
     """
@@ -80,7 +74,9 @@ class IBertEmbeddings(nn.Module):
         )
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
 
         # End copy
@@ -740,8 +736,6 @@ class IBertModel(IBertPreTrainedModel):
 
     """
 
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     def __init__(self, config, add_pooling_layer=True):
         super().__init__(config)
         self.config = config
@@ -796,6 +790,7 @@ class IBertModel(IBertPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -854,8 +849,7 @@ class IBertModel(IBertPreTrainedModel):
 
 @add_start_docstrings("""I-BERT Model with a `language modeling` head on top.""", IBERT_START_DOCSTRING)
 class IBertForMaskedLM(IBertPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"position_ids", r"lm_head.decoder.bias", "lm_head.decoder.weight"]
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+    _tied_weights_keys = ["lm_head.decoder.bias", "lm_head.decoder.weight"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -871,6 +865,7 @@ class IBertForMaskedLM(IBertPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head.decoder = new_embeddings
+        self.lm_head.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(IBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
@@ -897,7 +892,7 @@ class IBertForMaskedLM(IBertPreTrainedModel):
             Labels for computing the masked language modeling loss. Indices should be in `[-100, 0, ...,
             config.vocab_size]` (see `input_ids` docstring) Tokens with indices set to `-100` are ignored (masked), the
             loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`
-        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
+        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
             Used to hide legacy arguments that have been deprecated.
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -955,9 +950,13 @@ class IBertLMHead(nn.Module):
 
         return x
 
-    def _tie_weights(self):
-        # To tie those two weights if they get disconnected (on TPU or when the bias is resized)
-        self.bias = self.decoder.bias
+    def _tie_weights(self) -> None:
+        # For accelerate compatibility and to not break backward compatibility
+        if self.decoder.bias.device.type == "meta":
+            self.decoder.bias = self.bias
+        else:
+            # To tie those two weights if they get disconnected (on TPU or when the bias is resized)
+            self.bias = self.decoder.bias
 
 
 @add_start_docstrings(
@@ -968,8 +967,6 @@ class IBertLMHead(nn.Module):
     IBERT_START_DOCSTRING,
 )
 class IBertForSequenceClassification(IBertPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1063,8 +1060,6 @@ class IBertForSequenceClassification(IBertPreTrainedModel):
     IBERT_START_DOCSTRING,
 )
 class IBertForMultipleChoice(IBertPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     def __init__(self, config):
         super().__init__(config)
 
@@ -1155,9 +1150,6 @@ class IBertForMultipleChoice(IBertPreTrainedModel):
     IBERT_START_DOCSTRING,
 )
 class IBertForTokenClassification(IBertPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1255,9 +1247,6 @@ class IBertClassificationHead(nn.Module):
     IBERT_START_DOCSTRING,
 )
 class IBertForQuestionAnswering(IBertPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels

@@ -44,16 +44,18 @@ class MgpstrProcessor(ProcessorMixin):
     [`~MgpstrProcessor.__call__`] and [`~MgpstrProcessor.batch_decode`] for more information.
 
     Args:
-        image_processor (`ViTImageProcessor`):
+        image_processor (`ViTImageProcessor`, *optional*):
             An instance of `ViTImageProcessor`. The image processor is a required input.
-        tokenizer ([`MgpstrTokenizer`]):
+        tokenizer ([`MgpstrTokenizer`], *optional*):
             The tokenizer is a required input.
     """
+
     attributes = ["image_processor", "char_tokenizer"]
     image_processor_class = "ViTImageProcessor"
     char_tokenizer_class = "MgpstrTokenizer"
 
     def __init__(self, image_processor=None, tokenizer=None, **kwargs):
+        feature_extractor = None
         if "feature_extractor" in kwargs:
             warnings.warn(
                 "The `feature_extractor` argument is deprecated and will be removed in v5, use `image_processor`"
@@ -69,8 +71,8 @@ class MgpstrProcessor(ProcessorMixin):
             raise ValueError("You need to specify a `tokenizer`.")
 
         self.char_tokenizer = tokenizer
-        self.bpe_tokenizer = AutoTokenizer.from_pretrained("gpt2")
-        self.wp_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+        self.bpe_tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        self.wp_tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")
 
         super().__init__(image_processor, tokenizer)
 

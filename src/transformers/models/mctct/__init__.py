@@ -17,7 +17,12 @@ from ...utils import OptionalDependencyNotAvailable, _LazyModule, is_speech_avai
 
 
 _import_structure = {
+<<<<<<< HEAD:src/transformers/models/mctct/__init__.py
     "configuration_mctct": ["MCTCT_PRETRAINED_CONFIG_ARCHIVE_MAP", "MCTCTConfig"],
+=======
+    "configuration_mctct": ["MCTCTConfig"],
+    "feature_extraction_mctct": ["MCTCTFeatureExtractor"],
+>>>>>>> temp-branch:src/transformers/models/deprecated/mctct/__init__.py
     "processing_mctct": ["MCTCTProcessor"],
 }
 
@@ -38,7 +43,6 @@ except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_mctct"] = [
-        "MCTCT_PRETRAINED_MODEL_ARCHIVE_LIST",
         "MCTCTForCTC",
         "MCTCTModel",
         "MCTCTPreTrainedModel",
@@ -46,7 +50,12 @@ else:
 
 
 if TYPE_CHECKING:
+<<<<<<< HEAD:src/transformers/models/mctct/__init__.py
     from .configuration_mctct import MCTCT_PRETRAINED_CONFIG_ARCHIVE_MAP, MCTCTConfig
+=======
+    from .configuration_mctct import MCTCTConfig
+    from .feature_extraction_mctct import MCTCTFeatureExtractor
+>>>>>>> temp-branch:src/transformers/models/deprecated/mctct/__init__.py
     from .processing_mctct import MCTCTProcessor
 
     try:
@@ -63,7 +72,7 @@ if TYPE_CHECKING:
     except OptionalDependencyNotAvailable:
         pass
     else:
-        from .modeling_mctct import MCTCT_PRETRAINED_MODEL_ARCHIVE_LIST, MCTCTForCTC, MCTCTModel, MCTCTPreTrainedModel
+        from .modeling_mctct import MCTCTForCTC, MCTCTModel, MCTCTPreTrainedModel
 
 else:
     import sys

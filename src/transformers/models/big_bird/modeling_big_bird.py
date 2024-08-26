@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch BigBird model."""
-
+"""PyTorch BigBird model."""
 
 import math
 import os
@@ -54,12 +53,6 @@ logger = logging.get_logger(__name__)
 _CHECKPOINT_FOR_DOC = "google/bigbird-roberta-base"
 _CONFIG_FOR_DOC = "BigBirdConfig"
 
-BIG_BIRD_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "google/bigbird-roberta-base",
-    "google/bigbird-roberta-large",
-    "google/bigbird-base-trivia-itc",
-    # See all BigBird models at https://huggingface.co/models?filter=big_bird
-]
 
 _TRIVIA_QA_MAPPING = {
     "big_bird_attention": "attention/self",
@@ -227,7 +220,7 @@ def load_tf_weights_in_big_bird(model, tf_checkpoint_path, is_trivia_qa=False):
                 raise ValueError(
                     f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched of {txt_name}."
                 )
-        except AssertionError as e:
+        except ValueError as e:
             e.args += (pointer.shape, array.shape)
             raise
         pt_weight_name = ".".join(pt_name)
@@ -257,7 +250,9 @@ class BigBirdEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
         )
@@ -894,15 +889,11 @@ class BigBirdBlockSparseAttention(nn.Module):
             # global keys (corresponding to 1st key block)
             attention_probs[:, :, 2 * from_block_size : -2 * from_block_size, :to_block_size] = attn_weights[
                 :, :, :, :, :to_block_size
-            ].view(
-                bsz, n_heads, -1, to_block_size
-            )  # first_band_product
+            ].view(bsz, n_heads, -1, to_block_size)  # first_band_product
             # global keys (corresponding to last key block)
             attention_probs[:, :, 2 * from_block_size : -2 * from_block_size, -to_block_size:] = attn_weights[
                 :, :, :, :, -to_block_size:
-            ].view(
-                bsz, n_heads, -1, to_block_size
-            )  # last_band_product
+            ].view(bsz, n_heads, -1, to_block_size)  # last_band_product
             # random keys
             for p1, i1, w1 in zip(range(bsz), rand_attn, attn_weights):
                 # p1, i1, w1 corresponds to batch_dim i.e. following operation is done for each sequence in batch
@@ -927,11 +918,9 @@ class BigBirdBlockSparseAttention(nn.Module):
             attention_probs[:, :, -2 * from_block_size : -from_block_size, :to_block_size] = second_last_attn_weights[
                 :, :, :, :to_block_size
             ]  # 1st key block (global)
-            attention_probs[
-                :, :, -2 * from_block_size : -from_block_size, -3 * to_block_size :
-            ] = second_last_attn_weights[
-                :, :, :, to_block_size : 4 * to_block_size
-            ]  # last three blocks (global + sliding)
+            attention_probs[:, :, -2 * from_block_size : -from_block_size, -3 * to_block_size :] = (
+                second_last_attn_weights[:, :, :, to_block_size : 4 * to_block_size]
+            )  # last three blocks (global + sliding)
             # random keys
             for p1, i1, w1 in zip(range(bsz), rand_attn, second_last_attn_weights):
                 # p1, i1, w1 corresponds to batch_dim i.e. following operation is done for each sequence in batch
@@ -1615,15 +1604,8 @@ class BigBirdEncoder(nn.Module):
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, past_key_value, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
@@ -1633,6 +1615,8 @@ class BigBirdEncoder(nn.Module):
                     from_mask,
                     to_mask,
                     blocked_encoder_mask,
+                    past_key_value,
+                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(
@@ -1714,6 +1698,9 @@ class BigBirdLMPredictionHead(nn.Module):
         # Need a link between the two variables so that the bias is correctly resized with `resize_token_embeddings`
         self.decoder.bias = self.bias
 
+    def _tie_weights(self):
+        self.decoder.bias = self.bias
+
     def forward(self, hidden_states):
         hidden_states = self.transform(hidden_states)
         hidden_states = self.decoder(hidden_states)
@@ -1765,7 +1752,6 @@ class BigBirdPreTrainedModel(PreTrainedModel):
     load_tf_weights = load_tf_weights_in_big_bird
     base_model_prefix = "bert"
     supports_gradient_checkpointing = True
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -1782,10 +1768,6 @@ class BigBirdPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, BigBirdEncoder):
-            module.gradient_checkpointing = value
 
 
 BIG_BIRD_START_DOCSTRING = r"""
@@ -2034,6 +2016,7 @@ class BigBirdModel(BigBirdPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -2234,7 +2217,7 @@ class BigBirdModel(BigBirdPreTrainedModel):
 
         padding_len = (block_size - seq_len % block_size) % block_size
         if padding_len > 0:
-            logger.info(
+            logger.warning_once(
                 f"Input ids are automatically padded from {seq_len} to {seq_len + padding_len} to be a multiple of "
                 f"`config.block_size`: {block_size}"
             )
@@ -2261,7 +2244,7 @@ class BigBirdModel(BigBirdPreTrainedModel):
 
 
 class BigBirdForPreTraining(BigBirdPreTrainedModel):
-    _keys_to_ignore_on_load_missing = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
+    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -2277,6 +2260,7 @@ class BigBirdForPreTraining(BigBirdPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.cls.predictions.decoder = new_embeddings
+        self.cls.predictions.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(BIG_BIRD_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @replace_return_docstrings(output_type=BigBirdForPreTrainingOutput, config_class=_CONFIG_FOR_DOC)
@@ -2306,7 +2290,7 @@ class BigBirdForPreTraining(BigBirdPreTrainedModel):
 
             - 0 indicates sequence B is a continuation of sequence A,
             - 1 indicates sequence B is a random sequence.
-        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
+        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
             Used to hide legacy arguments that have been deprecated.
 
         Returns:
@@ -2367,7 +2351,7 @@ class BigBirdForPreTraining(BigBirdPreTrainedModel):
 
 @add_start_docstrings("""BigBird Model with a `language modeling` head on top.""", BIG_BIRD_START_DOCSTRING)
 class BigBirdForMaskedLM(BigBirdPreTrainedModel):
-    _keys_to_ignore_on_load_missing = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
+    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -2389,6 +2373,7 @@ class BigBirdForMaskedLM(BigBirdPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.cls.predictions.decoder = new_embeddings
+        self.cls.predictions.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(BIG_BIRD_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @replace_return_docstrings(output_type=MaskedLMOutput, config_class=_CONFIG_FOR_DOC)
@@ -2424,7 +2409,7 @@ class BigBirdForMaskedLM(BigBirdPreTrainedModel):
 
         >>> tokenizer = AutoTokenizer.from_pretrained("google/bigbird-roberta-base")
         >>> model = BigBirdForMaskedLM.from_pretrained("google/bigbird-roberta-base")
-        >>> squad_ds = load_dataset("squad_v2", split="train")  # doctest: +IGNORE_RESULT
+        >>> squad_ds = load_dataset("rajpurkar/squad_v2", split="train")  # doctest: +IGNORE_RESULT
 
         >>> # select random long article
         >>> LONG_ARTICLE_TARGET = squad_ds[81514]["context"]
@@ -2453,7 +2438,7 @@ class BigBirdForMaskedLM(BigBirdPreTrainedModel):
         >>> labels = torch.where(inputs.input_ids == tokenizer.mask_token_id, labels, -100)
         >>> outputs = model(**inputs, labels=labels)
         >>> round(outputs.loss.item(), 2)
-        1.08
+        1.99
         ```
         """
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
@@ -2511,12 +2496,7 @@ class BigBirdForMaskedLM(BigBirdPreTrainedModel):
     """BigBird Model with a `language modeling` head on top for CLM fine-tuning.""", BIG_BIRD_START_DOCSTRING
 )
 class BigBirdForCausalLM(BigBirdPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [
-        r"position_ids",
-        r"predictions.decoder.bias",
-        "cls.predictions.decoder.weight",
-        "cls.predictions.decoder.bias",
-    ]
+    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -2535,6 +2515,7 @@ class BigBirdForCausalLM(BigBirdPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.cls.predictions.decoder = new_embeddings
+        self.cls.predictions.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(BIG_BIRD_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
@@ -2631,9 +2612,18 @@ class BigBirdForCausalLM(BigBirdPreTrainedModel):
         if attention_mask is None:
             attention_mask = input_ids.new_ones(input_shape)
 
-        # cut decoder_input_ids if past is used
+        # cut decoder_input_ids if past_key_values is used
         if past_key_values is not None:
-            input_ids = input_ids[:, -1:]
+            past_length = past_key_values[0][0].shape[2]
+
+            # Some generation methods already pass only the last input ID
+            if input_ids.shape[1] > past_length:
+                remove_prefix_length = past_length
+            else:
+                # Default to old behavior: keep only final ID
+                remove_prefix_length = input_ids.shape[1] - 1
+
+            input_ids = input_ids[:, remove_prefix_length:]
 
         return {"input_ids": input_ids, "attention_mask": attention_mask, "past_key_values": past_key_values}
 
@@ -2641,7 +2631,8 @@ class BigBirdForCausalLM(BigBirdPreTrainedModel):
         reordered_past = ()
         for layer_past in past_key_values:
             reordered_past += (
-                tuple(past_state.index_select(0, beam_idx) for past_state in layer_past[:2]) + layer_past[2:],
+                tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past[:2])
+                + layer_past[2:],
             )
         return reordered_past
 
@@ -2720,7 +2711,7 @@ class BigBirdForSequenceClassification(BigBirdPreTrainedModel):
 
         >>> tokenizer = AutoTokenizer.from_pretrained("l-yohai/bigbird-roberta-base-mnli")
         >>> model = BigBirdForSequenceClassification.from_pretrained("l-yohai/bigbird-roberta-base-mnli")
-        >>> squad_ds = load_dataset("squad_v2", split="train")  # doctest: +IGNORE_RESULT
+        >>> squad_ds = load_dataset("rajpurkar/squad_v2", split="train")  # doctest: +IGNORE_RESULT
 
         >>> LONG_ARTICLE = squad_ds[81514]["context"]
         >>> inputs = tokenizer(LONG_ARTICLE, return_tensors="pt")
@@ -3015,9 +3006,9 @@ class BigBirdForQuestionAnswering(BigBirdPreTrainedModel):
     @replace_return_docstrings(output_type=BigBirdForQuestionAnsweringModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
         self,
-        input_ids: torch.LongTensor = None,
+        input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.FloatTensor] = None,
-        question_lengths=None,
+        question_lengths: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.LongTensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
@@ -3049,7 +3040,7 @@ class BigBirdForQuestionAnswering(BigBirdPreTrainedModel):
 
         >>> tokenizer = AutoTokenizer.from_pretrained("google/bigbird-roberta-base")
         >>> model = BigBirdForQuestionAnswering.from_pretrained("google/bigbird-roberta-base")
-        >>> squad_ds = load_dataset("squad_v2", split="train")  # doctest: +IGNORE_RESULT
+        >>> squad_ds = load_dataset("rajpurkar/squad_v2", split="train")  # doctest: +IGNORE_RESULT
 
         >>> # select random article and question
         >>> LONG_ARTICLE = squad_ds[81514]["context"]

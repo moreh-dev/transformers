@@ -26,14 +26,6 @@ logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.json"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "mgp-str": "https://huggingface.co/alibaba-damo/mgp-str-base/blob/main/vocab.json",
-    }
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {"mgp-str": 27}
-
 
 class MgpstrTokenizer(PreTrainedTokenizer):
     """
@@ -52,16 +44,17 @@ class MgpstrTokenizer(PreTrainedTokenizer):
             The beginning of sequence token.
         eos_token (`str`, *optional*, defaults to `"[s]"`):
             The end of sequence token.
-        pad_token (`str` or `tokenizers.AddedToken`, *optional*, , defaults to `"[GO]"`):
+        pad_token (`str` or `tokenizers.AddedToken`, *optional*, defaults to `"[GO]"`):
             A special token used to make arrays of tokens the same size for batching purpose. Will then be ignored by
             attention mechanisms or loss computation.
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
 
     def __init__(self, vocab_file, unk_token="[GO]", bos_token="[GO]", eos_token="[s]", pad_token="[GO]", **kwargs):
+        with open(vocab_file, encoding="utf-8") as vocab_handle:
+            self.vocab = json.load(vocab_handle)
+        self.decoder = {v: k for k, v in self.vocab.items()}
         super().__init__(
             unk_token=unk_token,
             bos_token=bos_token,
@@ -70,16 +63,14 @@ class MgpstrTokenizer(PreTrainedTokenizer):
             **kwargs,
         )
 
-        with open(vocab_file, encoding="utf-8") as vocab_handle:
-            self.vocab = json.load(vocab_handle)
-        self.decoder = {v: k for k, v in self.vocab.items()}
-
     @property
     def vocab_size(self):
         return len(self.vocab)
 
     def get_vocab(self):
-        return dict(self.vocab, **self.added_tokens_encoder)
+        vocab = dict(self.vocab).copy()
+        vocab.update(self.added_tokens_encoder)
+        return vocab
 
     def _tokenize(self, text):
         """Tokenize a string."""

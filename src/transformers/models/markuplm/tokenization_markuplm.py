@@ -39,23 +39,6 @@ logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.json", "merges_file": "merges.txt", "tokenizer_file": "tokenizer.json"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "microsoft/markuplm-base": "https://huggingface.co/microsoft/markuplm-base/resolve/main/vocab.json",
-        "microsoft/markuplm-large": "https://huggingface.co/microsoft/markuplm-large/resolve/main/vocab.json",
-    },
-    "merges_file": {
-        "microsoft/markuplm-base": "https://huggingface.co/microsoft/markuplm-base/resolve/main/merges.txt",
-        "microsoft/markuplm-large": "https://huggingface.co/microsoft/markuplm-large/resolve/main/merges.txt",
-    },
-}
-
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "microsoft/markuplm-base": 512,
-    "microsoft/markuplm-large": 512,
-}
-
 
 MARKUPLM_ENCODE_PLUS_ADDITIONAL_KWARGS_DOCSTRING = r"""
             add_special_tokens (`bool`, *optional*, defaults to `True`):
@@ -198,8 +181,6 @@ class MarkupLMTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
 
     def __init__(
         self,
@@ -232,27 +213,6 @@ class MarkupLMTokenizer(PreTrainedTokenizer):
         # Mask token behave like a normal word, i.e. include the space before it
         mask_token = AddedToken(mask_token, lstrip=True, rstrip=False) if isinstance(mask_token, str) else mask_token
 
-        super().__init__(
-            vocab_file=vocab_file,
-            merges_file=merges_file,
-            tags_dict=tags_dict,
-            errors=errors,
-            bos_token=bos_token,
-            eos_token=eos_token,
-            unk_token=unk_token,
-            sep_token=sep_token,
-            cls_token=cls_token,
-            pad_token=pad_token,
-            mask_token=mask_token,
-            add_prefix_space=add_prefix_space,
-            max_depth=max_depth,
-            max_width=max_width,
-            pad_width=pad_width,
-            pad_token_label=pad_token_label,
-            only_label_first_subword=only_label_first_subword,
-            **kwargs,
-        )
-
         with open(vocab_file, encoding="utf-8") as vocab_handle:
             self.encoder = json.load(vocab_handle)
 
@@ -279,6 +239,28 @@ class MarkupLMTokenizer(PreTrainedTokenizer):
         self.pad_tag_id = self.unk_tag_id + 1
         self.pad_xpath_tags_seq = [self.pad_tag_id] * self.max_depth
         self.pad_xpath_subs_seq = [self.pad_width] * self.max_depth
+
+        super().__init__(
+            vocab_file=vocab_file,
+            merges_file=merges_file,
+            tags_dict=tags_dict,
+            errors=errors,
+            bos_token=bos_token,
+            eos_token=eos_token,
+            unk_token=unk_token,
+            sep_token=sep_token,
+            cls_token=cls_token,
+            pad_token=pad_token,
+            mask_token=mask_token,
+            add_prefix_space=add_prefix_space,
+            max_depth=max_depth,
+            max_width=max_width,
+            pad_width=pad_width,
+            pad_token_label=pad_token_label,
+            only_label_first_subword=only_label_first_subword,
+            **kwargs,
+        )
+
         self.pad_token_label = pad_token_label
         self.only_label_first_subword = only_label_first_subword
 
@@ -312,7 +294,9 @@ class MarkupLMTokenizer(PreTrainedTokenizer):
         return len(self.encoder)
 
     def get_vocab(self):
-        return dict(self.encoder, **self.added_tokens_encoder)
+        vocab = self.encoder.copy()
+        vocab.update(self.added_tokens_encoder)
+        return vocab
 
     def bpe(self, token):
         if token in self.cache:

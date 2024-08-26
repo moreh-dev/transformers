@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" SEW-D model configuration"""
+"""SEW-D model configuration"""
 
 import functools
 import operator
@@ -22,11 +22,6 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-SEW_D_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "asapp/sew-d-tiny-100k": "https://huggingface.co/asapp/sew-d-tiny-100k/resolve/main/config.json",
-    # See all SEW-D models at https://huggingface.co/models?filter=sew-d
-}
 
 
 class SEWDConfig(PretrainedConfig):
@@ -72,6 +67,8 @@ class SEWDConfig(PretrainedConfig):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
             `"relu"`, `"selu"`, `"gelu_python"` and `"gelu_new"` are supported.
         hidden_dropout (`float`, *optional*, defaults to 0.1):
+            Deprecated. Not used by the model and will be removed in a future version.
+        activation_dropout (`float`, *optional*, defaults to 0.1):
             The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
         attention_dropout (`float`, *optional*, defaults to 0.1):
             The dropout ratio for the attention probabilities.
@@ -167,6 +164,7 @@ class SEWDConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "sew-d"
 
     def __init__(
@@ -238,7 +236,7 @@ class SEWDConfig(PretrainedConfig):
         self.pos_att_type = list(pos_att_type)
         self.hidden_act = hidden_act
         self.num_attention_heads = num_attention_heads
-        self.hidden_dropout = hidden_dropout
+        self._hidden_dropout = hidden_dropout
         self.attention_dropout = attention_dropout
         self.activation_dropout = activation_dropout
         self.feat_proj_dropout = feat_proj_dropout
@@ -254,9 +252,9 @@ class SEWDConfig(PretrainedConfig):
             or (len(self.conv_dim) != self.num_feat_extract_layers)
         ):
             raise ValueError(
-                "Configuration for convolutional layers is incorrect."
-                "It is required that `len(config.conv_dim)` == `len(config.conv_stride)` == `len(config.conv_kernel)`,"
-                f"but is `len(config.conv_dim) = {len(self.conv_dim)}`, `len(config.conv_stride)"
+                "Configuration for convolutional layers is incorrect. "
+                "It is required that `len(config.conv_dim)` == `len(config.conv_stride)` == `len(config.conv_kernel)`, "
+                f"but is `len(config.conv_dim) = {len(self.conv_dim)}`, `len(config.conv_stride) "
                 f"= {len(self.conv_stride)}`, `len(config.conv_kernel) = {len(self.conv_kernel)}`."
             )
 
@@ -280,3 +278,11 @@ class SEWDConfig(PretrainedConfig):
     @property
     def inputs_to_logits_ratio(self):
         return functools.reduce(operator.mul, self.conv_stride, 1)
+
+    def to_dict(self):
+        """
+        Serializes this instance to a Python dictionary.
+        """
+        output = super().to_dict()
+        output["hidden_dropout"] = output.pop("_hidden_dropout")
+        return output

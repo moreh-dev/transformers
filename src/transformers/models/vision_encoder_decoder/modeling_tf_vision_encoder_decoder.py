@@ -12,8 +12,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Classes to support TF Vision-Encoder-Text-Decoder architectures"""
+"""Classes to support TF Vision-Encoder-Text-Decoder architectures"""
 
+from __future__ import annotations
 
 import re
 import warnings
@@ -24,10 +25,9 @@ import tensorflow as tf
 
 from ...configuration_utils import PretrainedConfig
 from ...modeling_tf_outputs import TFBaseModelOutput, TFSeq2SeqLMOutput
-from ...modeling_tf_utils import TFCausalLanguageModelingLoss, TFPreTrainedModel, get_initializer, unpack_inputs
+from ...modeling_tf_utils import TFCausalLanguageModelingLoss, TFPreTrainedModel, get_initializer, keras, unpack_inputs
 from ...tf_utils import shape_list
 from ...utils import (
-    DUMMY_INPUTS,
     ModelOutput,
     add_start_docstrings,
     add_start_docstrings_to_model_forward,
@@ -73,7 +73,7 @@ VISION_ENCODER_DECODER_START_DOCSTRING = r"""
     library implements for all its model (such as downloading or saving, resizing the input embeddings, pruning heads
     etc.)
 
-    This model is also a [tf.keras.Model](https://www.tensorflow.org/api_docs/python/tf/keras/Model) subclass. Use it
+    This model is also a [keras.Model](https://www.tensorflow.org/api_docs/python/tf/keras/Model) subclass. Use it
     as a regular TF 2.0 Keras Model and refer to the TF 2.0 documentation for all matter related to general usage and
     behavior.
 
@@ -179,6 +179,7 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
     decoder when created with the [`~TFAutoModel.from_pretrained`] class method for the encoder and
     [`~TFAutoModelForCausalLM.from_pretrained`] class method for the decoder.
     """
+
     config_class = VisionEncoderDecoderConfig
     base_model_prefix = "vision_encoder_decoder"
     load_weight_prefix = "tf_vision_encoder_decoder_model"
@@ -240,7 +241,7 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
             self.encoder.config.hidden_size != self.decoder.config.hidden_size
             and self.decoder.config.cross_attention_hidden_size is None
         ):
-            self.enc_to_dec_proj = tf.keras.layers.Dense(
+            self.enc_to_dec_proj = keras.layers.Dense(
                 units=self.decoder.config.hidden_size,
                 kernel_initializer=get_initializer(config.encoder.initializer_range),
                 name="enc_to_dec_proj",
@@ -252,29 +253,26 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
             )
 
     @property
-    def dummy_inputs(self):
-        """
-        Dummy inputs to build the network.
-
-        Returns:
-            `Dict[str, tf.Tensor]`: The dummy inputs.
-        """
-        decoder_input_ids = tf.constant(DUMMY_INPUTS, dtype=tf.int32)
-        batch_size, seq_len = decoder_input_ids.shape
-
-        VISION_DUMMY_INPUTS = tf.random.uniform(
-            shape=(
-                batch_size,
-                self.config.encoder.num_channels,
-                self.config.encoder.image_size,
-                self.config.encoder.image_size,
+    def input_signature(self):
+        vision_config = self.config.encoder
+        if hasattr(vision_config, "vision_config"):
+            vision_config = vision_config.vision_config
+        if hasattr(vision_config, "image_size"):
+            image_size = vision_config.image_size
+        else:
+            image_size = vision_config.input_size
+        return {
+            "pixel_values": tf.TensorSpec(
+                shape=(
+                    None,
+                    vision_config.num_channels,
+                    image_size,
+                    image_size,
+                ),
+                dtype=tf.float32,
             ),
-            dtype=tf.float32,
-        )
-        pixel_values = tf.constant(VISION_DUMMY_INPUTS)
-        # Add `decoder_input_ids` because `self.decoder` requires it.
-        dummy = {"pixel_values": pixel_values, "decoder_input_ids": decoder_input_ids}
-        return dummy
+            "decoder_input_ids": tf.TensorSpec(shape=(None, None), dtype=tf.int32, name="decoder_input_ids"),
+        }
 
     def get_encoder(self):
         return self.encoder
@@ -291,51 +289,22 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
     def set_output_embeddings(self, new_embeddings):
         return self.decoder.set_output_embeddings(new_embeddings)
 
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
-        r"""
-        Example:
-
-        ```python
-        >>> from transformers import TFVisionEncoderDecoderModel, AutoImageProcessor, AutoTokenizer
-        >>> from PIL import Image
-        >>> import requests
-
-        >>> image_processor = AutoImageProcessor.from_pretrained("ydshieh/vit-gpt2-coco-en")
-        >>> decoder_tokenizer = AutoTokenizer.from_pretrained("ydshieh/vit-gpt2-coco-en")
-        >>> model = TFVisionEncoderDecoderModel.from_pretrained("ydshieh/vit-gpt2-coco-en")
-
-        >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-        >>> img = Image.open(requests.get(url, stream=True).raw)
-        >>> pixel_values = image_processor(images=img, return_tensors="tf").pixel_values  # Batch size 1
-
-        >>> output_ids = model.generate(
-        ...     pixel_values, max_length=16, num_beams=4, return_dict_in_generate=True
-        ... ).sequences
-
-        >>> preds = decoder_tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-        >>> preds = [pred.strip() for pred in preds]
-
-        >>> assert preds == ["a cat laying on top of a couch next to another cat"]
-        ```"""
+    def tf_to_pt_weight_rename(self, tf_weight):
         # Matt: The TF and PT weights don't align because our TF base classes have an extra layer compared to PT models
         # (the main model stem is in the MainLayer class). If we remove that layer, then weight names sync up as normal.
         # However, the name of that extra layer is the name of the MainLayer in the base model. We make the assumption
         # here that the config model_type is the same as the name of the MainLayer. I don't know of anywhere that's
         # not the case, and I wasn't sure how else to go from the config to the correct MainLayer name!
 
-        if kwargs.get("from_pt", False):
-            config = AutoConfig.from_pretrained(pretrained_model_name_or_path)
-            encoder_model_type = config.encoder.model_type
-
-            def tf_to_pt_weight_rename(tf_weight):
-                if "encoder" in tf_weight and "decoder" not in tf_weight:
-                    return re.sub(rf"encoder\.{encoder_model_type}\.", "encoder.", tf_weight)
-                else:
-                    return tf_weight
-
-            kwargs["tf_to_pt_weight_rename"] = tf_to_pt_weight_rename
-        return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+        # This override is only needed in the case where we're crossloading weights from PT. However, since weights are
+        # often safetensors now, we don't know if we're going to be crossloading until we sniff the weights file.
+        # Therefore, we specify tf_to_pt_weight_rename anyway, and let the super method figure out if it needs it
+        # or not.
+        encoder_model_type = self.config.encoder.model_type
+        if "encoder" in tf_weight and "decoder" not in tf_weight:
+            return (re.sub(rf"encoder\.{encoder_model_type}\.", "encoder.", tf_weight),)
+        else:
+            return (tf_weight,)
 
     @classmethod
     def from_encoder_decoder_pretrained(
@@ -365,8 +334,6 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
                 Information necessary to initiate the decoder. Can be either:
 
                     - A string, the *model id* of a pretrained model hosted inside a model repo on huggingface.co.
-                      Valid model ids can be located at the root-level, like `bert-base-uncased`, or namespaced under a
-                      user or organization name, like `dbmdz/bert-base-german-cased`.
                     - A path to a *directory* containing model weights saved using
                       [`~TFPreTrainedModel.save_pretrained`], e.g., `./my_model_directory/`.
                     - A path or url to a *pytorch checkpoint file* (e.g, `./pt_model/`). In this case,
@@ -392,7 +359,7 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
 
         >>> # initialize a vit-bert from a pretrained ViT and a pretrained BERT model. Note that the cross-attention layers will be randomly initialized
         >>> model = TFVisionEncoderDecoderModel.from_encoder_decoder_pretrained(
-        ...     "google/vit-base-patch16-224-in21k", "bert-base-uncased"
+        ...     "google/vit-base-patch16-224-in21k", "google-bert/bert-base-uncased"
         ... )
         >>> # saving model after fine-tuning
         >>> model.save_pretrained("./vit-bert")
@@ -475,7 +442,7 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
             kwargs_decoder["load_weight_prefix"] = cls.load_weight_prefix
             decoder = TFAutoModelForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
 
-        # Make sure these 2 `tf.keras.Model` have fixed names so `from_pretrained` could load model weights correctly.
+        # Make sure these 2 `keras.Model` have fixed names so `from_pretrained` could load model weights correctly.
         if encoder.name != "encoder":
             raise ValueError("encoder model must be created with the name `encoder`.")
         if decoder.name != "decoder":
@@ -492,13 +459,13 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
     @replace_return_docstrings(output_type=TFSeq2SeqLMOutput, config_class=_CONFIG_FOR_DOC)
     def call(
         self,
-        pixel_values: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        decoder_input_ids: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        decoder_attention_mask: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        pixel_values: np.ndarray | tf.Tensor | None = None,
+        decoder_input_ids: np.ndarray | tf.Tensor | None = None,
+        decoder_attention_mask: np.ndarray | tf.Tensor | None = None,
         encoder_outputs: Optional[Union[Tuple, TFBaseModelOutput]] = None,
         past_key_values: Optional[Tuple[Tuple[Union[np.ndarray, tf.Tensor]]]] = None,
-        decoder_inputs_embeds: Optional[Union[np.ndarray, tf.Tensor]] = None,
-        labels: Optional[Union[np.ndarray, tf.Tensor]] = None,
+        decoder_inputs_embeds: np.ndarray | tf.Tensor | None = None,
+        labels: np.ndarray | tf.Tensor | None = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -517,11 +484,11 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
         >>> import requests
 
         >>> image_processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
-        >>> decoder_tokenizer = AutoTokenizer.from_pretrained("gpt2")
+        >>> decoder_tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
 
         >>> # initialize a bert2gpt2 from a pretrained BERT and GPT2 models. Note that the cross-attention layers will be randomly initialized
         >>> model = TFVisionEncoderDecoderModel.from_encoder_decoder_pretrained(
-        ...     "google/vit-base-patch16-224-in21k", "gpt2"
+        ...     "google/vit-base-patch16-224-in21k", "openai-community/gpt2"
         ... )
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
@@ -711,6 +678,20 @@ class TFVisionEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLos
 
     def resize_token_embeddings(self, *args, **kwargs):
         raise NotImplementedError(
-            "Resizing the embedding layers via the TFVisionEncoderDecoderModel directly is not supported."
+            "Resizing the embedding layers via the TFVisionEncoderDecoderModel directly is not supported. "
             "Please use the respective methods of the wrapped objects (model.decoder.resize_token_embeddings(...))"
         )
+
+    def build(self, input_shape=None):
+        if self.built:
+            return
+        self.built = True
+        if getattr(self, "enc_to_dec_proj", None) is not None:
+            with tf.name_scope(self.enc_to_dec_proj.name):
+                self.enc_to_dec_proj.build([None, None, self.encoder.config.hidden_size])
+        if getattr(self, "encoder", None) is not None:
+            with tf.name_scope(self.encoder.name):
+                self.encoder.build(None)
+        if getattr(self, "decoder", None) is not None:
+            with tf.name_scope(self.decoder.name):
+                self.decoder.build(None)

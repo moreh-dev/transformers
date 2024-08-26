@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch SegFormer model."""
-
+"""PyTorch SegFormer model."""
 
 import math
 from typing import Optional, Tuple, Union
@@ -51,11 +50,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 256, 16, 16]
 _IMAGE_CLASS_CHECKPOINT = "nvidia/mit-b0"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tabby, tabby cat"
 
-SEGFORMER_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "nvidia/segformer-b0-finetuned-ade-512-512",
-    # See all SegFormer models at https://huggingface.co/models?filter=segformer
-]
-
 
 class SegFormerImageClassifierOutput(ImageClassifierOutput):
     """
@@ -84,8 +78,8 @@ class SegFormerImageClassifierOutput(ImageClassifierOutput):
     attentions: Optional[Tuple[torch.FloatTensor]] = None
 
 
-# Copied from transformers.models.convnext.modeling_convnext.drop_path
-def drop_path(input, drop_prob: float = 0.0, training: bool = False, scale_by_keep=True):
+# Copied from transformers.models.beit.modeling_beit.drop_path
+def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = False) -> torch.Tensor:
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
@@ -790,6 +784,9 @@ class SegformerForSemanticSegmentation(SegformerPreTrainedModel):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
 
+        if labels is not None and self.config.num_labels < 1:
+            raise ValueError(f"Number of labels should be >=0: {self.config.num_labels}")
+
         outputs = self.segformer(
             pixel_values,
             output_attentions=output_attentions,
@@ -815,8 +812,6 @@ class SegformerForSemanticSegmentation(SegformerPreTrainedModel):
                 loss_fct = BCEWithLogitsLoss(reduction="none")
                 loss = loss_fct(upsampled_logits.squeeze(1), labels.float())
                 loss = (loss * valid_mask).mean()
-            else:
-                raise ValueError(f"Number of labels should be >=0: {self.config.num_labels}")
 
         if not return_dict:
             if output_hidden_states:

@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Flax T5 model."""
-
+"""Flax T5 model."""
 
 import copy
 from typing import Callable, Optional, Tuple
@@ -49,22 +48,22 @@ from .configuration_t5 import T5Config
 
 logger = logging.get_logger(__name__)
 
-_CHECKPOINT_FOR_DOC = "t5-small"
+_CHECKPOINT_FOR_DOC = "google-t5/t5-small"
 _CONFIG_FOR_DOC = "T5Config"
 
 remat = nn_partitioning.remat
 
 
 # Copied from transformers.models.bart.modeling_flax_bart.shift_tokens_right
-def shift_tokens_right(input_ids: np.array, pad_token_id: int, decoder_start_token_id: int) -> np.ndarray:
+def shift_tokens_right(input_ids: jnp.ndarray, pad_token_id: int, decoder_start_token_id: int) -> jnp.ndarray:
     """
     Shift input ids one token to the right.
     """
-    shifted_input_ids = np.zeros_like(input_ids)
-    shifted_input_ids[:, 1:] = input_ids[:, :-1]
-    shifted_input_ids[:, 0] = decoder_start_token_id
+    shifted_input_ids = jnp.zeros_like(input_ids)
+    shifted_input_ids = shifted_input_ids.at[:, 1:].set(input_ids[:, :-1])
+    shifted_input_ids = shifted_input_ids.at[:, 0].set(decoder_start_token_id)
 
-    shifted_input_ids = np.where(shifted_input_ids == -100, pad_token_id, shifted_input_ids)
+    shifted_input_ids = jnp.where(shifted_input_ids == -100, pad_token_id, shifted_input_ids)
     return shifted_input_ids
 
 
@@ -405,7 +404,7 @@ class FlaxT5Attention(nn.Module):
         # During fast autoregressive decoding, we feed one position at a time,
         # and cache the keys and values step by step.
         if self.causal and (self.has_variable("cache", "cached_key") or init_cache):
-            key_states, value_states, attention_attention_mask = self._concatenate_to_cache(
+            key_states, value_states, attention_mask = self._concatenate_to_cache(
                 key_states, value_states, query_states, attention_mask
             )
 
@@ -1090,8 +1089,8 @@ class FlaxT5PreTrainedModel(FlaxPreTrainedModel):
         ```python
         >>> from transformers import AutoTokenizer, FlaxT5ForConditionalGeneration
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("t5-small")
-        >>> model = FlaxT5ForConditionalGeneration.from_pretrained("t5-small")
+        >>> tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
+        >>> model = FlaxT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
 
         >>> text = "My friends are cool but they eat too many carbs."
         >>> inputs = tokenizer(text, return_tensors="np")
@@ -1152,8 +1151,8 @@ class FlaxT5PreTrainedModel(FlaxPreTrainedModel):
         >>> from transformers import AutoTokenizer, FlaxT5ForConditionalGeneration
         >>> import jax.numpy as jnp
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("t5-small")
-        >>> model = FlaxT5ForConditionalGeneration.from_pretrained("t5-small")
+        >>> tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
+        >>> model = FlaxT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
 
         >>> text = "My friends are cool but they eat too many carbs."
         >>> inputs = tokenizer(text, return_tensors="np")
@@ -1378,8 +1377,8 @@ FLAX_T5_MODEL_DOCSTRING = """
     ```python
     >>> from transformers import AutoTokenizer, FlaxT5Model
 
-    >>> tokenizer = AutoTokenizer.from_pretrained("t5-small")
-    >>> model = FlaxT5Model.from_pretrained("t5-small")
+    >>> tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
+    >>> model = FlaxT5Model.from_pretrained("google-t5/t5-small")
 
     >>> input_ids = tokenizer(
     ...     "Studies have been shown that owning a dog is good for you", return_tensors="np"
@@ -1630,8 +1629,8 @@ class FlaxT5ForConditionalGeneration(FlaxT5PreTrainedModel):
         >>> from transformers import AutoTokenizer, FlaxT5ForConditionalGeneration
         >>> import jax.numpy as jnp
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("t5-small")
-        >>> model = FlaxT5ForConditionalGeneration.from_pretrained("t5-small")
+        >>> tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
+        >>> model = FlaxT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
 
         >>> text = "summarize: My friends are cool but they eat too many carbs."
         >>> inputs = tokenizer(text, return_tensors="np")
@@ -1740,8 +1739,8 @@ class FlaxT5ForConditionalGeneration(FlaxT5PreTrainedModel):
         self,
         decoder_input_ids,
         max_length,
-        attention_mask: Optional[jnp.DeviceArray] = None,
-        decoder_attention_mask: Optional[jnp.DeviceArray] = None,
+        attention_mask: Optional[jax.Array] = None,
+        decoder_attention_mask: Optional[jax.Array] = None,
         encoder_outputs=None,
         **kwargs,
     ):
@@ -1778,8 +1777,8 @@ FLAX_T5_CONDITIONAL_GENERATION_DOCSTRING = """
     ```python
     >>> from transformers import AutoTokenizer, FlaxT5ForConditionalGeneration
 
-    >>> tokenizer = AutoTokenizer.from_pretrained("t5-small")
-    >>> model = FlaxT5ForConditionalGeneration.from_pretrained("t5-small")
+    >>> tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-small")
+    >>> model = FlaxT5ForConditionalGeneration.from_pretrained("google-t5/t5-small")
 
     >>> ARTICLE_TO_SUMMARIZE = "summarize: My friends are cool but they eat too many carbs."
     >>> inputs = tokenizer([ARTICLE_TO_SUMMARIZE], return_tensors="np")

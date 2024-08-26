@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch BEiT model."""
-
+"""PyTorch BEiT model."""
 
 import collections.abc
 import math
@@ -22,11 +21,12 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 from ...activations import ACT2FN
 from ...modeling_outputs import (
+    BackboneOutput,
     BaseModelOutput,
     BaseModelOutputWithPooling,
     ImageClassifierOutput,
@@ -34,7 +34,7 @@ from ...modeling_outputs import (
     SemanticSegmenterOutput,
 )
 from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import find_pruneable_heads_and_indices, meshgrid, prune_linear_layer
+from ...pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer
 from ...utils import (
     add_code_sample_docstrings,
     add_start_docstrings,
@@ -42,6 +42,7 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
+from ...utils.backbone_utils import BackboneMixin
 from .configuration_beit import BeitConfig
 
 
@@ -57,11 +58,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 197, 768]
 # Image classification docstring
 _IMAGE_CLASS_CHECKPOINT = "microsoft/beit-base-patch16-224"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tabby, tabby cat"
-
-BEIT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "microsoft/beit-base-patch16-224",
-    # See all BEiT models at https://huggingface.co/models?filter=beit
-]
 
 
 @dataclass
@@ -141,6 +137,12 @@ class BeitEmbeddings(nn.Module):
         else:
             self.mask_token = None
         self.patch_embeddings = BeitPatchEmbeddings(config)
+        self.patch_size = config.patch_size
+        self.image_size = (
+            config.image_size
+            if isinstance(config.image_size, collections.abc.Iterable)
+            else (config.image_size, config.image_size)
+        )
         num_patches = self.patch_embeddings.num_patches
         if config.use_absolute_position_embeddings:
             self.position_embeddings = nn.Parameter(torch.zeros(1, num_patches + 1, config.hidden_size))
@@ -148,23 +150,72 @@ class BeitEmbeddings(nn.Module):
             self.position_embeddings = None
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
-    def forward(self, pixel_values: torch.Tensor, bool_masked_pos: Optional[torch.BoolTensor] = None) -> torch.Tensor:
-        embeddings = self.patch_embeddings(pixel_values)
+    def interpolate_pos_encoding(self, embeddings: torch.Tensor, height: int, width: int) -> torch.Tensor:
+        """
+        This method allows the model to interpolate the pre-trained position encodings so that it can be used on
+        higher resolution images.
+
+        Source:
+        https://github.com/facebookresearch/dino/blob/de9ee3df6cf39fac952ab558447af1fa1365362a/vision_transformer.py#L174
+        """
+        num_patches = embeddings.shape[1] - 1
+        num_positions = self.position_embeddings.shape[1] - 1
+        if num_patches == num_positions and height == width:
+            return self.position_embeddings
+
+        class_pos_embed = self.position_embeddings[:, 0]
+        patch_pos_embed = self.position_embeddings[:, 1:]
+        dim = embeddings.shape[-1]
+        h = height // self.patch_size
+        w = width // self.patch_size
+        # we add a small number to avoid floating point error in the interpolation
+        # see discussion at https://github.com/facebookresearch/dino/issues/8
+        h, w = h + 0.1, w + 0.1
+
+        patch_pos_embed = patch_pos_embed.reshape(1, int(math.sqrt(num_positions)), int(math.sqrt(num_positions)), dim)
+        patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
+        patch_pos_embed = nn.functional.interpolate(
+            patch_pos_embed,
+            scale_factor=(h / math.sqrt(num_positions), w / math.sqrt(num_positions)),
+            mode="bicubic",
+            align_corners=False,
+        )
+        if int(h) != patch_pos_embed.shape[-2] or int(w) != patch_pos_embed.shape[-1]:
+            raise ValueError("Width or height does not match with the interpolated position embeddings")
+
+        patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
+        return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
+
+    def forward(
+        self,
+        pixel_values: torch.Tensor,
+        bool_masked_pos: Optional[torch.BoolTensor] = None,
+        interpolate_pos_encoding: bool = False,
+    ) -> torch.Tensor:
+        _, _, height, width = pixel_values.shape
+        embeddings, (patch_height, patch_width) = self.patch_embeddings(
+            pixel_values, self.position_embeddings[:, 1:, :] if self.position_embeddings is not None else None
+        )
         batch_size, seq_len, _ = embeddings.size()
 
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         if bool_masked_pos is not None:
             mask_tokens = self.mask_token.expand(batch_size, seq_len, -1)
             # replace the masked visual tokens by mask_tokens
             w = bool_masked_pos.unsqueeze(-1).type_as(mask_tokens)
             embeddings = embeddings * (1 - w) + mask_tokens * w
 
-        embeddings = torch.cat((cls_tokens, embeddings), dim=1)
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
         if self.position_embeddings is not None:
-            embeddings = embeddings + self.position_embeddings
+            if interpolate_pos_encoding:
+                cls_tokens = cls_tokens + self.interpolate_pos_encoding(embeddings, height, width)
+            else:
+                cls_tokens = cls_tokens + self.position_embeddings[:, :1, :]
+
+        embeddings = torch.cat((cls_tokens, embeddings), dim=1)
+
         embeddings = self.dropout(embeddings)
 
-        return embeddings
+        return embeddings, (patch_height, patch_width)
 
 
 class BeitPatchEmbeddings(nn.Module):
@@ -191,24 +242,39 @@ class BeitPatchEmbeddings(nn.Module):
 
         self.projection = nn.Conv2d(num_channels, hidden_size, kernel_size=patch_size, stride=patch_size)
 
-    def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        pixel_values: torch.Tensor,
+        position_embedding: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         batch_size, num_channels, height, width = pixel_values.shape
         if num_channels != self.num_channels:
             raise ValueError(
                 "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
             )
-        if height != self.image_size[0] or width != self.image_size[1]:
-            raise ValueError(
-                f"Input image size ({height}*{width}) doesn't match model ({self.image_size[0]}*{self.image_size[1]})."
-            )
-        embeddings = self.projection(pixel_values).flatten(2).transpose(1, 2)
 
-        return embeddings
+        embeddings = self.projection(pixel_values)
+        patch_height, patch_width = embeddings.shape[2], embeddings.shape[3]
+
+        if position_embedding is not None:
+            # interpolate the position embedding to the corresponding size
+            position_embedding = position_embedding.view(1, self.patch_shape[0], self.patch_shape[1], -1).permute(
+                0, 3, 1, 2
+            )
+            position_embedding = nn.functional.interpolate(
+                position_embedding, size=(patch_height, patch_width), mode="bicubic"
+            )
+            embeddings = embeddings + position_embedding
+
+        embeddings = embeddings.flatten(2).transpose(1, 2)
+
+        return embeddings, (patch_height, patch_width)
 
 
 class BeitSelfAttention(nn.Module):
     def __init__(self, config: BeitConfig, window_size: Optional[tuple] = None) -> None:
         super().__init__()
+        self.config = config
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
             raise ValueError(
                 f"The hidden size {config.hidden_size,} is not a multiple of the number of attention "
@@ -241,6 +307,8 @@ class BeitSelfAttention(nn.Module):
         head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         relative_position_bias: Optional["BeitRelativePositionBias"] = None,
+        interpolate_pos_encoding: bool = False,
+        resolution: Optional[Tuple[int]] = None,
     ) -> Union[Tuple[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         mixed_query_layer = self.query(hidden_states)
 
@@ -255,7 +323,11 @@ class BeitSelfAttention(nn.Module):
 
         # Add relative position bias if present.
         if self.relative_position_bias is not None:
-            attention_scores = attention_scores + self.relative_position_bias().unsqueeze(0)
+            height, width = resolution
+            window_size = (height // self.config.patch_size, width // self.config.patch_size)
+            attention_scores = attention_scores + self.relative_position_bias(
+                window_size, interpolate_pos_encoding, dim_size=hidden_states.shape[1]
+            )
 
         # Add shared relative position bias if provided.
         if relative_position_bias is not None:
@@ -332,8 +404,12 @@ class BeitAttention(nn.Module):
         head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         relative_position_bias: Optional["BeitRelativePositionBias"] = None,
+        interpolate_pos_encoding: bool = False,
+        resolution: Optional[Tuple[int]] = None,
     ) -> Union[Tuple[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
-        self_outputs = self.attention(hidden_states, head_mask, output_attentions, relative_position_bias)
+        self_outputs = self.attention(
+            hidden_states, head_mask, output_attentions, relative_position_bias, interpolate_pos_encoding, resolution
+        )
 
         attention_output = self.output(self_outputs[0], hidden_states)
 
@@ -397,12 +473,16 @@ class BeitLayer(nn.Module):
         head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         relative_position_bias: Optional["BeitRelativePositionBias"] = None,
+        interpolate_pos_encoding: bool = False,
+        resolution: Optional[Tuple[int]] = None,
     ) -> Union[Tuple[torch.Tensor], Tuple[torch.Tensor, torch.Tensor]]:
         self_attention_outputs = self.attention(
             self.layernorm_before(hidden_states),  # in BEiT, layernorm is applied before self-attention
             head_mask,
             output_attentions=output_attentions,
             relative_position_bias=relative_position_bias,
+            interpolate_pos_encoding=interpolate_pos_encoding,
+            resolution=resolution,
         )
         attention_output = self_attention_outputs[0]
         outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
@@ -441,32 +521,80 @@ class BeitRelativePositionBias(nn.Module):
         )  # 2*Wh-1 * 2*Ww-1, nH
         # cls to token & token 2 cls & cls to cls
 
+        self.relative_position_indices = {}
+
+    def generate_relative_position_index(self, window_size: Tuple[int, int]) -> torch.Tensor:
+        """
+        This method creates the relative position index, modified to support arbitrary window sizes,
+        as introduced in [MiDaS v3.1](https://arxiv.org/abs/2307.14460).
+        """
+        num_relative_distance = (2 * window_size[0] - 1) * (2 * window_size[1] - 1) + 3
+        # cls to token & token 2 cls & cls to cls
         # get pair-wise relative position index for each token inside the window
-        coords_h = torch.arange(window_size[0])
-        coords_w = torch.arange(window_size[1])
-        coords = torch.stack(meshgrid([coords_h, coords_w], indexing="ij"))  # 2, Wh, Ww
+        window_area = window_size[0] * window_size[1]
+        grid = torch.meshgrid(torch.arange(window_size[0]), torch.arange(window_size[1]), indexing="ij")
+        coords = torch.stack(grid)  # 2, Wh, Ww
         coords_flatten = torch.flatten(coords, 1)  # 2, Wh*Ww
         relative_coords = coords_flatten[:, :, None] - coords_flatten[:, None, :]  # 2, Wh*Ww, Wh*Ww
         relative_coords = relative_coords.permute(1, 2, 0).contiguous()  # Wh*Ww, Wh*Ww, 2
         relative_coords[:, :, 0] += window_size[0] - 1  # shift to start from 0
         relative_coords[:, :, 1] += window_size[1] - 1
         relative_coords[:, :, 0] *= 2 * window_size[1] - 1
-        relative_position_index = torch.zeros(
-            size=(window_size[0] * window_size[1] + 1,) * 2, dtype=relative_coords.dtype
-        )
+        relative_position_index = torch.zeros(size=(window_area + 1,) * 2, dtype=relative_coords.dtype)
         relative_position_index[1:, 1:] = relative_coords.sum(-1)  # Wh*Ww, Wh*Ww
-        relative_position_index[0, 0:] = self.num_relative_distance - 3
-        relative_position_index[0:, 0] = self.num_relative_distance - 2
-        relative_position_index[0, 0] = self.num_relative_distance - 1
+        relative_position_index[0, 0:] = num_relative_distance - 3
+        relative_position_index[0:, 0] = num_relative_distance - 2
+        relative_position_index[0, 0] = num_relative_distance - 1
+        return relative_position_index
 
-        self.register_buffer("relative_position_index", relative_position_index)
+    def forward(self, window_size, interpolate_pos_encoding: bool = False, dim_size=None) -> torch.Tensor:
+        """
+        Modification of timm.models.beit.py: Attention._get_rel_pos_bias to support arbitrary window sizes.
+        """
+        old_height = 2 * self.window_size[0] - 1
+        old_width = 2 * self.window_size[1] - 1
 
-    def forward(self) -> torch.Tensor:
-        relative_position_bias = self.relative_position_bias_table[self.relative_position_index.view(-1)].view(
-            self.window_size[0] * self.window_size[1] + 1, self.window_size[0] * self.window_size[1] + 1, -1
-        )  # Wh*Ww,Wh*Ww,nH
+        new_height = 2 * window_size[0] - 1
+        new_width = 2 * window_size[1] - 1
 
-        return relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
+        old_relative_position_bias_table = self.relative_position_bias_table
+
+        old_num_relative_distance = self.num_relative_distance
+        new_num_relative_distance = new_height * new_width + 3
+
+        old_sub_table = old_relative_position_bias_table[: old_num_relative_distance - 3]
+
+        old_sub_table = old_sub_table.reshape(1, old_width, old_height, -1).permute(0, 3, 1, 2)
+        new_sub_table = nn.functional.interpolate(
+            old_sub_table, size=(int(new_height), int(new_width)), mode="bilinear"
+        )
+        new_sub_table = new_sub_table.permute(0, 2, 3, 1).reshape(new_num_relative_distance - 3, -1)
+
+        new_relative_position_bias_table = torch.cat(
+            [new_sub_table, old_relative_position_bias_table[old_num_relative_distance - 3 :]]
+        )
+
+        key = window_size
+        if key not in self.relative_position_indices.keys():
+            self.relative_position_indices[key] = self.generate_relative_position_index(window_size)
+
+        relative_position_bias = new_relative_position_bias_table[self.relative_position_indices[key].view(-1)]
+        # patch_size*num_patches_height, patch_size*num_patches_width, num_attention_heads
+        relative_position_bias = relative_position_bias.view(
+            window_size[0] * window_size[1] + 1, window_size[0] * window_size[1] + 1, -1
+        )
+        # num_attention_heads, patch_size*num_patches_width, patch_size*num_patches_height
+        relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()
+
+        if interpolate_pos_encoding:
+            relative_position_bias = nn.functional.interpolate(
+                relative_position_bias.unsqueeze(1),
+                size=(dim_size, dim_size),
+                mode="bilinear",
+                align_corners=False,
+            ).squeeze(1)
+
+        return relative_position_bias.unsqueeze(0)
 
 
 class BeitEncoder(nn.Module):
@@ -498,6 +626,8 @@ class BeitEncoder(nn.Module):
         head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
         output_hidden_states: bool = False,
+        interpolate_pos_encoding: bool = False,
+        resolution: Optional[Tuple[int]] = None,
         return_dict: bool = True,
     ) -> Union[tuple, BaseModelOutput]:
         all_hidden_states = () if output_hidden_states else None
@@ -510,23 +640,30 @@ class BeitEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                     layer_head_mask,
+                    output_attentions,
                 )
             else:
+                height, width = resolution
+                window_size = (height // self.config.patch_size, width // self.config.patch_size)
                 relative_position_bias = (
-                    self.relative_position_bias() if self.relative_position_bias is not None else None
+                    self.relative_position_bias(
+                        window_size, interpolate_pos_encoding=interpolate_pos_encoding, dim_size=hidden_states.shape[1]
+                    )
+                    if self.relative_position_bias is not None
+                    else None
                 )
-                layer_outputs = layer_module(hidden_states, layer_head_mask, output_attentions, relative_position_bias)
+                layer_outputs = layer_module(
+                    hidden_states,
+                    layer_head_mask,
+                    output_attentions,
+                    relative_position_bias,
+                    interpolate_pos_encoding,
+                    resolution,
+                )
 
             hidden_states = layer_outputs[0]
 
@@ -555,6 +692,8 @@ class BeitPreTrainedModel(PreTrainedModel):
     base_model_prefix = "beit"
     main_input_name = "pixel_values"
     supports_gradient_checkpointing = True
+    _no_split_modules = ["BeitLayer"]
+    _keys_to_ignore_on_load_unexpected = [r".*relative_position_index.*"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -571,10 +710,6 @@ class BeitPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, BeitEncoder):
-            module.gradient_checkpointing = value
 
 
 BEIT_START_DOCSTRING = r"""
@@ -606,6 +741,8 @@ BEIT_INPUTS_DOCSTRING = r"""
         output_hidden_states (`bool`, *optional*):
             Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
             more detail.
+        interpolate_pos_encoding (`bool`, *optional*, defaults to `False`):
+            Whether to interpolate the pre-trained position encodings.
         return_dict (`bool`, *optional*):
             Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
 """
@@ -652,11 +789,12 @@ class BeitModel(BeitPreTrainedModel):
     )
     def forward(
         self,
-        pixel_values: Optional[torch.Tensor] = None,
+        pixel_values: torch.Tensor,
         bool_masked_pos: Optional[torch.BoolTensor] = None,
         head_mask: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        interpolate_pos_encoding: bool = False,
         return_dict: Optional[bool] = None,
     ) -> Union[tuple, BeitModelOutputWithPooling]:
         r"""
@@ -669,9 +807,6 @@ class BeitModel(BeitPreTrainedModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if pixel_values is None:
-            raise ValueError("You have to specify pixel_values")
-
         # Prepare head mask if needed
         # 1.0 in head_mask indicate we keep the head
         # attention_probs has shape bsz x n_heads x N x N
@@ -679,14 +814,19 @@ class BeitModel(BeitPreTrainedModel):
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
 
-        embedding_output = self.embeddings(pixel_values, bool_masked_pos)
+        embedding_output, _ = self.embeddings(
+            pixel_values, bool_masked_pos=bool_masked_pos, interpolate_pos_encoding=interpolate_pos_encoding
+        )
+        resolution = pixel_values.shape[2:]
 
         encoder_outputs = self.encoder(
             embedding_output,
             head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            resolution=resolution,
             return_dict=return_dict,
+            interpolate_pos_encoding=interpolate_pos_encoding,
         )
         sequence_output = encoder_outputs[0]
         sequence_output = self.layernorm(sequence_output)
@@ -754,6 +894,7 @@ class BeitForMaskedImageModeling(BeitPreTrainedModel):
         labels: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        interpolate_pos_encoding: bool = False,
         return_dict: Optional[bool] = None,
     ) -> Union[tuple, MaskedLMOutput]:
         r"""
@@ -799,6 +940,7 @@ class BeitForMaskedImageModeling(BeitPreTrainedModel):
             head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            interpolate_pos_encoding=interpolate_pos_encoding,
             return_dict=return_dict,
         )
 
@@ -857,6 +999,7 @@ class BeitForImageClassification(BeitPreTrainedModel):
         labels: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        interpolate_pos_encoding: bool = False,
         return_dict: Optional[bool] = None,
     ) -> Union[tuple, ImageClassifierOutput]:
         r"""
@@ -871,6 +1014,7 @@ class BeitForImageClassification(BeitPreTrainedModel):
             head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
+            interpolate_pos_encoding=interpolate_pos_encoding,
             return_dict=return_dict,
         )
 
@@ -1161,6 +1305,12 @@ class BeitForSemanticSegmentation(BeitPreTrainedModel):
         self.beit = BeitModel(config, add_pooling_layer=False)
 
         # FPNs
+        if len(self.config.out_indices) != 4:
+            raise ValueError(
+                "BeitForSemanticSegmentation requires config.out_indices to be a list of 4 integers, "
+                "specifying which features to use from the backbone. One can use [3, 5, 7, 11] in case of "
+                "a base-sized architecture."
+            )
         self.fpn1 = nn.Sequential(
             nn.ConvTranspose2d(config.hidden_size, config.hidden_size, kernel_size=2, stride=2),
             nn.BatchNorm2d(config.hidden_size),
@@ -1192,8 +1342,10 @@ class BeitForSemanticSegmentation(BeitPreTrainedModel):
         # compute weighted loss
         loss_fct = CrossEntropyLoss(ignore_index=self.config.semantic_loss_ignore_index)
         main_loss = loss_fct(upsampled_logits, labels)
-        auxiliary_loss = loss_fct(upsampled_auxiliary_logits, labels)
-        loss = main_loss + self.config.auxiliary_loss_weight * auxiliary_loss
+        loss = main_loss
+        if auxiliary_logits is not None:
+            auxiliary_loss = loss_fct(upsampled_auxiliary_logits, labels)
+            loss += self.config.auxiliary_loss_weight * auxiliary_loss
 
         return loss
 
@@ -1206,6 +1358,7 @@ class BeitForSemanticSegmentation(BeitPreTrainedModel):
         labels: Optional[torch.Tensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
+        interpolate_pos_encoding: bool = False,
         return_dict: Optional[bool] = None,
     ) -> Union[tuple, SemanticSegmenterOutput]:
         r"""
@@ -1238,11 +1391,15 @@ class BeitForSemanticSegmentation(BeitPreTrainedModel):
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
         )
 
+        if labels is not None and self.config.num_labels == 1:
+            raise ValueError("The number of labels should be greater than one")
+
         outputs = self.beit(
             pixel_values,
             head_mask=head_mask,
             output_attentions=output_attentions,
             output_hidden_states=True,  # we need the intermediate hidden states
+            interpolate_pos_encoding=interpolate_pos_encoding,
             return_dict=return_dict,
         )
 
@@ -1270,10 +1427,7 @@ class BeitForSemanticSegmentation(BeitPreTrainedModel):
 
         loss = None
         if labels is not None:
-            if self.config.num_labels == 1:
-                raise ValueError("The number of labels should be greater than one")
-            else:
-                loss = self.compute_loss(logits, auxiliary_logits, labels)
+            loss = self.compute_loss(logits, auxiliary_logits, labels)
 
         if not return_dict:
             if output_hidden_states:
@@ -1285,6 +1439,134 @@ class BeitForSemanticSegmentation(BeitPreTrainedModel):
         return SemanticSegmenterOutput(
             loss=loss,
             logits=logits,
+            hidden_states=outputs.hidden_states if output_hidden_states else None,
+            attentions=outputs.attentions,
+        )
+
+
+@add_start_docstrings(
+    """
+    BEiT backbone, to be used with frameworks like DETR and MaskFormer.
+    """,
+    BEIT_START_DOCSTRING,
+)
+class BeitBackbone(BeitPreTrainedModel, BackboneMixin):
+    def __init__(self, config):
+        super().__init__(config)
+        super()._init_backbone(config)
+
+        self.num_features = [config.hidden_size for _ in range(config.num_hidden_layers + 1)]
+        self.embeddings = BeitEmbeddings(config)
+        self.encoder = BeitEncoder(config, window_size=self.embeddings.patch_embeddings.patch_shape)
+
+        if config.add_fpn:
+            if len(self.config.out_indices) != 4:
+                raise ValueError(
+                    "BeitBackbone requires config.out_indices to be a list of 4 integers, "
+                    "specifying which features to use from the backbone. One can use [3, 5, 7, 11] in case of "
+                    "a base-sized architecture."
+                )
+            hidden_size = config.hidden_size
+            self.fpn1 = nn.Sequential(
+                nn.ConvTranspose2d(hidden_size, hidden_size, kernel_size=2, stride=2),
+                nn.BatchNorm2d(hidden_size, eps=config.batch_norm_eps),
+                nn.GELU(),
+                nn.ConvTranspose2d(hidden_size, hidden_size, kernel_size=2, stride=2),
+            )
+
+            self.fpn2 = nn.Sequential(nn.ConvTranspose2d(hidden_size, hidden_size, kernel_size=2, stride=2))
+            self.fpn3 = nn.Identity()
+            self.fpn4 = nn.MaxPool2d(kernel_size=2, stride=2)
+
+        # initialize weights and apply final processing
+        self.post_init()
+
+    def get_input_embeddings(self):
+        return self.embeddings.patch_embeddings
+
+    @add_start_docstrings_to_model_forward(BEIT_INPUTS_DOCSTRING)
+    @replace_return_docstrings(output_type=BackboneOutput, config_class=_CONFIG_FOR_DOC)
+    def forward(
+        self,
+        pixel_values: Tensor,
+        output_hidden_states: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+    ) -> BackboneOutput:
+        """
+        Returns:
+
+        Examples:
+
+        ```python
+        >>> from transformers import AutoImageProcessor, AutoBackbone
+        >>> import torch
+        >>> from PIL import Image
+        >>> import requests
+
+        >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+        >>> image = Image.open(requests.get(url, stream=True).raw)
+
+        >>> processor = AutoImageProcessor.from_pretrained("microsoft/beit-base-patch16-224")
+        >>> model = AutoBackbone.from_pretrained(
+        ...     "microsoft/beit-base-patch16-224", out_features=["stage1", "stage2", "stage3", "stage4"]
+        ... )
+
+        >>> inputs = processor(image, return_tensors="pt")
+
+        >>> outputs = model(**inputs)
+        >>> feature_maps = outputs.feature_maps
+        >>> list(feature_maps[-1].shape)
+        [1, 768, 14, 14]
+        ```"""
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+
+        batch_size = pixel_values.shape[0]
+        embedding_output, (patch_height, patch_width) = self.embeddings(pixel_values)
+        resolution = pixel_values.shape[2:]
+
+        outputs = self.encoder(
+            embedding_output,
+            output_hidden_states=True,
+            output_attentions=output_attentions,
+            resolution=resolution,
+            return_dict=return_dict,
+        )
+
+        hidden_states = outputs.hidden_states if return_dict else outputs[1]
+
+        feature_maps = ()
+        for stage, hidden_state in zip(self.stage_names, hidden_states):
+            if stage in self.out_features:
+                if self.config.reshape_hidden_states:
+                    hidden_state = hidden_state[:, 1:, :]
+                    hidden_state = hidden_state.permute(0, 2, 1)
+                    hidden_state = hidden_state.reshape(batch_size, -1, patch_height, patch_width)
+
+                feature_maps += (hidden_state,)
+
+        if self.config.add_fpn:
+            feature_maps = [
+                self.fpn1(feature_maps[0]),
+                self.fpn2(feature_maps[1]),
+                self.fpn3(feature_maps[2]),
+                self.fpn4(feature_maps[3]),
+            ]
+            feature_maps = tuple(feature_maps)
+
+        if not return_dict:
+            if output_hidden_states:
+                output = (feature_maps,) + outputs[1:]
+            else:
+                output = (feature_maps,) + outputs[2:]
+            return output
+
+        return BackboneOutput(
+            feature_maps=feature_maps,
             hidden_states=outputs.hidden_states if output_hidden_states else None,
             attentions=outputs.attentions,
         )

@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch LeViT model."""
+"""PyTorch LeViT model."""
 
 import itertools
 from dataclasses import dataclass
@@ -46,11 +46,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 16, 384]
 # Image classification docstring
 _IMAGE_CLASS_CHECKPOINT = "facebook/levit-128S"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tabby, tabby cat"
-
-LEVIT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "facebook/levit-128S",
-    # See all LeViT models at https://huggingface.co/models?filter=levit
-]
 
 
 @dataclass
@@ -195,7 +190,9 @@ class LevitAttention(nn.Module):
 
         self.attention_bias_cache = {}
         self.attention_biases = torch.nn.Parameter(torch.zeros(num_attention_heads, len(attention_offsets)))
-        self.register_buffer("attention_bias_idxs", torch.LongTensor(indices).view(len_points, len_points))
+        self.register_buffer(
+            "attention_bias_idxs", torch.LongTensor(indices).view(len_points, len_points), persistent=False
+        )
 
     @torch.no_grad()
     def train(self, mode=True):
@@ -271,7 +268,9 @@ class LevitAttentionSubsample(nn.Module):
                 indices.append(attention_offsets[offset])
 
         self.attention_biases = torch.nn.Parameter(torch.zeros(num_attention_heads, len(attention_offsets)))
-        self.register_buffer("attention_bias_idxs", torch.LongTensor(indices).view(len_points_, len_points))
+        self.register_buffer(
+            "attention_bias_idxs", torch.LongTensor(indices).view(len_points_, len_points), persistent=False
+        )
 
     @torch.no_grad()
     def train(self, mode=True):
@@ -489,7 +488,7 @@ class LevitPreTrainedModel(PreTrainedModel):
     config_class = LevitConfig
     base_model_prefix = "levit"
     main_input_name = "pixel_values"
-    supports_gradient_checkpointing = True
+    _no_split_modules = ["LevitResidualLayer"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -502,10 +501,6 @@ class LevitPreTrainedModel(PreTrainedModel):
         elif isinstance(module, (nn.BatchNorm1d, nn.BatchNorm2d)):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, LevitModel):
-            module.gradient_checkpointing = value
 
 
 LEVIT_START_DOCSTRING = r"""

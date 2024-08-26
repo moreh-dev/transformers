@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch ConvNext model."""
-
+"""PyTorch ConvNext model."""
 
 from typing import Optional, Tuple, Union
 
@@ -37,7 +36,7 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
-from ...utils.backbone_utils import BackboneMixin, get_aligned_output_features_output_indices
+from ...utils.backbone_utils import BackboneMixin
 from .configuration_convnext import ConvNextConfig
 
 
@@ -54,14 +53,9 @@ _EXPECTED_OUTPUT_SHAPE = [1, 768, 7, 7]
 _IMAGE_CLASS_CHECKPOINT = "facebook/convnext-tiny-224"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tabby, tabby cat"
 
-CONVNEXT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "facebook/convnext-tiny-224",
-    # See all ConvNext models at https://huggingface.co/models?filter=convnext
-]
-
 
 # Copied from transformers.models.beit.modeling_beit.drop_path
-def drop_path(input, drop_prob: float = 0.0, training: bool = False):
+def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = False) -> torch.Tensor:
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
@@ -282,7 +276,7 @@ class ConvNextPreTrainedModel(PreTrainedModel):
     config_class = ConvNextConfig
     base_model_prefix = "convnext"
     main_input_name = "pixel_values"
-    supports_gradient_checkpointing = True
+    _no_split_modules = ["ConvNextLayer"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -295,10 +289,6 @@ class ConvNextPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, ConvNextEncoder):
-            module.gradient_checkpointing = value
 
 
 CONVNEXT_START_DOCSTRING = r"""
@@ -481,15 +471,11 @@ class ConvNextForImageClassification(ConvNextPreTrainedModel):
 class ConvNextBackbone(ConvNextPreTrainedModel, BackboneMixin):
     def __init__(self, config):
         super().__init__(config)
+        super()._init_backbone(config)
 
-        self.stage_names = config.stage_names
         self.embeddings = ConvNextEmbeddings(config)
         self.encoder = ConvNextEncoder(config)
-
         self.num_features = [config.hidden_sizes[0]] + config.hidden_sizes
-        self._out_features, self._out_indices = get_aligned_output_features_output_indices(
-            config.out_features, config.out_indices, self.stage_names
-        )
 
         # Add layer norms to hidden states of out_features
         hidden_states_norms = {}
@@ -538,14 +524,13 @@ class ConvNextBackbone(ConvNextPreTrainedModel, BackboneMixin):
         outputs = self.encoder(
             embedding_output,
             output_hidden_states=True,
-            return_dict=True,
+            return_dict=return_dict,
         )
 
-        hidden_states = outputs.hidden_states
+        hidden_states = outputs.hidden_states if return_dict else outputs[1]
 
         feature_maps = ()
-        # we skip the stem
-        for idx, (stage, hidden_state) in enumerate(zip(self.stage_names[1:], hidden_states[1:])):
+        for stage, hidden_state in zip(self.stage_names, hidden_states):
             if stage in self.out_features:
                 hidden_state = self.hidden_states_norms[stage](hidden_state)
                 feature_maps += (hidden_state,)
@@ -553,11 +538,11 @@ class ConvNextBackbone(ConvNextPreTrainedModel, BackboneMixin):
         if not return_dict:
             output = (feature_maps,)
             if output_hidden_states:
-                output += (outputs.hidden_states,)
+                output += (hidden_states,)
             return output
 
         return BackboneOutput(
             feature_maps=feature_maps,
-            hidden_states=outputs.hidden_states if output_hidden_states else None,
+            hidden_states=hidden_states if output_hidden_states else None,
             attentions=None,
         )

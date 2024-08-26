@@ -12,9 +12,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Chinese-CLIP model configuration"""
+"""Chinese-CLIP model configuration"""
 
-import copy
 import os
 from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Mapping, Optional, Union
@@ -30,12 +29,6 @@ from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-CHINESE_CLIP_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "OFA-Sys/chinese-clip-vit-base-patch16": (
-        "https://huggingface.co/OFA-Sys/chinese-clip-vit-base-patch16/resolve/main/config.json"
-    ),
-}
 
 
 class ChineseCLIPTextConfig(PretrainedConfig):
@@ -76,8 +69,13 @@ class ChineseCLIPTextConfig(PretrainedConfig):
             The vocabulary size of the `token_type_ids` passed when calling [`ChineseCLIPModel`].
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
+        initializer_factor (`float`, *optional*, defaults to 1.0):
+            A factor for initializing all weight matrices (should be kept to 1, used internally for initialization
+            testing).
         layer_norm_eps (`float`, *optional*, defaults to 1e-12):
             The epsilon used by the layer normalization layers.
+        pad_token_id (`int`, *optional*, defaults to 0):
+            Padding token id.
         position_embedding_type (`str`, *optional*, defaults to `"absolute"`):
             Type of position embedding. Choose one of `"absolute"`, `"relative_key"`, `"relative_key_query"`. For
             positional embeddings use `"absolute"`. For more information on `"relative_key"`, please refer to
@@ -102,6 +100,7 @@ class ChineseCLIPTextConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "chinese_clip_text_model"
 
     def __init__(
@@ -144,6 +143,8 @@ class ChineseCLIPTextConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
+        cls._set_token_in_kwargs(kwargs)
+
         config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
 
         # get the vision config dict if we are loading from ChineseCLIPConfig
@@ -164,8 +165,7 @@ class ChineseCLIPVisionConfig(PretrainedConfig):
     This is the configuration class to store the configuration of a [`ChineseCLIPModel`]. It is used to instantiate an
     ChineseCLIP model according to the specified arguments, defining the model architecture. Instantiating a
     configuration with the defaults will yield a similar configuration to that of the ChineseCLIP
-    [OFA-Sys/chinese-clip-vit-base-patch16](https:
-        //huggingface.co/OFA-Sys/chinese-clip-vit-base-patch16) architecture.
+    [OFA-Sys/chinese-clip-vit-base-patch16](https://huggingface.co/OFA-Sys/chinese-clip-vit-base-patch16) architecture.
 
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
@@ -176,24 +176,28 @@ class ChineseCLIPVisionConfig(PretrainedConfig):
             Dimensionality of the encoder layers and the pooler layer.
         intermediate_size (`int`, *optional*, defaults to 3072):
             Dimensionality of the "intermediate" (i.e., feed-forward) layer in the Transformer encoder.
+        projection_dim (`int`, *optional*, defaults to 512):
+            Dimensionality of text and vision projection layers.
         num_hidden_layers (`int`, *optional*, defaults to 12):
             Number of hidden layers in the Transformer encoder.
         num_attention_heads (`int`, *optional*, defaults to 12):
             Number of attention heads for each attention layer in the Transformer encoder.
+        num_channels (`int`, *optional*, defaults to 3):
+            The number of input channels.
         image_size (`int`, *optional*, defaults to 224):
             The size (resolution) of each image.
         patch_size (`int`, *optional*, defaults to 32):
             The size (resolution) of each patch.
         hidden_act (`str` or `function`, *optional*, defaults to `"quick_gelu"`):
             The non-linear activation function (function or string) in the encoder and pooler. If string, `"gelu"`,
-            `"relu"`, `"selu"` and `"gelu_new"` ``"quick_gelu"` are supported.
-        layer_norm_eps (`float`, *optional*, defaults to 1e-5):
+            `"relu"`, `"selu"` and `"gelu_new"` `"quick_gelu"` are supported.
+        layer_norm_eps (`float`, *optional*, defaults to 1e-05):
             The epsilon used by the layer normalization layers.
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
         initializer_range (`float`, *optional*, defaults to 0.02):
             The standard deviation of the truncated_normal_initializer for initializing all weight matrices.
-        initializer_factor (`float``, *optional*, defaults to 1):
+        initializer_factor (`float`, *optional*, defaults to 1.0):
             A factor for initializing all weight matrices (should be kept to 1, used internally for initialization
             testing).
     Example:
@@ -247,6 +251,8 @@ class ChineseCLIPVisionConfig(PretrainedConfig):
 
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path: Union[str, os.PathLike], **kwargs) -> "PretrainedConfig":
+        cls._set_token_in_kwargs(kwargs)
+
         config_dict, kwargs = cls.get_config_dict(pretrained_model_name_or_path, **kwargs)
 
         # get the vision config dict if we are loading from ChineseCLIPConfig
@@ -279,9 +285,9 @@ class ChineseCLIPConfig(PretrainedConfig):
         vision_config (`dict`, *optional*):
             Dictionary of configuration options used to initialize [`ChineseCLIPVisionConfig`].
         projection_dim (`int`, *optional*, defaults to 512):
-            Dimentionality of text and vision projection layers.
+            Dimensionality of text and vision projection layers.
         logit_scale_init_value (`float`, *optional*, defaults to 2.6592):
-            The inital value of the *logit_scale* paramter. Default is used as per the original ChineseCLIP
+            The initial value of the *logit_scale* parameter. Default is used as per the original ChineseCLIP
             implementation.
         kwargs (*optional*):
             Dictionary of keyword arguments.
@@ -310,7 +316,6 @@ class ChineseCLIPConfig(PretrainedConfig):
     ```"""
 
     model_type = "chinese_clip"
-    is_composition = True
 
     def __init__(
         self, text_config=None, vision_config=None, projection_dim=512, logit_scale_init_value=2.6592, **kwargs
@@ -346,9 +351,9 @@ class ChineseCLIPConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`text_config_dict` is provided which will be used to initialize `ChineseCLIPTextConfig`. "
-                            f'The value `text_config["{key}"]` will be overriden.'
+                            f'The value `text_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `text_config` with the ones in `_text_config_dict`.
             text_config.update(_text_config_dict)
@@ -378,9 +383,9 @@ class ChineseCLIPConfig(PretrainedConfig):
                     else:
                         message = (
                             f"`vision_config_dict` is provided which will be used to initialize "
-                            f'`ChineseCLIPVisionConfig`. The value `vision_config["{key}"]` will be overriden.'
+                            f'`ChineseCLIPVisionConfig`. The value `vision_config["{key}"]` will be overridden.'
                         )
-                    logger.warning(message)
+                    logger.info(message)
 
             # Update all values in `vision_config` with the ones in `_vision_config_dict`.
             vision_config.update(_vision_config_dict)
@@ -412,19 +417,6 @@ class ChineseCLIPConfig(PretrainedConfig):
         """
 
         return cls(text_config=text_config.to_dict(), vision_config=vision_config.to_dict(), **kwargs)
-
-    def to_dict(self):
-        """
-        Serializes this instance to a Python dictionary. Override the default [`~PretrainedConfig.to_dict`].
-
-        Returns:
-            `Dict[str, any]`: Dictionary of all the attributes that make up this configuration instance,
-        """
-        output = copy.deepcopy(self.__dict__)
-        output["text_config"] = self.text_config.to_dict()
-        output["vision_config"] = self.vision_config.to_dict()
-        output["model_type"] = self.__class__.model_type
-        return output
 
 
 class ChineseCLIPOnnxConfig(OnnxConfig):
@@ -464,7 +456,7 @@ class ChineseCLIPOnnxConfig(OnnxConfig):
             processor.tokenizer, batch_size=batch_size, seq_length=seq_length, framework=framework
         )
         image_input_dict = super().generate_dummy_inputs(
-            processor.feature_extractor, batch_size=batch_size, framework=framework
+            processor.image_processor, batch_size=batch_size, framework=framework
         )
         return {**text_input_dict, **image_input_dict}
 

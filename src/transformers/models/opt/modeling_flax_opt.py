@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Flax OPT model."""
+"""Flax OPT model."""
 
 from functools import partial
 from typing import Optional, Tuple
@@ -763,7 +763,7 @@ class FlaxOPTForCausalLMModule(nn.Module):
 class FlaxOPTForCausalLM(FlaxOPTPreTrainedModel):
     module_class = FlaxOPTForCausalLMModule
 
-    def prepare_inputs_for_generation(self, input_ids, max_length, attention_mask: Optional[jnp.DeviceArray] = None):
+    def prepare_inputs_for_generation(self, input_ids, max_length, attention_mask: Optional[jax.Array] = None):
         # initializing the cache
         batch_size, seq_length = input_ids.shape
 

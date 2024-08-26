@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch SqueezeBert model."""
-
+"""PyTorch SqueezeBert model."""
 
 import math
 from typing import Optional, Tuple, Union
@@ -42,12 +41,6 @@ logger = logging.get_logger(__name__)
 _CHECKPOINT_FOR_DOC = "squeezebert/squeezebert-uncased"
 _CONFIG_FOR_DOC = "SqueezeBertConfig"
 
-SQUEEZEBERT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "squeezebert/squeezebert-uncased",
-    "squeezebert/squeezebert-mnli",
-    "squeezebert/squeezebert-mnli-headless",
-]
-
 
 class SqueezeBertEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
@@ -64,7 +57,9 @@ class SqueezeBertEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
 
     def forward(self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
         if input_ids is not None:
@@ -401,6 +396,9 @@ class SqueezeBertLMPredictionHead(nn.Module):
         # Need a link between the two variables so that the bias is correctly resized with `resize_token_embeddings`
         self.decoder.bias = self.bias
 
+    def _tie_weights(self) -> None:
+        self.decoder.bias = self.bias
+
     def forward(self, hidden_states):
         hidden_states = self.transform(hidden_states)
         hidden_states = self.decoder(hidden_states)
@@ -425,7 +423,6 @@ class SqueezeBertPreTrainedModel(PreTrainedModel):
 
     config_class = SqueezeBertConfig
     base_model_prefix = "transformer"
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -595,6 +592,7 @@ class SqueezeBertModel(SqueezeBertPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -643,11 +641,7 @@ class SqueezeBertModel(SqueezeBertPreTrainedModel):
 
 @add_start_docstrings("""SqueezeBERT Model with a `language modeling` head on top.""", SQUEEZEBERT_START_DOCSTRING)
 class SqueezeBertForMaskedLM(SqueezeBertPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [
-        r"predictions.decoder.bias",
-        "cls.predictions.decoder.weight",
-        "embeddings.position_ids",
-    ]
+    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -663,6 +657,7 @@ class SqueezeBertForMaskedLM(SqueezeBertPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings):
         self.cls.predictions.decoder = new_embeddings
+        self.cls.predictions.bias = new_embeddings.bias
 
     @add_start_docstrings_to_model_forward(SQUEEZEBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(

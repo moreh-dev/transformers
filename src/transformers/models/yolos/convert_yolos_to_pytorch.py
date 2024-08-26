@@ -14,7 +14,6 @@
 # limitations under the License.
 """Convert YOLOS checkpoints from the original repository. URL: https://github.com/hustvl/YOLOS"""
 
-
 import argparse
 import json
 from pathlib import Path
@@ -24,7 +23,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from PIL import Image
 
-from transformers import YolosConfig, YolosFeatureExtractor, YolosForObjectDetection
+from transformers import YolosConfig, YolosForObjectDetection, YolosImageProcessor
 from transformers.utils import logging
 
 
@@ -172,10 +171,10 @@ def convert_yolos_checkpoint(
     new_state_dict = convert_state_dict(state_dict, model)
     model.load_state_dict(new_state_dict)
 
-    # Check outputs on an image, prepared by YolosFeatureExtractor
+    # Check outputs on an image, prepared by YolosImageProcessor
     size = 800 if yolos_name != "yolos_ti" else 512
-    feature_extractor = YolosFeatureExtractor(format="coco_detection", size=size)
-    encoding = feature_extractor(images=prepare_img(), return_tensors="pt")
+    image_processor = YolosImageProcessor(format="coco_detection", size=size)
+    encoding = image_processor(images=prepare_img(), return_tensors="pt")
     outputs = model(**encoding)
     logits, pred_boxes = outputs.logits, outputs.pred_boxes
 
@@ -224,8 +223,8 @@ def convert_yolos_checkpoint(
     Path(pytorch_dump_folder_path).mkdir(exist_ok=True)
     print(f"Saving model {yolos_name} to {pytorch_dump_folder_path}")
     model.save_pretrained(pytorch_dump_folder_path)
-    print(f"Saving feature extractor to {pytorch_dump_folder_path}")
-    feature_extractor.save_pretrained(pytorch_dump_folder_path)
+    print(f"Saving image processor to {pytorch_dump_folder_path}")
+    image_processor.save_pretrained(pytorch_dump_folder_path)
 
     if push_to_hub:
         model_mapping = {
@@ -238,7 +237,7 @@ def convert_yolos_checkpoint(
 
         print("Pushing to the hub...")
         model_name = model_mapping[yolos_name]
-        feature_extractor.push_to_hub(model_name, organization="hustvl")
+        image_processor.push_to_hub(model_name, organization="hustvl")
         model.push_to_hub(model_name, organization="hustvl")
 
 

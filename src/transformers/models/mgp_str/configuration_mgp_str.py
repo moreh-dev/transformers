@@ -12,17 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" MGP-STR model configuration"""
+"""MGP-STR model configuration"""
 
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-MGP_STR_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "alibaba-damo/mgp-str-base": "https://huggingface.co/alibaba-damo/mgp-str-base/resolve/main/config.json",
-}
 
 
 class MgpstrConfig(PretrainedConfig):
@@ -62,7 +58,7 @@ class MgpstrConfig(PretrainedConfig):
             Whether to add a bias to the queries, keys and values.
         distilled (`bool`, *optional*, defaults to `False`):
             Model includes a distillation token and head as in DeiT models.
-        layer_norm_eps (`float`, *optional*, defaults to 1e-5):
+        layer_norm_eps (`float`, *optional*, defaults to 1e-05):
             The epsilon used by the layer normalization layers.
         drop_rate (`float`, *optional*, defaults to 0.0):
             The dropout probability for all fully connected layers in the embeddings, encoder.
@@ -89,6 +85,7 @@ class MgpstrConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "mgp-str"
 
     def __init__(

@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch BiT model. Also supports backbone for ViT hybrid."""
+"""PyTorch BiT model. Also supports backbone for ViT hybrid."""
 
 import collections
 import math
@@ -39,7 +39,7 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
-from ...utils.backbone_utils import BackboneMixin, get_aligned_output_features_output_indices
+from ...utils.backbone_utils import BackboneMixin
 from .configuration_bit import BitConfig
 
 
@@ -55,11 +55,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 2048, 7, 7]
 # Image classification docstring
 _IMAGE_CLASS_CHECKPOINT = "google/bit-50"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tiger cat"
-
-BIT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "google/bit-50",
-    # See all BiT models at https://huggingface.co/models?filter=bit
-]
 
 
 def get_padding_value(padding=None, kernel_size=7, stride=1, dilation=1) -> Tuple[Tuple, bool]:
@@ -300,7 +295,7 @@ class BitEmbeddings(nn.Module):
 
 
 # Copied from transformers.models.convnext.modeling_convnext.drop_path
-def drop_path(input, drop_prob: float = 0.0, training: bool = False):
+def drop_path(input: torch.Tensor, drop_prob: float = 0.0, training: bool = False) -> torch.Tensor:
     """
     Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 
@@ -660,18 +655,21 @@ class BitPreTrainedModel(PreTrainedModel):
     config_class = BitConfig
     base_model_prefix = "bit"
     main_input_name = "pixel_values"
-    supports_gradient_checkpointing = True
+    _no_split_modules = ["BitEmbeddings"]
 
     def _init_weights(self, module):
         if isinstance(module, nn.Conv2d):
             nn.init.kaiming_normal_(module.weight, mode="fan_out", nonlinearity="relu")
+        # copied from the `reset_parameters` method of `class Linear(Module)` in `torch`.
+        elif isinstance(module, nn.Linear):
+            nn.init.kaiming_uniform_(module.weight, a=math.sqrt(5))
+            if module.bias is not None:
+                fan_in, _ = nn.init._calculate_fan_in_and_fan_out(module.weight)
+                bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+                nn.init.uniform_(module.bias, -bound, bound)
         elif isinstance(module, (nn.BatchNorm2d, nn.GroupNorm)):
             nn.init.constant_(module.weight, 1)
             nn.init.constant_(module.bias, 0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, BitModel):
-            module.gradient_checkpointing = value
 
 
 BIT_START_DOCSTRING = r"""
@@ -845,14 +843,10 @@ class BitForImageClassification(BitPreTrainedModel):
 class BitBackbone(BitPreTrainedModel, BackboneMixin):
     def __init__(self, config):
         super().__init__(config)
+        super()._init_backbone(config)
 
-        self.stage_names = config.stage_names
         self.bit = BitModel(config)
-
         self.num_features = [config.embedding_size] + config.hidden_sizes
-        self._out_features, self._out_indices = get_aligned_output_features_output_indices(
-            config.out_features, config.out_indices, self.stage_names
-        )
 
         # initialize weights and apply final processing
         self.post_init()
@@ -876,8 +870,8 @@ class BitBackbone(BitPreTrainedModel, BackboneMixin):
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
 
-        >>> processor = AutoImageProcessor.from_pretrained("google/resnetnv2-50")
-        >>> model = AutoBackbone.from_pretrained("google/resnetnv2-50")
+        >>> processor = AutoImageProcessor.from_pretrained("google/bit-50")
+        >>> model = AutoBackbone.from_pretrained("google/bit-50")
 
         >>> inputs = processor(image, return_tensors="pt")
         >>> outputs = model(**inputs)

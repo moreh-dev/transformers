@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Tokenization classes for CPMAnt."""
+
 import collections
 import os
 from typing import List, Optional, Tuple
@@ -31,16 +32,6 @@ logger = logging.get_logger(__name__)
 
 VOCAB_FILES_NAMES = {"vocab_file": "vocab.txt"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "openbmb/cpm-ant-10b": "https://huggingface.co/openbmb/cpm-ant-10b/blob/main/vocab.txt",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "openbmb/cpm-ant-10b": 1024,
-}
-
 
 def load_vocab(vocab_file):
     """Loads a vocabulary file into a dictionary."""
@@ -53,7 +44,7 @@ def load_vocab(vocab_file):
     return vocab
 
 
-class WordpieceTokenizer(object):
+class WordpieceTokenizer:
     def __init__(self, vocab, unk_token="<unk>", max_input_chars_per_word=200):
         self.vocab = vocab
         self.unk_token = unk_token
@@ -111,8 +102,6 @@ class CpmAntTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
     add_prefix_space = False
 
@@ -131,18 +120,6 @@ class CpmAntTokenizer(PreTrainedTokenizer):
         **kwargs,
     ):
         requires_backends(self, ["jieba"])
-        super().__init__(
-            bod_token=bod_token,
-            eod_token=eod_token,
-            bos_token=bos_token,
-            eos_token=eos_token,
-            pad_token=pad_token,
-            unk_token=unk_token,
-            line_token=line_token,
-            space_token=space_token,
-            padding_side=padding_side,
-            **kwargs,
-        )
         self.bod_token = bod_token
         self.eod_token = eod_token
         self.encoder = load_vocab(vocab_file)
@@ -155,7 +132,20 @@ class CpmAntTokenizer(PreTrainedTokenizer):
         self.encoder = collections.OrderedDict(sorted(self.encoder.items(), key=lambda x: x[1]))
         self.decoder = {v: k for k, v in self.encoder.items()}
 
-        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.encoder, unk_token=self.unk_token)
+        self.wordpiece_tokenizer = WordpieceTokenizer(vocab=self.encoder, unk_token=unk_token)
+
+        super().__init__(
+            bod_token=bod_token,
+            eod_token=eod_token,
+            bos_token=bos_token,
+            eos_token=eos_token,
+            pad_token=pad_token,
+            unk_token=unk_token,
+            line_token=line_token,
+            space_token=space_token,
+            padding_side=padding_side,
+            **kwargs,
+        )
 
     @property
     def bod_token_id(self):

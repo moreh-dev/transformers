@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch EfficientNet model."""
-
+"""PyTorch EfficientNet model."""
 
 import math
 from typing import Optional, Tuple, Union
@@ -51,11 +50,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 768, 7, 7]
 # Image classification docstring
 _IMAGE_CLASS_CHECKPOINT = "google/efficientnet-b7"
 _IMAGE_CLASS_EXPECTED_OUTPUT = "tabby, tabby cat"
-
-EFFICIENTNET_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "google/efficientnet-b7",
-    # See all EfficientNet models at https://huggingface.co/models?filter=efficientnet
-]
 
 
 EFFICIENTNET_START_DOCSTRING = r"""
@@ -486,7 +480,7 @@ class EfficientNetPreTrainedModel(PreTrainedModel):
     config_class = EfficientNetConfig
     base_model_prefix = "efficientnet"
     main_input_name = "pixel_values"
-    supports_gradient_checkpointing = True
+    _no_split_modules = []
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -499,10 +493,6 @@ class EfficientNetPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, EfficientNetBlock):
-            module.gradient_checkpointing = value
 
 
 @add_start_docstrings(
@@ -588,7 +578,6 @@ class EfficientNetForImageClassification(EfficientNetPreTrainedModel):
         # Classifier head
         self.dropout = nn.Dropout(p=config.dropout_rate)
         self.classifier = nn.Linear(config.hidden_dim, self.num_labels) if self.num_labels > 0 else nn.Identity()
-        self.classifier_act = nn.Softmax(dim=1)
 
         # Initialize weights and apply final processing
         self.post_init()
@@ -620,7 +609,6 @@ class EfficientNetForImageClassification(EfficientNetPreTrainedModel):
         pooled_output = outputs.pooler_output if return_dict else outputs[1]
         pooled_output = self.dropout(pooled_output)
         logits = self.classifier(pooled_output)
-        logits = self.classifier_act(logits)
 
         loss = None
         if labels is not None:

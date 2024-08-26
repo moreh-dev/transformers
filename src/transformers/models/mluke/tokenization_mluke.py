@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License
-""" Tokenization classes for mLUKE."""
-
+"""Tokenization classes for mLUKE."""
 
 import itertools
 import json
@@ -52,21 +51,6 @@ SPIECE_UNDERLINE = "▁"
 
 VOCAB_FILES_NAMES = {"vocab_file": "sentencepiece.bpe.model", "entity_vocab_file": "entity_vocab.json"}
 
-PRETRAINED_VOCAB_FILES_MAP = {
-    "vocab_file": {
-        "studio-ousia/mluke-base": "https://huggingface.co/studio-ousia/mluke-base/resolve/main/vocab.json",
-    },
-    "merges_file": {
-        "studio-ousia/mluke-base": "https://huggingface.co/studio-ousia/mluke-base/resolve/main/merges.txt",
-    },
-    "entity_vocab_file": {
-        "studio-ousia/mluke-base": "https://huggingface.co/studio-ousia/mluke-base/resolve/main/entity_vocab.json",
-    },
-}
-
-PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES = {
-    "studio-ousia/mluke-base": 512,
-}
 
 ENCODE_PLUS_ADDITIONAL_KWARGS_DOCSTRING = r"""
             return_token_type_ids (`bool`, *optional*):
@@ -230,8 +214,6 @@ class MLukeTokenizer(PreTrainedTokenizer):
     """
 
     vocab_files_names = VOCAB_FILES_NAMES
-    pretrained_vocab_files_map = PRETRAINED_VOCAB_FILES_MAP
-    max_model_input_sizes = PRETRAINED_POSITIONAL_EMBEDDINGS_SIZES
     model_input_names = ["input_ids", "attention_mask"]
 
     def __init__(
@@ -272,31 +254,10 @@ class MLukeTokenizer(PreTrainedTokenizer):
             if isinstance(entity_token_2, str)
             else entity_token_2
         )
-        kwargs["additional_special_tokens"] = kwargs.get("additional_special_tokens", [])
-        kwargs["additional_special_tokens"] += [entity_token_1, entity_token_2]
+        additional_special_tokens = kwargs.pop("additional_special_tokens", [])
+        additional_special_tokens += [entity_token_1, entity_token_2]
 
         self.sp_model_kwargs = {} if sp_model_kwargs is None else sp_model_kwargs
-
-        super().__init__(
-            bos_token=bos_token,
-            eos_token=eos_token,
-            unk_token=unk_token,
-            sep_token=sep_token,
-            cls_token=cls_token,
-            pad_token=pad_token,
-            mask_token=mask_token,
-            sp_model_kwargs=self.sp_model_kwargs,
-            task=task,
-            max_entity_length=max_entity_length,
-            max_mention_length=max_mention_length,
-            entity_token_1=entity_token_1,
-            entity_token_2=entity_token_2,
-            entity_unk_token=entity_unk_token,
-            entity_pad_token=entity_pad_token,
-            entity_mask_token=entity_mask_token,
-            entity_mask2_token=entity_mask2_token,
-            **kwargs,
-        )
 
         self.sp_model = spm.SentencePieceProcessor(**self.sp_model_kwargs)
         self.sp_model.Load(str(vocab_file))
@@ -344,6 +305,65 @@ class MLukeTokenizer(PreTrainedTokenizer):
             )
 
         self.max_mention_length = max_mention_length
+
+        super().__init__(
+            bos_token=bos_token,
+            eos_token=eos_token,
+            unk_token=unk_token,
+            sep_token=sep_token,
+            cls_token=cls_token,
+            pad_token=pad_token,
+            mask_token=mask_token,
+            sp_model_kwargs=self.sp_model_kwargs,
+            task=task,
+            max_entity_length=max_entity_length,
+            max_mention_length=max_mention_length,
+            entity_token_1=entity_token_1,
+            entity_token_2=entity_token_2,
+            entity_unk_token=entity_unk_token,
+            entity_pad_token=entity_pad_token,
+            entity_mask_token=entity_mask_token,
+            entity_mask2_token=entity_mask2_token,
+            additional_special_tokens=additional_special_tokens,
+            **kwargs,
+        )
+
+    @property
+    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer.vocab_size
+    def vocab_size(self):
+        return len(self.sp_model) + self.fairseq_offset + 1  # Add the <mask> token
+
+    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer.get_vocab
+    def get_vocab(self):
+        vocab = {self.convert_ids_to_tokens(i): i for i in range(self.vocab_size)}
+        vocab.update(self.added_tokens_encoder)
+        return vocab
+
+    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer._tokenize
+    def _tokenize(self, text: str) -> List[str]:
+        # TODO check if the t5/llama PR also applies here
+        return self.sp_model.encode(text, out_type=str)
+
+    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer._convert_token_to_id
+    def _convert_token_to_id(self, token):
+        """Converts a token (str) in an id using the vocab."""
+        if token in self.fairseq_tokens_to_ids:
+            return self.fairseq_tokens_to_ids[token]
+        spm_id = self.sp_model.PieceToId(token)
+
+        # Need to return unknown token if the SP model returned 0
+        return spm_id + self.fairseq_offset if spm_id else self.unk_token_id
+
+    def _convert_id_to_token(self, index):
+        """Converts an index (integer) in a token (str) using the vocab."""
+        if index in self.fairseq_ids_to_tokens:
+            return self.fairseq_ids_to_tokens[index]
+        return self.sp_model.IdToPiece(index - self.fairseq_offset)
+
+    def convert_tokens_to_string(self, tokens):
+        """Converts a sequence of tokens (strings for sub-words) in a single string."""
+        out_string = "".join(tokens).replace(SPIECE_UNDERLINE, " ").strip()
+        return out_string
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -701,7 +721,7 @@ class MLukeTokenizer(PreTrainedTokenizer):
     # Copied from transformers.models.luke.tokenization_luke.LukeTokenizer._check_entity_input_format
     def _check_entity_input_format(self, entities: Optional[EntityInput], entity_spans: Optional[EntitySpanInput]):
         if not isinstance(entity_spans, list):
-            raise ValueError("entity_spans should be given as a list")
+            raise TypeError("entity_spans should be given as a list")
         elif len(entity_spans) > 0 and not isinstance(entity_spans[0], tuple):
             raise ValueError(
                 "entity_spans should be given as a list of tuples containing the start and end character indices"
@@ -1494,8 +1514,12 @@ class MLukeTokenizer(PreTrainedTokenizer):
             save_directory, (filename_prefix + "-" if filename_prefix else "") + VOCAB_FILES_NAMES["vocab_file"]
         )
 
-        if os.path.abspath(self.vocab_file) != os.path.abspath(out_vocab_file):
+        if os.path.abspath(self.vocab_file) != os.path.abspath(out_vocab_file) and os.path.isfile(self.vocab_file):
             copyfile(self.vocab_file, out_vocab_file)
+        elif not os.path.isfile(self.vocab_file):
+            with open(out_vocab_file, "wb") as fi:
+                content_spiece_model = self.sp_model.serialized_model_proto()
+                fi.write(content_spiece_model)
 
         entity_vocab_file = os.path.join(
             save_directory, (filename_prefix + "-" if filename_prefix else "") + VOCAB_FILES_NAMES["entity_vocab_file"]
@@ -1587,39 +1611,3 @@ class MLukeTokenizer(PreTrainedTokenizer):
         if token_ids_1 is None:
             return len(cls + token_ids_0 + sep) * [0]
         return len(cls + token_ids_0 + sep + sep + token_ids_1 + sep) * [0]
-
-    @property
-    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer.vocab_size
-    def vocab_size(self):
-        return len(self.sp_model) + self.fairseq_offset + 1  # Add the <mask> token
-
-    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer.get_vocab
-    def get_vocab(self):
-        vocab = {self.convert_ids_to_tokens(i): i for i in range(self.vocab_size)}
-        vocab.update(self.added_tokens_encoder)
-        return vocab
-
-    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer._tokenize
-    def _tokenize(self, text: str) -> List[str]:
-        return self.sp_model.encode(text, out_type=str)
-
-    # Copied from transformers.models.xlm_roberta.tokenization_xlm_roberta.XLMRobertaTokenizer._convert_token_to_id
-    def _convert_token_to_id(self, token):
-        """Converts a token (str) in an id using the vocab."""
-        if token in self.fairseq_tokens_to_ids:
-            return self.fairseq_tokens_to_ids[token]
-        spm_id = self.sp_model.PieceToId(token)
-
-        # Need to return unknown token if the SP model returned 0
-        return spm_id + self.fairseq_offset if spm_id else self.unk_token_id
-
-    def _convert_id_to_token(self, index):
-        """Converts an index (integer) in a token (str) using the vocab."""
-        if index in self.fairseq_ids_to_tokens:
-            return self.fairseq_ids_to_tokens[index]
-        return self.sp_model.IdToPiece(index - self.fairseq_offset)
-
-    def convert_tokens_to_string(self, tokens):
-        """Converts a sequence of tokens (strings for sub-words) in a single string."""
-        out_string = "".join(tokens).replace(SPIECE_UNDERLINE, " ").strip()
-        return out_string

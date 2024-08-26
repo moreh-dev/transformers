@@ -120,14 +120,14 @@ class RetrievAugLMMarginOutput(ModelOutput):
     context_input_ids: Optional[torch.LongTensor] = None
     context_attention_mask: Optional[torch.LongTensor] = None
     question_encoder_last_hidden_state: Optional[torch.FloatTensor] = None
-    question_enc_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    question_enc_attentions: Optional[Tuple[torch.FloatTensor]] = None
+    question_enc_hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    question_enc_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
     generator_enc_last_hidden_state: Optional[torch.FloatTensor] = None
-    generator_enc_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    generator_enc_attentions: Optional[Tuple[torch.FloatTensor]] = None
-    generator_dec_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    generator_dec_attentions: Optional[Tuple[torch.FloatTensor]] = None
-    generator_cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
+    generator_enc_hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    generator_enc_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    generator_dec_hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    generator_dec_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    generator_cross_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 
 @dataclass
@@ -210,14 +210,14 @@ class RetrievAugLMOutput(ModelOutput):
     context_input_ids: Optional[torch.LongTensor] = None
     context_attention_mask: Optional[torch.LongTensor] = None
     question_encoder_last_hidden_state: Optional[torch.FloatTensor] = None
-    question_enc_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    question_enc_attentions: Optional[Tuple[torch.FloatTensor]] = None
+    question_enc_hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    question_enc_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
     generator_enc_last_hidden_state: Optional[torch.FloatTensor] = None
-    generator_enc_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    generator_enc_attentions: Optional[Tuple[torch.FloatTensor]] = None
-    generator_dec_hidden_states: Optional[Tuple[torch.FloatTensor]] = None
-    generator_dec_attentions: Optional[Tuple[torch.FloatTensor]] = None
-    generator_cross_attentions: Optional[Tuple[torch.FloatTensor]] = None
+    generator_enc_hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    generator_enc_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    generator_dec_hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    generator_dec_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    generator_cross_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 
 class RagPreTrainedModel(PreTrainedModel):
@@ -229,9 +229,9 @@ class RagPreTrainedModel(PreTrainedModel):
     generator, the encoder and generator are trainable while the retriever is just an indexed dataset.
 
     """
+
     config_class = RagConfig
     base_model_prefix = "rag"
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     @classmethod
     def from_pretrained(cls, *args, **kwargs):
@@ -260,8 +260,6 @@ class RagPreTrainedModel(PreTrainedModel):
                 Information necessary to initiate the question encoder. Can be either:
 
                     - A string, the *model id* of a pretrained model hosted inside a model repo on huggingface.co.
-                      Valid model ids can be located at the root-level, like `bert-base-uncased`, or namespaced under a
-                      user or organization name, like `dbmdz/bert-base-german-cased`.
                     - A path to a *directory* containing model weights saved using
                       [`~PreTrainedModel.save_pretrained`], e.g., `./my_model_directory/`.
                     - A path or url to a *tensorflow index checkpoint file* (e.g, `./tf_model/model.ckpt.index`). In
@@ -273,8 +271,6 @@ class RagPreTrainedModel(PreTrainedModel):
                 Information necessary to initiate the generator. Can be either:
 
                     - A string, the *model id* of a pretrained model hosted inside a model repo on huggingface.co.
-                      Valid model ids can be located at the root-level, like `bert-base-uncased`, or namespaced under a
-                      user or organization name, like `dbmdz/bert-base-german-cased`.
                     - A path to a *directory* containing model weights saved using
                       [`~PreTrainedModel.save_pretrained`], e.g., `./my_model_directory/`.
                     - A path or url to a *tensorflow index checkpoint file* (e.g, `./tf_model/model.ckpt.index`). In
@@ -304,7 +300,7 @@ class RagPreTrainedModel(PreTrainedModel):
 
         >>> # initialize a RAG from two pretrained models.
         >>> model = RagModel.from_pretrained_question_encoder_generator(
-        ...     "facebook/dpr-question_encoder-single-nq-base", "t5-small"
+        ...     "facebook/dpr-question_encoder-single-nq-base", "google-t5/t5-small"
         ... )
         >>> # saving model after fine-tuning
         >>> model.save_pretrained("./rag")
@@ -463,16 +459,12 @@ RAG_FORWARD_INPUTS_DOCSTRING = r"""
             `question_encoder_last_hidden_state` and `retrieved_doc_embeds`, see examples for more information.
         context_input_ids (`torch.LongTensor` of shape `(batch_size * config.n_docs, config.max_combined_length)`, *optional*, returned when *output_retrieved=True*):
             Input IDs post-processed from the retrieved documents and the question encoder `input_ids` by the
-            retriever.
-
-            If the model has is not initialized with a `retriever` ``context_input_ids` has to be provided to the
-            forward pass. `context_input_ids` are returned by [`~RagRetriever.__call__`]. context_attention_mask
-            (`torch.LongTensor` of shape `(batch_size * config.n_docs, config.max_combined_length)`, *optional*,
-            returned when *output_retrieved=True*): Attention mask post-processed from the retrieved documents and the
-            question encoder `input_ids` by the retriever.
-
-            If the model has is not initialized with a `retriever` `context_attention_mask` has to be provided to the
-            forward pass. `context_attention_mask` are returned by [`~RagRetriever.__call__`].
+            retriever. If the model was not initialized with a `retriever` ``context_input_ids` has to be provided to
+            the forward pass. `context_input_ids` are returned by [`~RagRetriever.__call__`].
+        context_attention_mask (`torch.LongTensor` of shape `(batch_size * config.n_docs, config.max_combined_length)`,*optional*, returned when *output_retrieved=True*):
+            Attention mask post-processed from the retrieved documents and the question encoder `input_ids` by the
+            retriever. If the model has is not initialized with a `retriever` `context_attention_mask` has to be
+            provided to the forward pass. `context_attention_mask` are returned by [`~RagRetriever.__call__`].
         use_cache (`bool`, *optional*, defaults to `True`):
             If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding (see
             `past_key_values`).
@@ -514,12 +506,16 @@ class RagModel(RagPreTrainedModel):
         if question_encoder is None:
             from ..auto.modeling_auto import AutoModel
 
-            question_encoder = AutoModel.from_config(config.question_encoder)
+            question_encoder = AutoModel.from_config(
+                config.question_encoder, attn_implementation=config._attn_implementation
+            )
 
         if generator is None:
             from ..auto.modeling_auto import AutoModelForSeq2SeqLM
 
-            generator = AutoModelForSeq2SeqLM.from_config(config.generator)
+            generator = AutoModelForSeq2SeqLM.from_config(
+                config.generator, attn_implementation=config._attn_implementation
+            )
 
         self.retriever = retriever
         if self.retriever is not None:
@@ -546,7 +542,7 @@ class RagModel(RagPreTrainedModel):
         past_key_values: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
         doc_scores: Optional[torch.FloatTensor] = None,
         context_input_ids: Optional[torch.LongTensor] = None,
-        context_attention_mask=None,
+        context_attention_mask: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -796,7 +792,7 @@ class RagSequenceForGeneration(RagPreTrainedModel):
         reduce_loss (`bool`, *optional*):
             Only relevant if `labels` is passed. If `True`, the NLL loss is reduced using the `torch.Tensor.sum`
             operation.
-        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
+        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
              Legacy dictionary, which is required so that model can use *generate()* function.
 
         Returns:
@@ -963,7 +959,7 @@ class RagSequenceForGeneration(RagPreTrainedModel):
                 Number of beams for beam search. 1 means no beam search.
             n_docs (`int`, *optional*, defaults to `config.n_docs`)
                 Number of documents to retrieve and/or number of documents for which to generate an answer.
-            kwargs:
+            kwargs (`Dict[str, Any]`, *optional*):
                 Additional kwargs will be passed to [`~generation.GenerationMixin.generate`].
 
         Return:
@@ -1218,7 +1214,9 @@ class RagTokenForGeneration(RagPreTrainedModel):
         reordered_past = ()
         for layer_past in past_key_values:
             # get the correct batch idx from decoder layer's batch dim for cross and self-attn
-            reordered_past += (tuple(_reorder_stacked(past_state, beam_idx) for past_state in layer_past),)
+            reordered_past += (
+                tuple(_reorder_stacked(past_state, beam_idx.to(past_state.device)) for past_state in layer_past),
+            )
 
         return reordered_past
 
@@ -1263,7 +1261,7 @@ class RagTokenForGeneration(RagPreTrainedModel):
         reduce_loss (`bool`, *optional*):
             Only relevant if `labels` is passed. If `True`, the NLL loss is reduced using the `torch.Tensor.sum`
             operation.
-        kwargs (`Dict[str, any]`, optional, defaults to *{}*):
+        kwargs (`Dict[str, any]`, *optional*, defaults to `{}`):
             Legacy dictionary, which is required so that model can use *generate()* function.
 
         Returns:
@@ -1430,7 +1428,7 @@ class RagTokenForGeneration(RagPreTrainedModel):
                 priority: 1) from the `generation_config.json` model file, if it exists; 2) from the model
                 configuration. Please note that unspecified parameters will inherit [`~generation.GenerationConfig`]'s
                 default values, whose documentation should be checked to parameterize generation.
-            prefix_allowed_tokens_fn: (`Callable[[int, torch.Tensor], List[int]]`, *optional*):
+            prefix_allowed_tokens_fn (`Callable[[int, torch.Tensor], List[int]]`, *optional*):
                 If provided, this function constraints the beam search to allowed tokens only at each step. If not
                 provided no constraint is applied. This function takes 2 arguments `inputs_ids` and the batch ID
                 `batch_id`. It has to return a list with the allowed tokens for the next generation step conditioned on
@@ -1445,7 +1443,7 @@ class RagTokenForGeneration(RagPreTrainedModel):
                 Custom stopping criteria that complement the default stopping criteria built from arguments and a
                 model's config. If a stopping criteria is passed that is already created with the arguments or a
                 model's config an error is thrown.
-            kwargs:
+            kwargs (`Dict[str, Any]`, *optional*):
                 Ad hoc parametrization of `generate_config` and/or additional model-specific kwargs that will be
                 forwarded to the `forward` function of the model.
 
@@ -1459,6 +1457,9 @@ class RagTokenForGeneration(RagPreTrainedModel):
             generation_config = self.generation_config
         generation_config = copy.deepcopy(generation_config)
         model_kwargs = generation_config.update(**kwargs)  # All unused kwargs must be model kwargs
+
+        kwargs_has_attention_mask = model_kwargs.get("attention_mask", None) is not None
+        self._prepare_special_tokens(generation_config, kwargs_has_attention_mask)
 
         # set default parameters
         n_docs = n_docs if n_docs is not None else self.config.n_docs
@@ -1537,6 +1538,11 @@ class RagTokenForGeneration(RagPreTrainedModel):
             encoder_input_ids=context_input_ids,
             prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
             logits_processor=logits_processor,
+            device=input_ids.device,
+        )
+
+        prepared_stopping_criteria = self._get_stopping_criteria(
+            generation_config=generation_config, stopping_criteria=stopping_criteria
         )
 
         if generation_config.num_beams == 1:
@@ -1545,12 +1551,14 @@ class RagTokenForGeneration(RagPreTrainedModel):
                     f"num_return_sequences has to be 1, but is {generation_config.num_return_sequences} when doing"
                     " greedy search."
                 )
-            return self.greedy_search(
+            return self._sample(
                 input_ids,
                 logits_processor=pre_processor,
-                max_length=generation_config.max_length,
-                pad_token_id=generation_config.pad_token_id,
-                eos_token_id=generation_config.eos_token_id,
+                stopping_criteria=prepared_stopping_criteria,
+                generation_config=generation_config,
+                synced_gpus=False,
+                streamer=None,
+                logits_warper=None,
                 **model_kwargs,
             )
         elif generation_config.num_beams > 1:
@@ -1565,13 +1573,14 @@ class RagTokenForGeneration(RagPreTrainedModel):
                 num_beam_hyps_to_keep=generation_config.num_return_sequences,
                 max_length=generation_config.max_length,
             )
-            return self.beam_search(
+            return self._beam_search(
                 input_ids,
                 beam_scorer,
                 logits_processor=pre_processor,
-                max_length=generation_config.max_length,
-                pad_token_id=generation_config.pad_token_id,
-                eos_token_id=generation_config.eos_token_id,
+                stopping_criteria=prepared_stopping_criteria,
+                generation_config=generation_config,
+                synced_gpus=False,
+                logits_warper=None,
                 **model_kwargs,
             )
         else:

@@ -12,21 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" OPT model configuration"""
+"""OPT model configuration"""
+
 from ...configuration_utils import PretrainedConfig
 from ...utils import logging
 
 
 logger = logging.get_logger(__name__)
-
-OPT_PRETRAINED_CONFIG_ARCHIVE_MAP = {
-    "facebook/opt-125m": "https://huggingface.co/facebook/opt-125m/blob/main/config.json",
-    "facebook/opt-350m": "https://huggingface.co/facebook/opt-350m/blob/main/config.json",
-    "facebook/opt-1.3b": "https://huggingface.co/facebook/opt-1.3b/blob/main/config.json",
-    "facebook/opt-2.7b": "https://huggingface.co/facebook/opt-2.7b/blob/main/config.json",
-    "facebook/opt-6.7b": "https://huggingface.co/facebook/opt-6.7b/blob/main/config.json",
-    "facebook/opt-13b": "https://huggingface.co/facebook/opt-13b/blob/main/config.json",
-}
 
 
 class OPTConfig(PretrainedConfig):
@@ -67,7 +59,7 @@ class OPTConfig(PretrainedConfig):
             The dropout probability for all fully connected layers in the embeddings, encoder, and pooler.
         attention_dropout (`float`, *optional*, defaults to 0.0):
             The dropout ratio for the attention probabilities.
-        layerdrop: (`float`, *optional*, defaults to 0.0):
+        layerdrop (`float`, *optional*, defaults to 0.0):
             The LayerDrop probability. See the [LayerDrop paper](see https://arxiv.org/abs/1909.11556) for more
             details.
         init_std (`float`, *optional*, defaults to 0.02):
@@ -93,6 +85,7 @@ class OPTConfig(PretrainedConfig):
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
+
     model_type = "opt"
     keys_to_ignore_at_inference = ["past_key_values"]
 

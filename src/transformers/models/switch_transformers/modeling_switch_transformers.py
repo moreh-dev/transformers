@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch SwitchTransformers model."""
-
+"""PyTorch SwitchTransformers model."""
 
 import copy
 import math
@@ -23,7 +22,6 @@ from typing import Optional, Tuple, Union
 import torch
 import torch.nn as nn
 from torch.nn import CrossEntropyLoss
-from torch.utils.checkpoint import checkpoint
 
 from ...activations import ACT2FN
 from ...modeling_outputs import (
@@ -55,18 +53,6 @@ _CHECKPOINT_FOR_DOC = "google/switch-base-8"
 # This dict contains ids and associated url
 # for the pretrained weights provided with the models
 ####################################################
-SWITCH_TRANSFORMERS_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "google/switch-base-8",
-    "google/switch-base-16",
-    "google/switch-base-32",
-    "google/switch-base-64",
-    "google/switch-base-128",
-    "google/switch-base-256",
-    "google/switch-large-128",
-    "google/switch-xxl-128",
-    "google/switch-c-2048",
-    # See all SwitchTransformers models at https://huggingface.co/models?filter=switch_transformers
-]
 
 
 def router_z_loss_func(router_logits: torch.Tensor) -> float:
@@ -169,18 +155,9 @@ class SwitchTransformersTop1Router(nn.Module):
         self.input_dtype = hidden_states.dtype
         hidden_states = hidden_states.to(self.dtype)
 
-        if self.jitter_noise > 0:
-            # Get the lower and upper bound of the uniform distribution
-            # Adapted from: https://stackoverflow.com/questions/44328530/how-to-get-a-uniform-distribution-in-a-range-r1-r2-in-pytorch
-            distrib_lower_bound = 1.0 - self.jitter_noise
-            distrib_upper_bound = 1.0 + self.jitter_noise
-
-            uniform_distrib = torch.rand(hidden_states.shape, device=hidden_states.device, dtype=self.dtype)
-            uniform_distrib = uniform_distrib * (distrib_lower_bound - distrib_upper_bound)
-
-            uniform_distrib = uniform_distrib + distrib_upper_bound
+        if self.training and self.jitter_noise > 0:
             # Multiply the token inputs by the uniform distribution - adding some noise
-            hidden_states *= uniform_distrib
+            hidden_states *= torch.empty_like(hidden_states).uniform_(1.0 - self.jitter_noise, 1.0 + self.jitter_noise)
 
         # Shape: [num_groups, tokens_per_group, num_experts]
         self._cast_classifier()
@@ -282,25 +259,6 @@ class SwitchTransformersDenseActDense(nn.Module):
         return hidden_states
 
 
-# Copied from transformers.models.longt5.modeling_longt5.LongT5DenseGatedActDense with LongT5->SwitchTransformers
-class SwitchTransformersDenseGatedActDense(nn.Module):
-    def __init__(self, config: SwitchTransformersConfig):
-        super().__init__()
-        self.wi_0 = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wi_1 = nn.Linear(config.d_model, config.d_ff, bias=False)
-        self.wo = nn.Linear(config.d_ff, config.d_model, bias=False)
-        self.dropout = nn.Dropout(config.dropout_rate)
-        self.act = ACT2FN[config.dense_act_fn]
-
-    def forward(self, hidden_states):
-        hidden_gelu = self.act(self.wi_0(hidden_states))
-        hidden_linear = self.wi_1(hidden_states)
-        hidden_states = hidden_gelu * hidden_linear
-        hidden_states = self.dropout(hidden_states)
-        hidden_states = self.wo(hidden_states)
-        return hidden_states
-
-
 class SwitchTransformersSparseMLP(nn.Module):
     r"""
     Implementation of the Switch Transformers Sparse MLP module.
@@ -336,9 +294,17 @@ class SwitchTransformersSparseMLP(nn.Module):
         # can be unchanged from one layer to another. That is why the hidden states are cloned before updating only the seleced ones.
 
         next_states = hidden_states.clone()
-        for idx, expert in enumerate(self.experts.values()):
-            token_indices = router_mask[:, :, idx].bool()
-            next_states[token_indices] = expert(hidden_states[token_indices])
+
+        router_mask = router_mask.bool()
+        batch_size, seq_len, num_experts = router_mask.shape
+        idx_mask = router_mask.transpose(1, 2).reshape(batch_size * seq_len, num_experts).sum(dim=0)
+        idx_mask = torch.nonzero(idx_mask, as_tuple=True)[
+            0
+        ].tolist()  # length: number of "activated" expert / value: index
+        for idx in idx_mask:
+            next_states[router_mask[:, :, idx]] = getattr(self.experts, "expert_{}".format(idx))(
+                hidden_states[router_mask[:, :, idx]]
+            )
 
         hidden_states = router_probs * next_states
         return hidden_states, (router_logits, expert_index)
@@ -515,9 +481,10 @@ class SwitchTransformersAttention(nn.Module):
         real_seq_length = seq_length
 
         if past_key_value is not None:
-            assert (
-                len(past_key_value) == 2
-            ), f"past_key_value should have 2 past states: keys and values. Got { len(past_key_value)} past states"
+            if len(past_key_value) != 2:
+                raise ValueError(
+                    f"past_key_value should have 2 past states: keys and values. Got { len(past_key_value)} past states"
+                )
             real_seq_length += past_key_value[0].shape[2] if query_length is None else query_length
 
         key_length = real_seq_length if key_value_states is None else key_value_states.shape[1]
@@ -797,7 +764,7 @@ class SwitchTransformersBlock(nn.Module):
         if isinstance(hidden_states, tuple):
             hidden_states, router_tuple = hidden_states
         else:
-            router_tuple = (None,)
+            router_tuple = (torch.zeros((1,), device=hidden_states.device, dtype=torch.int64),)
 
         # clamp inf values to enable fp16 training
         if hidden_states.dtype == torch.float16 and torch.isinf(hidden_states).any():
@@ -860,16 +827,6 @@ class SwitchTransformersPreTrainedModel(PreTrainedModel):
             module.wo.weight.data.normal_(mean=0.0, std=factor * ((self.config.d_ff) ** -0.5))
             if hasattr(module.wo, "bias") and module.wo.bias is not None:
                 module.wo.bias.data.zero_()
-        elif isinstance(module, SwitchTransformersDenseGatedActDense):
-            module.wi_0.weight.data.normal_(mean=0.0, std=factor * ((self.config.d_model) ** -0.5))
-            if hasattr(module.wi_0, "bias") and module.wi_0.bias is not None:
-                module.wi_0.bias.data.zero_()
-            module.wi_1.weight.data.normal_(mean=0.0, std=factor * ((self.config.d_model) ** -0.5))
-            if hasattr(module.wi_1, "bias") and module.wi_1.bias is not None:
-                module.wi_1.bias.data.zero_()
-            module.wo.weight.data.normal_(mean=0.0, std=factor * ((self.config.d_ff) ** -0.5))
-            if hasattr(module.wo, "bias") and module.wo.bias is not None:
-                module.wo.bias.data.zero_()
         elif isinstance(module, SwitchTransformersAttention):
             # Mesh TensorFlow attention initialization to avoid scaling before softmax
             # See https://github.com/tensorflow/mesh/blob/fa19d69eafc9a482aff0b59ddd96b025c0cb207d/mesh_tensorflow/transformer/attention.py#L136
@@ -892,10 +849,6 @@ class SwitchTransformersPreTrainedModel(PreTrainedModel):
             for idx in range(self.config.num_experts):
                 module.experts[f"expert_{idx}"].wi.weight.data.normal_(mean=0.0, std=factor * (d_model**-0.5))
                 module.experts[f"expert_{idx}"].wo.weight.data.normal_(mean=0.0, std=factor * (d_model**-0.5))
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, (SwitchTransformersAttention, SwitchTransformersStack)):
-            module.gradient_checkpointing = value
 
     def _shift_right(self, input_ids):
         decoder_start_token_id = self.config.decoder_start_token_id
@@ -940,7 +893,7 @@ class SwitchTransformersStack(SwitchTransformersPreTrainedModel):
         config.num_layers = config.num_decoder_layers if self.is_decoder else config.num_layers
         self.block = nn.ModuleList()
         for i in range(config.num_layers):
-            is_sparse = (i % sparse_step == 1) if sparse_step > 0 else False
+            is_sparse = (i % sparse_step == 1 or sparse_step == 1) if sparse_step > 0 else False
 
             self.block.append(
                 SwitchTransformersBlock(config, has_relative_attention_bias=bool(i == 0), is_sparse=is_sparse)
@@ -1067,15 +1020,8 @@ class SwitchTransformersStack(SwitchTransformersPreTrainedModel):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return tuple(module(*inputs, use_cache, output_attentions))
-
-                    return custom_forward
-
-                layer_outputs = checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.forward,
                     hidden_states,
                     extended_attention_mask,
                     position_bias,
@@ -1085,6 +1031,8 @@ class SwitchTransformersStack(SwitchTransformersPreTrainedModel):
                     layer_head_mask,
                     cross_attn_layer_head_mask,
                     None,  # past_key_value is always None with gradient checkpointing
+                    use_cache,
+                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(
@@ -1336,7 +1284,7 @@ num_heads)`.
     SWITCH_TRANSFORMERS_START_DOCSTRING,
 )
 class SwitchTransformersModel(SwitchTransformersPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"encoder.embed_tokens.weight", r"decoder.embed_tokens.weight"]
+    _tied_weights_keys = ["encoder.embed_tokens.weight", "decoder.embed_tokens.weight"]
 
     def __init__(self, config: SwitchTransformersConfig):
         super().__init__(config)
@@ -1366,6 +1314,11 @@ class SwitchTransformersModel(SwitchTransformersPreTrainedModel):
         self.shared = new_embeddings
         self.encoder.set_input_embeddings(new_embeddings)
         self.decoder.set_input_embeddings(new_embeddings)
+
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.encoder.embed_tokens, self.shared)
+            self._tie_or_clone_weights(self.decoder.embed_tokens, self.shared)
 
     def get_encoder(self):
         return self.encoder
@@ -1504,11 +1457,7 @@ class SwitchTransformersModel(SwitchTransformersPreTrainedModel):
     """SWITCH_TRANSFORMERS Model with a `language modeling` head on top.""", SWITCH_TRANSFORMERS_START_DOCSTRING
 )
 class SwitchTransformersForConditionalGeneration(SwitchTransformersPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [
-        r"encoder.embed_tokens.weight",
-        r"decoder.embed_tokens.weight",
-        r"lm_head.weight",
-    ]
+    _tied_weights_keys = ["encoder.embed_tokens.weight", "decoder.embed_tokens.weight", "lm_head.weight"]
 
     def __init__(self, config: SwitchTransformersConfig):
         super().__init__(config)
@@ -1546,6 +1495,11 @@ class SwitchTransformersForConditionalGeneration(SwitchTransformersPreTrainedMod
         self.shared = new_embeddings
         self.encoder.set_input_embeddings(new_embeddings)
         self.decoder.set_input_embeddings(new_embeddings)
+
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.encoder.embed_tokens, self.shared)
+            self._tie_or_clone_weights(self.decoder.embed_tokens, self.shared)
 
     def set_output_embeddings(self, new_embeddings):
         self.lm_head = new_embeddings
@@ -1680,50 +1634,45 @@ class SwitchTransformersForConditionalGeneration(SwitchTransformersPreTrainedMod
         decoder_z_loss = None
         decoder_aux_loss = None
 
-        if labels is not None:
-            loss_fct = CrossEntropyLoss(ignore_index=-100)
-            # todo check in the config if router loss enables
-
-            if output_router_logits:
-                # Compute the router loss (z_loss + auxiliary loss) for each router in the encoder and decoder
-                encoder_router_logits, encoder_expert_indexes = self._unpack_router_logits(
-                    encoder_outputs.router_probs
-                )
+        if output_router_logits:
+            # Compute the router loss (z_loss + auxiliary loss) for each router in the encoder and decoder
+            if self.encoder.config.encoder_sparse_step > 1:
+                encoder_router_logits, encoder_expert_indexes = self._unpack_router_logits(encoder_outputs[-1])
                 encoder_z_loss = router_z_loss_func(encoder_router_logits)
                 encoder_router_probs = nn.Softmax(dim=-1)(encoder_router_logits)
                 encoder_aux_loss = load_balancing_loss_func(encoder_router_probs, encoder_expert_indexes)
+            else:
+                encoder_z_loss = 0
+                encoder_aux_loss = 0
 
-                decoder_router_logits, decoder_expert_indexes = self._unpack_router_logits(
-                    decoder_outputs.router_probs
-                )
+            if self.decoder.config.decoder_sparse_step > 1:
+                decoder_router_logits, decoder_expert_indexes = self._unpack_router_logits(decoder_outputs[-1])
                 decoder_z_loss = router_z_loss_func(decoder_router_logits)
                 decoder_router_probs = nn.Softmax(dim=-1)(decoder_router_logits)
                 decoder_aux_loss = load_balancing_loss_func(decoder_router_probs, decoder_expert_indexes)
+            else:
+                decoder_z_loss = 0
+                decoder_aux_loss = 0
 
+        if labels is not None:
+            loss_fct = CrossEntropyLoss(ignore_index=-100)
             # move labels to correct device to enable PP
             labels = labels.to(lm_logits.device)
             loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
 
-            if output_router_logits and labels is not None:
+            if output_router_logits:
                 z_loss = self.router_z_loss_coef * (encoder_z_loss + decoder_z_loss)
                 aux_loss = self.router_aux_loss_coef * (encoder_aux_loss + decoder_aux_loss)
                 loss = loss + z_loss + aux_loss
 
         if not return_dict:
             output = (lm_logits,)
-            if output_router_logits:  # only return the loss if they are not None
-                output += (
-                    encoder_z_loss,
-                    encoder_aux_loss,
-                    decoder_z_loss,
-                    decoder_aux_loss,
-                    *decoder_outputs[1:],
-                    *encoder_outputs,
-                )
-            else:
-                output += (*decoder_outputs[1:], *encoder_outputs)
+            if output_router_logits:
+                output += (encoder_z_loss, encoder_aux_loss, decoder_z_loss, decoder_aux_loss)
+            output += (*decoder_outputs[1:], *encoder_outputs)
 
             return ((loss,) + output) if loss is not None else output
+
         return Seq2SeqMoEOutput(
             loss=loss,
             logits=lm_logits,
@@ -1735,18 +1684,18 @@ class SwitchTransformersForConditionalGeneration(SwitchTransformersPreTrainedMod
             decoder_hidden_states=decoder_outputs.hidden_states,
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
+            decoder_router_logits=decoder_outputs.router_probs,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
             encoder_hidden_states=encoder_outputs.hidden_states,
             encoder_attentions=encoder_outputs.attentions,
             encoder_router_logits=encoder_outputs.router_probs,
-            decoder_router_logits=decoder_outputs.router_probs,
         )
 
     def _unpack_router_logits(self, router_outputs):
         total_router_logits = []
         total_expert_indexes = []
         for router_output in router_outputs:
-            if router_output[0] is not None:
+            if len(router_output[0].shape) > 1:
                 router_logits, expert_indexes = router_output
                 total_router_logits.append(router_logits)
                 total_expert_indexes.append(expert_indexes)
@@ -1764,9 +1713,20 @@ class SwitchTransformersForConditionalGeneration(SwitchTransformersPreTrainedMod
         encoder_outputs=None,
         **kwargs,
     ):
-        # cut decoder_input_ids if past is used
+        # cut decoder_input_ids if past_key_values is used
         if past_key_values is not None:
-            input_ids = input_ids[:, -1:]
+            past_length = past_key_values[0][0].shape[2]
+
+            # Some generation methods already pass only the last input ID
+            if input_ids.shape[1] > past_length:
+                remove_prefix_length = past_length
+            else:
+                # Default to old behavior: keep only final ID
+                remove_prefix_length = input_ids.shape[1] - 1
+
+            input_ids = input_ids[:, remove_prefix_length:]
+
+        output_router_logits = kwargs.get("output_router_logits", True)
 
         return {
             "decoder_input_ids": input_ids,
@@ -1777,6 +1737,7 @@ class SwitchTransformersForConditionalGeneration(SwitchTransformersPreTrainedMod
             "decoder_head_mask": decoder_head_mask,
             "cross_attn_head_mask": cross_attn_head_mask,
             "use_cache": use_cache,
+            "output_router_logits": output_router_logits,
         }
 
     def prepare_decoder_input_ids_from_labels(self, labels: torch.Tensor):
@@ -1802,13 +1763,13 @@ class SwitchTransformersForConditionalGeneration(SwitchTransformersPreTrainedMod
 
             if reordered_layer_past_states[0].shape != layer_past_states[0].shape:
                 raise ValueError(
-                    "expected reordered_layer_past_states to have the same shape than layer_past_states"
+                    "expected reordered_layer_past_states to have the same shape than layer_past_states, "
                     f"but got {reordered_layer_past_states[0].shape} and {layer_past_states[0].shape}"
                 )
             if len(reordered_layer_past_states) != len(layer_past_states):
                 raise ValueError(
-                    "expected layer_past_states to have the same length as reordered_layer_past_states"
-                    f"got {len(layer_past_states)} and {len(reordered_layer_past_states)}"
+                    "expected layer_past_states to have the same length as reordered_layer_past_states, "
+                    f"but got {len(layer_past_states)} and {len(reordered_layer_past_states)}"
                 )
 
             reordered_decoder_past = reordered_decoder_past + (reordered_layer_past_states,)
@@ -1821,7 +1782,7 @@ class SwitchTransformersForConditionalGeneration(SwitchTransformersPreTrainedMod
     SWITCH_TRANSFORMERS_START_DOCSTRING,
 )
 class SwitchTransformersEncoderModel(SwitchTransformersPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"encoder.embed_tokens.weight"]
+    _tied_weights_keys = ["encoder.embed_tokens.weight"]
 
     def __init__(self, config: SwitchTransformersConfig):
         super().__init__(config)
@@ -1844,6 +1805,10 @@ class SwitchTransformersEncoderModel(SwitchTransformersPreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.shared = new_embeddings
         self.encoder.set_input_embeddings(new_embeddings)
+
+    def _tie_weights(self):
+        if self.config.tie_word_embeddings:
+            self._tie_or_clone_weights(self.encoder.embed_tokens, self.shared)
 
     def get_encoder(self):
         return self.encoder

@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch CPMAnt"""
-
+"""PyTorch CPMAnt"""
 
 import math
 from typing import List, Optional, Tuple, Union
@@ -35,11 +34,6 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "openbmb/cpm-ant-10b"
 _CONFIG_FOR_DOC = "CpmAntConfig"
-
-CPMANT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "openbmb/cpm-ant-10b",
-    # See all CPMAnt models at https://huggingface.co/models?filter=cpmant
-]
 
 
 class CpmAntLayerNorm(nn.Module):
@@ -536,8 +530,6 @@ class CpmAntPreTrainedModel(PreTrainedModel):
 
     config_class = CpmAntConfig
     base_model_prefix = "cpmant"
-    supports_gradient_checkpointing = True
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -556,10 +548,6 @@ class CpmAntPreTrainedModel(PreTrainedModel):
             module.weight.data.fill_(1.0)
         elif isinstance(module, CpmAntSegmentPositionEmbedding):
             module.relative_attention_bias.data.normal_(mean=0.0, std=self.config.init_std)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, CpmAntEncoder):
-            module.gradient_checkpointing = value
 
 
 CPMANT_START_DOCSTRING = r"""
@@ -654,7 +642,7 @@ class CpmAntModel(CpmAntPreTrainedModel):
         use_cache: Optional[bool] = None,
         return_dict: Optional[bool] = None,
         **kwargs,
-    ):
+    ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -749,7 +737,7 @@ class CpmAntModel(CpmAntPreTrainedModel):
     CPMANT_START_DOCSTRING,
 )
 class CpmAntForCausalLM(CpmAntPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [r"lm_head.weight"]
+    _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config: CpmAntConfig):
         super().__init__(config)

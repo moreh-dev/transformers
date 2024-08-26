@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Auto Model class."""
-
+"""Auto Model class."""
 
 from collections import OrderedDict
 
@@ -35,16 +34,20 @@ FLAX_MODEL_MAPPING_NAMES = OrderedDict(
         ("big_bird", "FlaxBigBirdModel"),
         ("blenderbot", "FlaxBlenderbotModel"),
         ("blenderbot-small", "FlaxBlenderbotSmallModel"),
+        ("bloom", "FlaxBloomModel"),
         ("clip", "FlaxCLIPModel"),
         ("distilbert", "FlaxDistilBertModel"),
         ("electra", "FlaxElectraModel"),
+        ("gemma", "FlaxGemmaModel"),
         ("gpt-sw3", "FlaxGPT2Model"),
         ("gpt2", "FlaxGPT2Model"),
         ("gpt_neo", "FlaxGPTNeoModel"),
         ("gptj", "FlaxGPTJModel"),
+        ("llama", "FlaxLlamaModel"),
         ("longt5", "FlaxLongT5Model"),
         ("marian", "FlaxMarianModel"),
         ("mbart", "FlaxMBartModel"),
+        ("mistral", "FlaxMistralModel"),
         ("mt5", "FlaxMT5Model"),
         ("opt", "FlaxOPTModel"),
         ("pegasus", "FlaxPegasusModel"),
@@ -139,11 +142,15 @@ FLAX_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES = OrderedDict(
         ("bart", "FlaxBartForCausalLM"),
         ("bert", "FlaxBertForCausalLM"),
         ("big_bird", "FlaxBigBirdForCausalLM"),
+        ("bloom", "FlaxBloomForCausalLM"),
         ("electra", "FlaxElectraForCausalLM"),
+        ("gemma", "FlaxGemmaForCausalLM"),
         ("gpt-sw3", "FlaxGPT2LMHeadModel"),
         ("gpt2", "FlaxGPT2LMHeadModel"),
         ("gpt_neo", "FlaxGPTNeoForCausalLM"),
         ("gptj", "FlaxGPTJForCausalLM"),
+        ("llama", "FlaxLlamaForCausalLM"),
+        ("mistral", "FlaxMistralForCausalLM"),
         ("opt", "FlaxOPTForCausalLM"),
         ("roberta", "FlaxRobertaForCausalLM"),
         ("roberta-prelayernorm", "FlaxRobertaPreLayerNormForCausalLM"),
@@ -264,6 +271,9 @@ FLAX_MODEL_FOR_NEXT_SENTENCE_PREDICTION_MAPPING = _LazyAutoMapping(
 FLAX_MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING = _LazyAutoMapping(
     CONFIG_MAPPING_NAMES, FLAX_MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES
 )
+FLAX_MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING = _LazyAutoMapping(
+    CONFIG_MAPPING_NAMES, FLAX_MODEL_FOR_AUDIO_CLASSIFICATION_MAPPING_NAMES
+)
 
 
 class FlaxAutoModel(_BaseAutoModelClass):
@@ -299,7 +309,9 @@ class FlaxAutoModelForSeq2SeqLM(_BaseAutoModelClass):
 
 
 FlaxAutoModelForSeq2SeqLM = auto_class_update(
-    FlaxAutoModelForSeq2SeqLM, head_doc="sequence-to-sequence language modeling", checkpoint_for_example="t5-base"
+    FlaxAutoModelForSeq2SeqLM,
+    head_doc="sequence-to-sequence language modeling",
+    checkpoint_for_example="google-t5/t5-base",
 )
 
 

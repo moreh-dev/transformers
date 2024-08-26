@@ -53,16 +53,6 @@ logger = logging.get_logger(__name__)
 _CHECKPOINT_FOR_DOC = "google/electra-small-discriminator"
 _CONFIG_FOR_DOC = "ElectraConfig"
 
-ELECTRA_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "google/electra-small-generator",
-    "google/electra-base-generator",
-    "google/electra-large-generator",
-    "google/electra-small-discriminator",
-    "google/electra-base-discriminator",
-    "google/electra-large-discriminator",
-    # See all ELECTRA models at https://huggingface.co/models?filter=electra
-]
-
 
 def load_tf_weights_in_electra(model, config, tf_checkpoint_path, discriminator_or_generator="discriminator"):
     """Load tf checkpoints in a pytorch model."""
@@ -135,7 +125,7 @@ def load_tf_weights_in_electra(model, config, tf_checkpoint_path, discriminator_
             try:
                 if pointer.shape != array.shape:
                     raise ValueError(f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched")
-            except AssertionError as e:
+            except ValueError as e:
                 e.args += (pointer.shape, array.shape)
                 raise
             print(f"Initialize PyTorch weight {name}", original_name)
@@ -161,7 +151,9 @@ class ElectraEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
@@ -360,11 +352,18 @@ class ElectraSelfOutput(nn.Module):
         return hidden_states
 
 
-# Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->Electra
+ELECTRA_SELF_ATTENTION_CLASSES = {
+    "eager": ElectraSelfAttention,
+}
+
+
+# Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->Electra,BERT->ELECTRA
 class ElectraAttention(nn.Module):
     def __init__(self, config, position_embedding_type=None):
         super().__init__()
-        self.self = ElectraSelfAttention(config, position_embedding_type=position_embedding_type)
+        self.self = ELECTRA_SELF_ATTENTION_CLASSES[config._attn_implementation](
+            config, position_embedding_type=position_embedding_type
+        )
         self.output = ElectraSelfOutput(config)
         self.pruned_heads = set()
 
@@ -569,20 +568,15 @@ class ElectraEncoder(nn.Module):
             past_key_value = past_key_values[i] if past_key_values is not None else None
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, past_key_value, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
                     encoder_hidden_states,
                     encoder_attention_mask,
+                    past_key_value,
+                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(
@@ -634,12 +628,13 @@ class ElectraDiscriminatorPredictions(nn.Module):
         super().__init__()
 
         self.dense = nn.Linear(config.hidden_size, config.hidden_size)
+        self.activation = get_activation(config.hidden_act)
         self.dense_prediction = nn.Linear(config.hidden_size, 1)
         self.config = config
 
     def forward(self, discriminator_hidden_states):
         hidden_states = self.dense(discriminator_hidden_states)
-        hidden_states = get_activation(self.config.hidden_act)(hidden_states)
+        hidden_states = self.activation(hidden_states)
         logits = self.dense_prediction(hidden_states).squeeze(-1)
 
         return logits
@@ -651,12 +646,13 @@ class ElectraGeneratorPredictions(nn.Module):
     def __init__(self, config):
         super().__init__()
 
+        self.activation = get_activation("gelu")
         self.LayerNorm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
         self.dense = nn.Linear(config.hidden_size, config.embedding_size)
 
     def forward(self, generator_hidden_states):
         hidden_states = self.dense(generator_hidden_states)
-        hidden_states = get_activation("gelu")(hidden_states)
+        hidden_states = self.activation(hidden_states)
         hidden_states = self.LayerNorm(hidden_states)
 
         return hidden_states
@@ -672,8 +668,6 @@ class ElectraPreTrainedModel(PreTrainedModel):
     load_tf_weights = load_tf_weights_in_electra
     base_model_prefix = "electra"
     supports_gradient_checkpointing = True
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
-    _keys_to_ignore_on_load_unexpected = [r"electra.embeddings_project.weight", r"electra.embeddings_project.bias"]
 
     # Copied from transformers.models.bert.modeling_bert.BertPreTrainedModel._init_weights
     def _init_weights(self, module):
@@ -691,10 +685,6 @@ class ElectraPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    def _set_gradient_checkpointing(self, module, value=False):
-        if isinstance(module, ElectraEncoder):
-            module.gradient_checkpointing = value
 
 
 @dataclass
@@ -868,6 +858,7 @@ class ElectraModel(ElectraPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -941,6 +932,7 @@ class ElectraClassificationHead(nn.Module):
         classifier_dropout = (
             config.classifier_dropout if config.classifier_dropout is not None else config.hidden_dropout_prob
         )
+        self.activation = get_activation("gelu")
         self.dropout = nn.Dropout(classifier_dropout)
         self.out_proj = nn.Linear(config.hidden_size, config.num_labels)
 
@@ -948,7 +940,7 @@ class ElectraClassificationHead(nn.Module):
         x = features[:, 0, :]  # take <s> token (equiv. to [CLS])
         x = self.dropout(x)
         x = self.dense(x)
-        x = get_activation("gelu")(x)  # although BERT uses tanh here, it seems Electra authors used gelu here
+        x = self.activation(x)  # although BERT uses tanh here, it seems Electra authors used gelu here
         x = self.dropout(x)
         x = self.out_proj(x)
         return x
@@ -1166,7 +1158,7 @@ class ElectraForPreTraining(ElectraPreTrainedModel):
     ELECTRA_START_DOCSTRING,
 )
 class ElectraForMaskedLM(ElectraPreTrainedModel):
-    _keys_to_ignore_on_load_missing = ["generator_lm_head.weight"]
+    _tied_weights_keys = ["generator_lm_head.weight"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1533,7 +1525,7 @@ class ElectraForMultipleChoice(ElectraPreTrainedModel):
     """ELECTRA Model with a `language modeling` head on top for CLM fine-tuning.""", ELECTRA_START_DOCSTRING
 )
 class ElectraForCausalLM(ElectraPreTrainedModel):
-    _keys_to_ignore_on_load_missing = ["generator_lm_head.weight"]
+    _tied_weights_keys = ["generator_lm_head.weight"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1666,9 +1658,18 @@ class ElectraForCausalLM(ElectraPreTrainedModel):
         if attention_mask is None:
             attention_mask = input_ids.new_ones(input_shape)
 
-        # cut decoder_input_ids if past is used
+        # cut decoder_input_ids if past_key_values is used
         if past_key_values is not None:
-            input_ids = input_ids[:, -1:]
+            past_length = past_key_values[0][0].shape[2]
+
+            # Some generation methods already pass only the last input ID
+            if input_ids.shape[1] > past_length:
+                remove_prefix_length = past_length
+            else:
+                # Default to old behavior: keep only final ID
+                remove_prefix_length = input_ids.shape[1] - 1
+
+            input_ids = input_ids[:, remove_prefix_length:]
 
         return {"input_ids": input_ids, "attention_mask": attention_mask, "past_key_values": past_key_values}
 
@@ -1676,5 +1677,7 @@ class ElectraForCausalLM(ElectraPreTrainedModel):
     def _reorder_cache(self, past_key_values, beam_idx):
         reordered_past = ()
         for layer_past in past_key_values:
-            reordered_past += (tuple(past_state.index_select(0, beam_idx) for past_state in layer_past),)
+            reordered_past += (
+                tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past),
+            )
         return reordered_past

@@ -15,22 +15,21 @@
 """Image processor class for OneFormer."""
 
 import json
-import warnings
+import os
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import numpy as np
 from huggingface_hub import hf_hub_download
+from huggingface_hub.utils import RepositoryNotFoundError
 
-from ...image_processing_utils import BaseImageProcessor, BatchFeature, get_size_dict
+from ...image_processing_utils import INIT_SERVICE_KWARGS, BaseImageProcessor, BatchFeature, get_size_dict
 from ...image_transforms import (
     PaddingMode,
     get_resize_output_image_size,
-    normalize,
     pad,
     rescale,
     resize,
     to_channel_dimension_format,
-    to_numpy_array,
 )
 from ...image_utils import (
     ChannelDimension,
@@ -38,17 +37,22 @@ from ...image_utils import (
     PILImageResampling,
     get_image_size,
     infer_channel_dimension_format,
+    is_scaled_image,
     make_list_of_images,
+    to_numpy_array,
     valid_images,
+    validate_preprocess_arguments,
 )
 from ...utils import (
     IMAGENET_DEFAULT_MEAN,
     IMAGENET_DEFAULT_STD,
     TensorType,
+    filter_out_non_signature_kwargs,
     is_torch_available,
     is_torch_tensor,
     logging,
 )
+from ...utils.deprecation import deprecate_kwarg
 
 
 logger = logging.get_logger(__name__)
@@ -68,23 +72,28 @@ def max_across_indices(values: Iterable[Any]) -> List[Any]:
 
 
 # Copied from transformers.models.detr.image_processing_detr.get_max_height_width
-def get_max_height_width(images: List[np.ndarray]) -> List[int]:
+def get_max_height_width(
+    images: List[np.ndarray], input_data_format: Optional[Union[str, ChannelDimension]] = None
+) -> List[int]:
     """
     Get the maximum height and width across all images in a batch.
     """
-    input_channel_dimension = infer_channel_dimension_format(images[0])
+    if input_data_format is None:
+        input_data_format = infer_channel_dimension_format(images[0])
 
-    if input_channel_dimension == ChannelDimension.FIRST:
+    if input_data_format == ChannelDimension.FIRST:
         _, max_height, max_width = max_across_indices([img.shape for img in images])
-    elif input_channel_dimension == ChannelDimension.LAST:
+    elif input_data_format == ChannelDimension.LAST:
         max_height, max_width, _ = max_across_indices([img.shape for img in images])
     else:
-        raise ValueError(f"Invalid channel dimension format: {input_channel_dimension}")
+        raise ValueError(f"Invalid channel dimension format: {input_data_format}")
     return (max_height, max_width)
 
 
 # Copied from transformers.models.detr.image_processing_detr.make_pixel_mask
-def make_pixel_mask(image: np.ndarray, output_size: Tuple[int, int]) -> np.ndarray:
+def make_pixel_mask(
+    image: np.ndarray, output_size: Tuple[int, int], input_data_format: Optional[Union[str, ChannelDimension]] = None
+) -> np.ndarray:
     """
     Make a pixel mask for the image, where 1 indicates a valid pixel and 0 indicates padding.
 
@@ -94,7 +103,7 @@ def make_pixel_mask(image: np.ndarray, output_size: Tuple[int, int]) -> np.ndarr
         output_size (`Tuple[int, int]`):
             Output size of the mask.
     """
-    input_height, input_width = get_image_size(image)
+    input_height, input_width = get_image_size(image, channel_dim=input_data_format)
     mask = np.zeros(output_size, dtype=np.int64)
     mask[:input_height, :input_width] = 1
     return mask
@@ -259,12 +268,12 @@ def convert_segmentation_map_to_binary_masks(
     segmentation_map: "np.ndarray",
     instance_id_to_semantic_id: Optional[Dict[int, int]] = None,
     ignore_index: Optional[int] = None,
-    reduce_labels: bool = False,
+    do_reduce_labels: bool = False,
 ):
-    if reduce_labels and ignore_index is None:
-        raise ValueError("If `reduce_labels` is True, `ignore_index` must be provided.")
+    if do_reduce_labels and ignore_index is None:
+        raise ValueError("If `do_reduce_labels` is True, `ignore_index` must be provided.")
 
-    if reduce_labels:
+    if do_reduce_labels:
         segmentation_map = np.where(segmentation_map == 0, ignore_index, segmentation_map - 1)
 
     # Get unique ids (class or instance ids based on input)
@@ -276,15 +285,20 @@ def convert_segmentation_map_to_binary_masks(
 
     # Generate a binary mask for each object instance
     binary_masks = [(segmentation_map == i) for i in all_labels]
-    binary_masks = np.stack(binary_masks, axis=0)  # (num_labels, height, width)
+
+    # Stack the binary masks
+    if binary_masks:
+        binary_masks = np.stack(binary_masks, axis=0)
+    else:
+        binary_masks = np.zeros((0, *segmentation_map.shape))
 
     # Convert instance ids to class ids
     if instance_id_to_semantic_id is not None:
         labels = np.zeros(all_labels.shape[0])
 
         for label in all_labels:
-            class_id = instance_id_to_semantic_id[label + 1 if reduce_labels else label]
-            labels[all_labels == label] = class_id - 1 if reduce_labels else class_id
+            class_id = instance_id_to_semantic_id[label + 1 if do_reduce_labels else label]
+            labels[all_labels == label] = class_id - 1 if do_reduce_labels else class_id
     else:
         labels = all_labels
 
@@ -296,32 +310,37 @@ def get_oneformer_resize_output_image_size(
     size: Union[int, Tuple[int, int], List[int], Tuple[int]],
     max_size: Optional[int] = None,
     default_to_square: bool = True,
+    input_data_format: Optional[Union[str, ChannelDimension]] = None,
 ) -> tuple:
     """
     Computes the output size given the desired size.
 
     Args:
-        input_image (`np.ndarray`):
+        image (`np.ndarray`):
             The input image.
-        size (`int`, `Tuple[int, int]`, `List[int]`, `Tuple[int]`):
+        size (`int` or `Tuple[int, int]` or `List[int]` or `Tuple[int]`):
             The size of the output image.
-        default_to_square (`bool`, *optional*, defaults to `True`):
-            Whether to default to square if no size is provided.
         max_size (`int`, *optional*):
             The maximum size of the output image.
+        default_to_square (`bool`, *optional*, defaults to `True`):
+            Whether to default to square if no size is provided.
+        input_data_format (`ChannelDimension` or `str`, *optional*):
+            The channel dimension format of the input image. If unset, will use the inferred format from the input.
 
     Returns:
         `Tuple[int, int]`: The output size.
     """
     output_size = get_resize_output_image_size(
-        input_image=image, size=size, default_to_square=default_to_square, max_size=max_size
+        input_image=image,
+        size=size,
+        default_to_square=default_to_square,
+        max_size=max_size,
+        input_data_format=input_data_format,
     )
     return output_size
 
 
-def prepare_metadata(repo_path, class_info_file):
-    with open(hf_hub_download(repo_path, class_info_file, repo_type="dataset"), "r") as f:
-        class_info = json.load(f)
+def prepare_metadata(class_info):
     metadata = {}
     class_names = []
     thing_ids = []
@@ -333,6 +352,24 @@ def prepare_metadata(repo_path, class_info_file):
     metadata["thing_ids"] = thing_ids
     metadata["class_names"] = class_names
     return metadata
+
+
+def load_metadata(repo_id, class_info_file):
+    fname = os.path.join("" if repo_id is None else repo_id, class_info_file)
+
+    if not os.path.exists(fname) or not os.path.isfile(fname):
+        if repo_id is None:
+            raise ValueError(f"Could not file {fname} locally. repo_id must be defined if loading from the hub")
+        # We try downloading from a dataset by default for backward compatibility
+        try:
+            fname = hf_hub_download(repo_id, class_info_file, repo_type="dataset")
+        except RepositoryNotFoundError:
+            fname = hf_hub_download(repo_id, class_info_file)
+
+    with open(fname, "r") as f:
+        class_info = json.load(f)
+
+    return class_info
 
 
 class OneFormerImageProcessor(BaseImageProcessor):
@@ -351,17 +388,14 @@ class OneFormerImageProcessor(BaseImageProcessor):
             sequence like `(width, height)`, output size will be matched to this. If size is an int, smaller edge of
             the image will be matched to this number. i.e, if `height > width`, then image will be rescaled to `(size *
             height / width, size)`.
-        max_size (`int`, *optional*, defaults to 1333):
-            The largest size an image dimension can have (otherwise it's capped). Only has an effect if `do_resize` is
-            set to `True`.
-        resample (`int`, *optional*, defaults to `PIL.Image.Resampling.BILINEAR`):
+        resample (`int`, *optional*, defaults to `Resampling.BILINEAR`):
             An optional resampling filter. This can be one of `PIL.Image.Resampling.NEAREST`,
             `PIL.Image.Resampling.BOX`, `PIL.Image.Resampling.BILINEAR`, `PIL.Image.Resampling.HAMMING`,
             `PIL.Image.Resampling.BICUBIC` or `PIL.Image.Resampling.LANCZOS`. Only has an effect if `do_resize` is set
             to `True`.
         do_rescale (`bool`, *optional*, defaults to `True`):
             Whether to rescale the input to a certain `scale`.
-        rescale_factor (`float`, *optional*, defaults to 1/ 255):
+        rescale_factor (`float`, *optional*, defaults to `1/ 255`):
             Rescale the input by the given factor. Only has an effect if `do_rescale` is set to `True`.
         do_normalize (`bool`, *optional*, defaults to `True`):
             Whether or not to normalize the input with mean and standard deviation.
@@ -377,17 +411,22 @@ class OneFormerImageProcessor(BaseImageProcessor):
             Whether or not to decrement all label values of segmentation maps by 1. Usually used for datasets where 0
             is used for background, and background itself is not included in all classes of a dataset (e.g. ADE20k).
             The background label will be replaced by `ignore_index`.
-        repo_path (`str`, defaults to `shi-labs/oneformer_demo`):
-            Dataset repository on huggingface hub containing the JSON file with class information for the dataset.
-        class_info_file (`str`):
-            JSON file containing class information for the dataset. It is stored inside on the `repo_path` dataset
-            repository.
+        repo_path (`str`, *optional*, defaults to `"shi-labs/oneformer_demo"`):
+            Path to hub repo or local directory containing the JSON file with class information for the dataset.
+            If unset, will look for `class_info_file` in the current working directory.
+        class_info_file (`str`, *optional*):
+            JSON file containing class information for the dataset. See `shi-labs/oneformer_demo/cityscapes_panoptic.json` for an example.
         num_text (`int`, *optional*):
             Number of text entries in the text input list.
+        num_labels (`int`, *optional*):
+            The number of labels in the segmentation map.
     """
 
     model_input_names = ["pixel_values", "pixel_mask", "task_inputs"]
 
+    @deprecate_kwarg("reduce_labels", new_name="do_reduce_labels", version="4.44.0")
+    @deprecate_kwarg("max_size", version="4.27.0", warn_if_greater_or_equal_version=True)
+    @filter_out_non_signature_kwargs(extra=["max_size", "metadata", *INIT_SERVICE_KWARGS])
     def __init__(
         self,
         do_resize: bool = True,
@@ -400,28 +439,23 @@ class OneFormerImageProcessor(BaseImageProcessor):
         image_std: Union[float, List[float]] = None,
         ignore_index: Optional[int] = None,
         do_reduce_labels: bool = False,
-        repo_path: str = "shi-labs/oneformer_demo",
+        repo_path: Optional[str] = "shi-labs/oneformer_demo",
         class_info_file: str = None,
         num_text: Optional[int] = None,
+        num_labels: Optional[int] = None,
         **kwargs,
     ):
-        if "max_size" in kwargs:
-            self._max_size = kwargs.pop("max_size")
-        else:
-            self._max_size = 1333
+        super().__init__(**kwargs)
+
+        # Deprecated, backward compatibility
+        self._max_size = kwargs.pop("max_size", 1333)
 
         size = size if size is not None else {"shortest_edge": 800, "longest_edge": self._max_size}
         size = get_size_dict(size, max_size=self._max_size, default_to_square=False)
 
-        if "reduce_labels" in kwargs:
-            warnings.warn(
-                "The `reduce_labels` argument is deprecated and will be removed in v4.27. "
-                "Please use `do_reduce_labels` instead.",
-                FutureWarning,
-            )
-            do_reduce_labels = kwargs.pop("reduce_labels")
+        if class_info_file is None:
+            raise ValueError("You must provide a `class_info_file`")
 
-        super().__init__(**kwargs)
         self.do_resize = do_resize
         self.size = size
         self.resample = resample
@@ -434,30 +468,49 @@ class OneFormerImageProcessor(BaseImageProcessor):
         self.do_reduce_labels = do_reduce_labels
         self.class_info_file = class_info_file
         self.repo_path = repo_path
-        self.metadata = prepare_metadata(repo_path, class_info_file)
+        self.metadata = prepare_metadata(load_metadata(repo_path, class_info_file))
         self.num_text = num_text
+        self.num_labels = num_labels
 
+    @classmethod
+    def from_dict(cls, image_processor_dict: Dict[str, Any], **kwargs):
+        """
+        Overrides the `from_dict` method from the base class to save support of deprecated `reduce_labels` in old configs
+        """
+        image_processor_dict = image_processor_dict.copy()
+        if "reduce_labels" in image_processor_dict:
+            image_processor_dict["do_reduce_labels"] = image_processor_dict.pop("reduce_labels")
+        return super().from_dict(image_processor_dict, **kwargs)
+
+    # Copied from transformers.models.maskformer.image_processing_maskformer.MaskFormerImageProcessor.to_dict
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Serializes this instance to a Python dictionary. This method calls the superclass method and then removes the
+        `_max_size` attribute from the dictionary.
+        """
+        image_processor_dict = super().to_dict()
+        image_processor_dict.pop("_max_size", None)
+        return image_processor_dict
+
+    @deprecate_kwarg("max_size", version="4.27.0", warn_if_greater_or_equal_version=True)
+    @filter_out_non_signature_kwargs(extra=["max_size"])
     def resize(
         self,
         image: np.ndarray,
         size: Dict[str, int],
         resample: PILImageResampling = PILImageResampling.BILINEAR,
         data_format=None,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
         **kwargs,
     ) -> np.ndarray:
         """
         Resize the image to the given size. Size can be min_size (scalar) or `(height, width)` tuple. If size is an
         int, smaller edge of the image will be matched to this number.
         """
-        if "max_size" in kwargs:
-            warnings.warn(
-                "The `max_size` parameter is deprecated and will be removed in v4.27. "
-                "Please specify in `size['longest_edge'] instead`.",
-                FutureWarning,
-            )
-            max_size = kwargs.pop("max_size")
-        else:
-            max_size = None
+
+        # Deprecated, backward compatibility
+        max_size = kwargs.pop("max_size", None)
+
         size = get_size_dict(size, max_size=max_size, default_to_square=False)
         if "shortest_edge" in size and "longest_edge" in size:
             size, max_size = size["shortest_edge"], size["longest_edge"]
@@ -470,35 +523,41 @@ class OneFormerImageProcessor(BaseImageProcessor):
                 f" {size.keys()}."
             )
         size = get_oneformer_resize_output_image_size(
-            image=image,
-            size=size,
-            max_size=max_size,
-            default_to_square=False,
+            image=image, size=size, max_size=max_size, default_to_square=False, input_data_format=input_data_format
         )
-        image = resize(image, size=size, resample=resample, data_format=data_format)
+        image = resize(
+            image, size=size, resample=resample, data_format=data_format, input_data_format=input_data_format
+        )
         return image
 
-    # Copied from transformers.models.maskformer.image_processing_maskformer.MaskFormerImageProcessor.rescale
+    # Copied from transformers.models.detr.image_processing_detr.DetrImageProcessor.rescale
     def rescale(
-        self, image: np.ndarray, rescale_factor: float, data_format: Optional[ChannelDimension] = None
-    ) -> np.ndarray:
-        """
-        Rescale the image by the given factor.
-        """
-        return rescale(image, rescale_factor, data_format=data_format)
-
-    # Copied from transformers.models.detr.image_processing_detr.DetrImageProcessor.normalize
-    def normalize(
         self,
         image: np.ndarray,
-        mean: Union[float, Iterable[float]],
-        std: Union[float, Iterable[float]],
-        data_format: Optional[ChannelDimension] = None,
+        rescale_factor: float,
+        data_format: Optional[Union[str, ChannelDimension]] = None,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
     ) -> np.ndarray:
         """
-        Normalize the image with the given mean and standard deviation.
+        Rescale the image by the given factor. image = image * rescale_factor.
+
+        Args:
+            image (`np.ndarray`):
+                Image to rescale.
+            rescale_factor (`float`):
+                The value to use for rescaling.
+            data_format (`str` or `ChannelDimension`, *optional*):
+                The channel dimension format for the output image. If unset, the channel dimension format of the input
+                image is used. Can be one of:
+                - `"channels_first"` or `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
+                - `"channels_last"` or `ChannelDimension.LAST`: image in (height, width, num_channels) format.
+            input_data_format (`str` or `ChannelDimension`, *optional*):
+                The channel dimension format for the input image. If unset, is inferred from the input image. Can be
+                one of:
+                - `"channels_first"` or `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
+                - `"channels_last"` or `ChannelDimension.LAST`: image in (height, width, num_channels) format.
         """
-        return normalize(image, mean=mean, std=std, data_format=data_format)
+        return rescale(image, rescale_factor, data_format=data_format, input_data_format=input_data_format)
 
     # Copied from transformers.models.maskformer.image_processing_maskformer.MaskFormerImageProcessor.convert_segmentation_map_to_binary_masks
     def convert_segmentation_map_to_binary_masks(
@@ -506,16 +565,15 @@ class OneFormerImageProcessor(BaseImageProcessor):
         segmentation_map: "np.ndarray",
         instance_id_to_semantic_id: Optional[Dict[int, int]] = None,
         ignore_index: Optional[int] = None,
-        reduce_labels: bool = False,
-        **kwargs,
+        do_reduce_labels: bool = False,
     ):
-        reduce_labels = reduce_labels if reduce_labels is not None else self.reduce_labels
+        do_reduce_labels = do_reduce_labels if do_reduce_labels is not None else self.do_reduce_labels
         ignore_index = ignore_index if ignore_index is not None else self.ignore_index
         return convert_segmentation_map_to_binary_masks(
             segmentation_map=segmentation_map,
             instance_id_to_semantic_id=instance_id_to_semantic_id,
             ignore_index=ignore_index,
-            reduce_labels=reduce_labels,
+            do_reduce_labels=do_reduce_labels,
         )
 
     def __call__(self, images, task_inputs=None, segmentation_maps=None, **kwargs) -> BatchFeature:
@@ -532,13 +590,14 @@ class OneFormerImageProcessor(BaseImageProcessor):
         do_normalize: bool = None,
         image_mean: Optional[Union[float, List[float]]] = None,
         image_std: Optional[Union[float, List[float]]] = None,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
     ):
         if do_resize:
-            image = self.resize(image, size=size, resample=resample)
+            image = self.resize(image, size=size, resample=resample, input_data_format=input_data_format)
         if do_rescale:
-            image = self.rescale(image, rescale_factor=rescale_factor)
+            image = self.rescale(image, rescale_factor=rescale_factor, input_data_format=input_data_format)
         if do_normalize:
-            image = self.normalize(image, mean=image_mean, std=image_std)
+            image = self.normalize(image, mean=image_mean, std=image_std, input_data_format=input_data_format)
         return image
 
     def _preprocess_image(
@@ -553,10 +612,18 @@ class OneFormerImageProcessor(BaseImageProcessor):
         image_mean: Optional[Union[float, List[float]]] = None,
         image_std: Optional[Union[float, List[float]]] = None,
         data_format: Optional[Union[str, ChannelDimension]] = None,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
     ) -> np.ndarray:
         """Preprocesses a single image."""
         # All transformations expect numpy arrays.
         image = to_numpy_array(image)
+        if is_scaled_image(image) and do_rescale:
+            logger.warning_once(
+                "It looks like you are trying to rescale already rescaled images. If the input"
+                " images have pixel values between 0 and 1, set `do_rescale=False` to avoid rescaling them again."
+            )
+        if input_data_format is None:
+            input_data_format = infer_channel_dimension_format(image)
         image = self._preprocess(
             image=image,
             do_resize=do_resize,
@@ -567,9 +634,10 @@ class OneFormerImageProcessor(BaseImageProcessor):
             do_normalize=do_normalize,
             image_mean=image_mean,
             image_std=image_std,
+            input_data_format=input_data_format,
         )
         if data_format is not None:
-            image = to_channel_dimension_format(image, data_format)
+            image = to_channel_dimension_format(image, data_format, input_channel_dim=input_data_format)
         return image
 
     def _preprocess_mask(
@@ -577,14 +645,19 @@ class OneFormerImageProcessor(BaseImageProcessor):
         segmentation_map: ImageInput,
         do_resize: bool = None,
         size: Dict[str, int] = None,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
     ) -> np.ndarray:
         """Preprocesses a single mask."""
         segmentation_map = to_numpy_array(segmentation_map)
         # Add channel dimension if missing - needed for certain transformations
-        added_channel_dim = False
         if segmentation_map.ndim == 2:
             added_channel_dim = True
             segmentation_map = segmentation_map[None, ...]
+            input_data_format = ChannelDimension.FIRST
+        else:
+            added_channel_dim = False
+            if input_data_format is None:
+                input_data_format = infer_channel_dimension_format(segmentation_map, num_channels=1)
         # TODO: (Amy)
         # Remork segmentation map processing to include reducing labels and resizing which doesn't
         # drop segment IDs > 255.
@@ -595,12 +668,14 @@ class OneFormerImageProcessor(BaseImageProcessor):
             size=size,
             do_rescale=False,
             do_normalize=False,
+            input_data_format=input_data_format,
         )
         # Remove extra channel dimension if added for processing
         if added_channel_dim:
             segmentation_map = segmentation_map.squeeze(0)
         return segmentation_map
 
+    @filter_out_non_signature_kwargs()
     def preprocess(
         self,
         images: ImageInput,
@@ -619,26 +694,8 @@ class OneFormerImageProcessor(BaseImageProcessor):
         do_reduce_labels: Optional[bool] = None,
         return_tensors: Optional[Union[str, TensorType]] = None,
         data_format: Union[str, ChannelDimension] = ChannelDimension.FIRST,
-        **kwargs,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
     ) -> BatchFeature:
-        if "pad_and_return_pixel_mask" in kwargs:
-            warnings.warn(
-                "The `pad_and_return_pixel_mask` argument is deprecated and will be removed in v4.27",
-                FutureWarning,
-            )
-        if "reduce_labels" in kwargs:
-            warnings.warn(
-                "The `reduce_labels` argument is deprecated and will be removed in a v4.27. Please use"
-                " `do_reduce_labels` instead.",
-                FutureWarning,
-            )
-            if do_reduce_labels is not None:
-                raise ValueError(
-                    "You cannot use both `reduce_labels` and `do_reduce_labels` arguments. Please use"
-                    " `do_reduce_labels` instead."
-                )
-            do_reduce_labels = kwargs.pop("reduce_labels")
-
         if task_inputs is None:
             # Default value
             task_inputs = ["panoptic"]
@@ -655,20 +712,22 @@ class OneFormerImageProcessor(BaseImageProcessor):
         ignore_index = ignore_index if ignore_index is not None else self.ignore_index
         do_reduce_labels = do_reduce_labels if do_reduce_labels is not None else self.do_reduce_labels
 
-        if do_resize is not None and size is None:
-            raise ValueError("If `do_resize` is True, `size` must be provided.")
-
-        if do_rescale is not None and rescale_factor is None:
-            raise ValueError("If `do_rescale` is True, `rescale_factor` must be provided.")
-
-        if do_normalize is not None and (image_mean is None or image_std is None):
-            raise ValueError("If `do_normalize` is True, `image_mean` and `image_std` must be provided.")
-
         if not valid_images(images):
             raise ValueError(
                 "Invalid image type. Must be of type PIL.Image.Image, numpy.ndarray, "
                 "torch.Tensor, tf.Tensor or jax.ndarray."
             )
+
+        validate_preprocess_arguments(
+            do_rescale=do_rescale,
+            rescale_factor=rescale_factor,
+            do_normalize=do_normalize,
+            image_mean=image_mean,
+            image_std=image_std,
+            do_resize=do_resize,
+            size=size,
+            resample=resample,
+        )
 
         if segmentation_maps is not None and not valid_images(segmentation_maps):
             raise ValueError(
@@ -695,13 +754,15 @@ class OneFormerImageProcessor(BaseImageProcessor):
                 image_mean=image_mean,
                 image_std=image_std,
                 data_format=data_format,
+                input_data_format=input_data_format,
             )
             for image in images
         ]
 
         if segmentation_maps is not None:
             segmentation_maps = [
-                self._preprocess_mask(segmentation_map, do_resize, size) for segmentation_map in segmentation_maps
+                self._preprocess_mask(segmentation_map, do_resize, size, input_data_format=input_data_format)
+                for segmentation_map in segmentation_maps
             ]
         encoded_inputs = self.encode_inputs(
             images,
@@ -711,32 +772,39 @@ class OneFormerImageProcessor(BaseImageProcessor):
             ignore_index,
             do_reduce_labels,
             return_tensors,
+            input_data_format=data_format,
         )
         return encoded_inputs
 
-    # Copied from transformers.models.detr.image_processing_detr.DetrImageProcessor._pad_image
+    # Copied from transformers.models.vilt.image_processing_vilt.ViltImageProcessor._pad_image
     def _pad_image(
         self,
         image: np.ndarray,
         output_size: Tuple[int, int],
         constant_values: Union[float, Iterable[float]] = 0,
         data_format: Optional[ChannelDimension] = None,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
     ) -> np.ndarray:
         """
         Pad an image with zeros to the given size.
         """
-        input_height, input_width = get_image_size(image)
+        input_height, input_width = get_image_size(image, channel_dim=input_data_format)
         output_height, output_width = output_size
 
         pad_bottom = output_height - input_height
         pad_right = output_width - input_width
         padding = ((0, pad_bottom), (0, pad_right))
         padded_image = pad(
-            image, padding, mode=PaddingMode.CONSTANT, constant_values=constant_values, data_format=data_format
+            image,
+            padding,
+            mode=PaddingMode.CONSTANT,
+            constant_values=constant_values,
+            data_format=data_format,
+            input_data_format=input_data_format,
         )
         return padded_image
 
-    # Copied from transformers.models.detr.image_processing_detr.DetrImageProcessor.pad
+    # Copied from transformers.models.vilt.image_processing_vilt.ViltImageProcessor.pad
     def pad(
         self,
         images: List[np.ndarray],
@@ -744,7 +812,8 @@ class OneFormerImageProcessor(BaseImageProcessor):
         return_pixel_mask: bool = True,
         return_tensors: Optional[Union[str, TensorType]] = None,
         data_format: Optional[ChannelDimension] = None,
-    ) -> np.ndarray:
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
+    ) -> BatchFeature:
         """
         Pads a batch of images to the bottom and right of the image with zeros to the size of largest height and width
         in the batch and optionally returns their corresponding pixel mask.
@@ -756,21 +825,37 @@ class OneFormerImageProcessor(BaseImageProcessor):
                 The value to use for the padding if `mode` is `"constant"`.
             return_pixel_mask (`bool`, *optional*, defaults to `True`):
                 Whether to return a pixel mask.
-            input_channel_dimension (`ChannelDimension`, *optional*):
-                The channel dimension format of the image. If not provided, it will be inferred from the input image.
+            return_tensors (`str` or `TensorType`, *optional*):
+                The type of tensors to return. Can be one of:
+                    - Unset: Return a list of `np.ndarray`.
+                    - `TensorType.TENSORFLOW` or `'tf'`: Return a batch of type `tf.Tensor`.
+                    - `TensorType.PYTORCH` or `'pt'`: Return a batch of type `torch.Tensor`.
+                    - `TensorType.NUMPY` or `'np'`: Return a batch of type `np.ndarray`.
+                    - `TensorType.JAX` or `'jax'`: Return a batch of type `jax.numpy.ndarray`.
             data_format (`str` or `ChannelDimension`, *optional*):
                 The channel dimension format of the image. If not provided, it will be the same as the input image.
+            input_data_format (`ChannelDimension` or `str`, *optional*):
+                The channel dimension format of the input image. If not provided, it will be inferred.
         """
-        pad_size = get_max_height_width(images)
+        pad_size = get_max_height_width(images, input_data_format=input_data_format)
 
         padded_images = [
-            self._pad_image(image, pad_size, constant_values=constant_values, data_format=data_format)
+            self._pad_image(
+                image,
+                pad_size,
+                constant_values=constant_values,
+                data_format=data_format,
+                input_data_format=input_data_format,
+            )
             for image in images
         ]
         data = {"pixel_values": padded_images}
 
         if return_pixel_mask:
-            masks = [make_pixel_mask(image=image, output_size=pad_size) for image in images]
+            masks = [
+                make_pixel_mask(image=image, output_size=pad_size, input_data_format=input_data_format)
+                for image in images
+            ]
             data["pixel_mask"] = masks
 
         return BatchFeature(data=data, tensor_type=return_tensors)
@@ -879,9 +964,9 @@ class OneFormerImageProcessor(BaseImageProcessor):
         segmentation_maps: ImageInput = None,
         instance_id_to_semantic_id: Optional[Union[List[Dict[int, int]], Dict[int, int]]] = None,
         ignore_index: Optional[int] = None,
-        reduce_labels: bool = False,
+        do_reduce_labels: bool = False,
         return_tensors: Optional[Union[str, TensorType]] = None,
-        **kwargs,
+        input_data_format: Optional[Union[str, ChannelDimension]] = None,
     ):
         """
         Pad images up to the largest image in a batch and create a corresponding `pixel_mask`.
@@ -921,6 +1006,10 @@ class OneFormerImageProcessor(BaseImageProcessor):
                 If set, will return tensors instead of NumPy arrays. If set to `'pt'`, return PyTorch `torch.Tensor`
                 objects.
 
+            input_data_format (`str` or `ChannelDimension`, *optional*):
+                The channel dimension format of the input image. If not provided, it will be inferred from the input
+                image.
+
         Returns:
             [`BatchFeature`]: A [`BatchFeature`] with the following fields:
 
@@ -935,16 +1024,17 @@ class OneFormerImageProcessor(BaseImageProcessor):
             - **text_inputs** -- Optional list of text string entries to be fed to a model (when `annotations` are
               provided). They identify the binary masks present in the image.
         """
-        if "pad_and_return_pixel_mask" in kwargs:
-            warnings.warn(
-                "The `pad_and_return_pixel_mask` argument has no effect and will be removed in v4.27", FutureWarning
-            )
-
         ignore_index = self.ignore_index if ignore_index is None else ignore_index
-        reduce_labels = self.do_reduce_labels if reduce_labels is None else reduce_labels
+        do_reduce_labels = self.do_reduce_labels if do_reduce_labels is None else do_reduce_labels
         pixel_values_list = [to_numpy_array(pixel_values) for pixel_values in pixel_values_list]
-        pad_size = get_max_height_width(pixel_values_list)
-        encoded_inputs = self.pad(pixel_values_list, return_tensors=return_tensors)
+
+        if input_data_format is None:
+            input_data_format = infer_channel_dimension_format(pixel_values_list[0])
+
+        pad_size = get_max_height_width(pixel_values_list, input_data_format=input_data_format)
+        encoded_inputs = self.pad(
+            pixel_values_list, return_tensors=return_tensors, input_data_format=input_data_format
+        )
 
         annotations = None
         if segmentation_maps is not None:
@@ -958,7 +1048,7 @@ class OneFormerImageProcessor(BaseImageProcessor):
                     instance_id = instance_id_to_semantic_id
                 # Use instance2class_id mapping per image
                 masks, classes = self.convert_segmentation_map_to_binary_masks(
-                    segmentation_map, instance_id, ignore_index=ignore_index, reduce_labels=reduce_labels
+                    segmentation_map, instance_id, ignore_index=ignore_index, do_reduce_labels=do_reduce_labels
                 )
                 annotations.append({"masks": masks, "classes": classes})
 
@@ -1070,7 +1160,7 @@ class OneFormerImageProcessor(BaseImageProcessor):
         Args:
             outputs ([`OneFormerForUniversalSegmentationOutput`]):
                 The outputs from [`OneFormerForUniversalSegmentationOutput`].
-            task_type (`str`, *optional)*, defaults to "instance"):
+            task_type (`str`, *optional*, defaults to "instance"):
                 The post processing depends on the task token input. If the `task_type` is "panoptic", we need to
                 ignore the stuff predictions.
             is_demo (`bool`, *optional)*, defaults to `True`):
@@ -1104,6 +1194,7 @@ class OneFormerImageProcessor(BaseImageProcessor):
         class_queries_logits = outputs.class_queries_logits  # [batch_size, num_queries, num_classes+1]
         masks_queries_logits = outputs.masks_queries_logits  # [batch_size, num_queries, height, width]
 
+        device = masks_queries_logits.device
         batch_size = class_queries_logits.shape[0]
         num_queries = class_queries_logits.shape[1]
         num_classes = class_queries_logits.shape[-1] - 1
@@ -1114,7 +1205,7 @@ class OneFormerImageProcessor(BaseImageProcessor):
         for i in range(batch_size):
             # [Q, K]
             scores = torch.nn.functional.softmax(class_queries_logits[i], dim=-1)[:, :-1]
-            labels = torch.arange(num_classes).unsqueeze(0).repeat(num_queries, 1).flatten(0, 1)
+            labels = torch.arange(num_classes, device=device).unsqueeze(0).repeat(num_queries, 1).flatten(0, 1)
 
             # scores_per_image, topk_indices = scores.flatten(0, 1).topk(self.num_queries, sorted=False)
             scores_per_image, topk_indices = scores.flatten(0, 1).topk(num_queries, sorted=False)
@@ -1134,8 +1225,8 @@ class OneFormerImageProcessor(BaseImageProcessor):
             # if this is panoptic segmentation, we only keep the "thing" classes
             if task_type == "panoptic":
                 keep = torch.zeros_like(scores_per_image).bool()
-                for i, lab in enumerate(labels_per_image):
-                    keep[i] = lab in self.metadata["thing_ids"]
+                for j, lab in enumerate(labels_per_image):
+                    keep[j] = lab in self.metadata["thing_ids"]
 
                 scores_per_image = scores_per_image[keep]
                 labels_per_image = labels_per_image[keep]
@@ -1148,8 +1239,8 @@ class OneFormerImageProcessor(BaseImageProcessor):
                 continue
 
             if "ade20k" in self.class_info_file and not is_demo and "instance" in task_type:
-                for i in range(labels_per_image.shape[0]):
-                    labels_per_image[i] = self.metadata["thing_ids"].index(labels_per_image[i].item())
+                for j in range(labels_per_image.shape[0]):
+                    labels_per_image[j] = self.metadata["thing_ids"].index(labels_per_image[j].item())
 
             # Get segmentation map and segment information of batch item
             target_size = target_sizes[i] if target_sizes is not None else None

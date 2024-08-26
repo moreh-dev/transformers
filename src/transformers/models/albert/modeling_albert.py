@@ -48,21 +48,8 @@ from .configuration_albert import AlbertConfig
 
 logger = logging.get_logger(__name__)
 
-_CHECKPOINT_FOR_DOC = "albert-base-v2"
+_CHECKPOINT_FOR_DOC = "albert/albert-base-v2"
 _CONFIG_FOR_DOC = "AlbertConfig"
-
-
-ALBERT_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "albert-base-v1",
-    "albert-large-v1",
-    "albert-xlarge-v1",
-    "albert-xxlarge-v1",
-    "albert-base-v2",
-    "albert-large-v2",
-    "albert-xlarge-v2",
-    "albert-xxlarge-v2",
-    # See all ALBERT models at https://huggingface.co/models?filter=albert
-]
 
 
 def load_tf_weights_in_albert(model, config, tf_checkpoint_path):
@@ -182,7 +169,7 @@ def load_tf_weights_in_albert(model, config, tf_checkpoint_path):
         try:
             if pointer.shape != array.shape:
                 raise ValueError(f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched")
-        except AssertionError as e:
+        except ValueError as e:
             e.args += (pointer.shape, array.shape)
             raise
         print(f"Initialize PyTorch weight {name} from {original_name}")
@@ -208,7 +195,9 @@ class AlbertEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.register_buffer(
+            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
+        )
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
@@ -507,7 +496,6 @@ class AlbertPreTrainedModel(PreTrainedModel):
     config_class = AlbertConfig
     load_tf_weights = load_tf_weights_in_albert
     base_model_prefix = "albert"
-    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights."""
@@ -687,9 +675,9 @@ class AlbertModel(AlbertPreTrainedModel):
         position_ids: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[None] = None,
-        output_hidden_states: Optional[None] = None,
-        return_dict: Optional[None] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
     ) -> Union[BaseModelOutputWithPooling, Tuple]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -700,6 +688,7 @@ class AlbertModel(AlbertPreTrainedModel):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
+            self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -759,11 +748,7 @@ class AlbertModel(AlbertPreTrainedModel):
     ALBERT_START_DOCSTRING,
 )
 class AlbertForPreTraining(AlbertPreTrainedModel):
-    _keys_to_ignore_on_load_missing = [
-        "predictions.decoder.weight",
-        "predictions.decoder.bias",
-        "embeddings.position_ids",
-    ]
+    _tied_weights_keys = ["predictions.decoder.bias", "predictions.decoder.weight"]
 
     def __init__(self, config: AlbertConfig):
         super().__init__(config)
@@ -818,8 +803,8 @@ class AlbertForPreTraining(AlbertPreTrainedModel):
         >>> from transformers import AutoTokenizer, AlbertForPreTraining
         >>> import torch
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
-        >>> model = AlbertForPreTraining.from_pretrained("albert-base-v2")
+        >>> tokenizer = AutoTokenizer.from_pretrained("albert/albert-base-v2")
+        >>> model = AlbertForPreTraining.from_pretrained("albert/albert-base-v2")
 
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)
         >>> # Batch size 1
@@ -889,8 +874,12 @@ class AlbertMLMHead(nn.Module):
         return prediction_scores
 
     def _tie_weights(self) -> None:
-        # To tie those two weights if they get disconnected (on TPU or when the bias is resized)
-        self.bias = self.decoder.bias
+        # For accelerate compatibility and to not break backward compatibility
+        if self.decoder.bias.device.type == "meta":
+            self.decoder.bias = self.bias
+        else:
+            # To tie those two weights if they get disconnected (on TPU or when the bias is resized)
+            self.bias = self.decoder.bias
 
 
 class AlbertSOPHead(nn.Module):
@@ -911,12 +900,7 @@ class AlbertSOPHead(nn.Module):
     ALBERT_START_DOCSTRING,
 )
 class AlbertForMaskedLM(AlbertPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-    _keys_to_ignore_on_load_missing = [
-        "predictions.decoder.weight",
-        "predictions.decoder.bias",
-        "embeddings.position_ids",
-    ]
+    _tied_weights_keys = ["predictions.decoder.bias", "predictions.decoder.weight"]
 
     def __init__(self, config):
         super().__init__(config)
@@ -932,6 +916,7 @@ class AlbertForMaskedLM(AlbertPreTrainedModel):
 
     def set_output_embeddings(self, new_embeddings: nn.Linear) -> None:
         self.predictions.decoder = new_embeddings
+        self.predictions.bias = new_embeddings.bias
 
     def get_input_embeddings(self) -> nn.Embedding:
         return self.albert.embeddings.word_embeddings
@@ -965,8 +950,8 @@ class AlbertForMaskedLM(AlbertPreTrainedModel):
         >>> import torch
         >>> from transformers import AutoTokenizer, AlbertForMaskedLM
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("albert-base-v2")
-        >>> model = AlbertForMaskedLM.from_pretrained("albert-base-v2")
+        >>> tokenizer = AutoTokenizer.from_pretrained("albert/albert-base-v2")
+        >>> model = AlbertForMaskedLM.from_pretrained("albert/albert-base-v2")
 
         >>> # add mask_token
         >>> inputs = tokenizer("The capital of [MASK] is Paris.", return_tensors="pt")
@@ -1131,8 +1116,6 @@ class AlbertForSequenceClassification(AlbertPreTrainedModel):
     ALBERT_START_DOCSTRING,
 )
 class AlbertForTokenClassification(AlbertPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-
     def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1216,8 +1199,6 @@ class AlbertForTokenClassification(AlbertPreTrainedModel):
     ALBERT_START_DOCSTRING,
 )
 class AlbertForQuestionAnswering(AlbertPreTrainedModel):
-    _keys_to_ignore_on_load_unexpected = [r"pooler"]
-
     def __init__(self, config: AlbertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels

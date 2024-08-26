@@ -12,7 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" PyTorch Audio Spectrogram Transformer (AST) model."""
+"""PyTorch Audio Spectrogram Transformer (AST) model."""
 
 import math
 from typing import Dict, List, Optional, Set, Tuple, Union
@@ -43,12 +43,6 @@ _EXPECTED_OUTPUT_SHAPE = [1, 1214, 768]
 _SEQ_CLASS_CHECKPOINT = "MIT/ast-finetuned-audioset-10-10-0.4593"
 _SEQ_CLASS_EXPECTED_OUTPUT = "'Speech'"
 _SEQ_CLASS_EXPECTED_LOSS = 0.17
-
-
-AUDIO_SPECTROGRAM_TRANSFORMER_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "MIT/ast-finetuned-audioset-10-10-0.4593",
-    # See all Audio Spectrogram Transformer models at https://huggingface.co/models?filter=ast
-]
 
 
 class ASTEmbeddings(nn.Module):
@@ -175,6 +169,38 @@ class ASTSelfAttention(nn.Module):
         return outputs
 
 
+# Copied from transformers.models.vit.modeling_vit.ViTSdpaSelfAttention with ViT->AST
+class ASTSdpaSelfAttention(ASTSelfAttention):
+    def __init__(self, config: ASTConfig) -> None:
+        super().__init__(config)
+        self.attention_probs_dropout_prob = config.attention_probs_dropout_prob
+
+    def forward(
+        self, hidden_states, head_mask: Optional[torch.Tensor] = None, output_attentions: bool = False
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
+        mixed_query_layer = self.query(hidden_states)
+
+        key_layer = self.transpose_for_scores(self.key(hidden_states))
+        value_layer = self.transpose_for_scores(self.value(hidden_states))
+        query_layer = self.transpose_for_scores(mixed_query_layer)
+
+        context_layer = torch.nn.functional.scaled_dot_product_attention(
+            query_layer,
+            key_layer,
+            value_layer,
+            head_mask,
+            self.attention_probs_dropout_prob if self.training else 0.0,
+            is_causal=False,
+            scale=None,
+        )
+
+        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
+        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
+        context_layer = context_layer.view(new_context_layer_shape)
+
+        return context_layer, None
+
+
 # Copied from transformers.models.vit.modeling_vit.ViTSelfOutput with ViT->AST
 class ASTSelfOutput(nn.Module):
     """
@@ -234,6 +260,13 @@ class ASTAttention(nn.Module):
         return outputs
 
 
+# Copied from transformers.models.vit.modeling_vit.ViTSdpaAttention with ViT->AST
+class ASTSdpaAttention(ASTAttention):
+    def __init__(self, config: ASTConfig) -> None:
+        super().__init__(config)
+        self.attention = ASTSdpaSelfAttention(config)
+
+
 # Copied from transformers.models.vit.modeling_vit.ViTIntermediate with ViT->AST
 class ASTIntermediate(nn.Module):
     def __init__(self, config: ASTConfig) -> None:
@@ -267,7 +300,13 @@ class ASTOutput(nn.Module):
         return hidden_states
 
 
-# Copied from transformers.models.vit.modeling_vit.ViTLayer with ViT->AST
+AST_ATTENTION_CLASSES = {
+    "eager": ASTAttention,
+    "sdpa": ASTSdpaAttention,
+}
+
+
+# Copied from transformers.models.vit.modeling_vit.ViTLayer with ViT->AST,VIT->AST
 class ASTLayer(nn.Module):
     """This corresponds to the Block class in the timm implementation."""
 
@@ -275,7 +314,7 @@ class ASTLayer(nn.Module):
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = ASTAttention(config)
+        self.attention = AST_ATTENTION_CLASSES[config._attn_implementation](config)
         self.intermediate = ASTIntermediate(config)
         self.output = ASTOutput(config)
         self.layernorm_before = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
@@ -336,17 +375,11 @@ class ASTEncoder(nn.Module):
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
             if self.gradient_checkpointing and self.training:
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
+                layer_outputs = self._gradient_checkpointing_func(
+                    layer_module.__call__,
                     hidden_states,
                     layer_head_mask,
+                    output_attentions,
                 )
             else:
                 layer_outputs = layer_module(hidden_states, layer_head_mask, output_attentions)
@@ -378,6 +411,7 @@ class ASTPreTrainedModel(PreTrainedModel):
     base_model_prefix = "audio_spectrogram_transformer"
     main_input_name = "input_values"
     supports_gradient_checkpointing = True
+    _supports_sdpa = True
 
     # Copied from transformers.models.deit.modeling_deit.DeiTPreTrainedModel._init_weights
     def _init_weights(self, module: Union[nn.Linear, nn.Conv2d, nn.LayerNorm]) -> None:
@@ -393,11 +427,6 @@ class ASTPreTrainedModel(PreTrainedModel):
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
-
-    # Copied from transformers.models.vit.modeling_vit.ViTPreTrainedModel._set_gradient_checkpointing with ViT->AST
-    def _set_gradient_checkpointing(self, module: ASTEncoder, value: bool = False) -> None:
-        if isinstance(module, ASTEncoder):
-            module.gradient_checkpointing = value
 
 
 AUDIO_SPECTROGRAM_TRANSFORMER_START_DOCSTRING = r"""
@@ -443,7 +472,7 @@ AUDIO_SPECTROGRAM_TRANSFORMER_INPUTS_DOCSTRING = r"""
     AUDIO_SPECTROGRAM_TRANSFORMER_START_DOCSTRING,
 )
 class ASTModel(ASTPreTrainedModel):
-    def __init__(self, config: ASTConfig):
+    def __init__(self, config: ASTConfig) -> None:
         super().__init__(config)
         self.config = config
 
@@ -481,7 +510,7 @@ class ASTModel(ASTPreTrainedModel):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
-    ):
+    ) -> Union[Tuple, BaseModelOutputWithPooling]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states

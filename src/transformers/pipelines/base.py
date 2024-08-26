@@ -15,11 +15,11 @@
 import collections
 import csv
 import importlib
-import inspect
 import json
 import os
 import pickle
 import sys
+import traceback
 import types
 import warnings
 from abc import ABC, abstractmethod
@@ -28,15 +28,27 @@ from contextlib import contextmanager
 from os.path import abspath, exists
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
-from packaging import version
-
 from ..dynamic_module_utils import custom_object_save
 from ..feature_extraction_utils import PreTrainedFeatureExtractor
 from ..image_processing_utils import BaseImageProcessor
 from ..modelcard import ModelCard
 from ..models.auto.configuration_auto import AutoConfig
 from ..tokenization_utils import PreTrainedTokenizer
-from ..utils import ModelOutput, add_end_docstrings, is_tf_available, is_torch_available, logging
+from ..utils import (
+    ModelOutput,
+    PushToHubMixin,
+    add_end_docstrings,
+    copy_func,
+    infer_framework,
+    is_tf_available,
+    is_torch_available,
+    is_torch_cuda_available,
+    is_torch_mlu_available,
+    is_torch_mps_available,
+    is_torch_npu_available,
+    is_torch_xpu_available,
+    logging,
+)
 
 
 GenericTensor = Union[List["GenericTensor"], "torch.Tensor", "tf.Tensor"]
@@ -78,6 +90,9 @@ def _pad(items, key, padding_value, padding_side):
         # Others include `attention_mask` etc...
         shape = items[0][key].shape
         dim = len(shape)
+        if dim == 1:
+            # We have a list of 1-dim torch tensors, which can be stacked without padding
+            return torch.cat([item[key] for item in items], dim=0)
         if key in ["pixel_values", "image"]:
             # This is probable image so padding shouldn't be necessary
             # B, C, H, W
@@ -203,7 +218,7 @@ def infer_framework_load_model(
     If both frameworks are installed and available for `model`, PyTorch is selected.
 
     Args:
-        model (`str`, [`PreTrainedModel`] or [`TFPreTrainedModel`]):
+        model (`str`, [`PreTrainedModel`] or [`TFPreTrainedModel]`):
             The model to infer the framework from. If `str`, a checkpoint name. The model to infer the framewrok from.
         config ([`AutoConfig`]):
             The config associated with the model to help using the correct class
@@ -251,6 +266,7 @@ def infer_framework_load_model(
         if len(class_tuple) == 0:
             raise ValueError(f"Pipeline cannot infer suitable model classes from {model}")
 
+        all_traceback = {}
         for model_class in class_tuple:
             kwargs = model_kwargs.copy()
             if framework == "pt" and model.endswith(".h5"):
@@ -273,12 +289,19 @@ def infer_framework_load_model(
                 # Stop loading on the first successful load.
                 break
             except (OSError, ValueError):
+                all_traceback[model_class.__name__] = traceback.format_exc()
                 continue
 
         if isinstance(model, str):
-            raise ValueError(f"Could not load model {model} with any of the following classes: {class_tuple}.")
+            error = ""
+            for class_name, trace in all_traceback.items():
+                error += f"while loading with {class_name}, an error is thrown:\n{trace}\n"
+            raise ValueError(
+                f"Could not load model {model} with any of the following classes: {class_tuple}. See the original errors:\n\n{error}\n"
+            )
 
-    framework = "tf" if "keras.engine.training.Model" in str(inspect.getmro(model.__class__)) else "pt"
+    if framework is None:
+        framework = infer_framework(model.__class__)
     return framework, model
 
 
@@ -299,7 +322,7 @@ def infer_framework_from_model(
     If both frameworks are installed and available for `model`, PyTorch is selected.
 
     Args:
-        model (`str`, [`PreTrainedModel`] or [`TFPreTrainedModel`]):
+        model (`str`, [`PreTrainedModel`] or [`TFPreTrainedModel]`):
             The model to infer the framework from. If `str`, a checkpoint name. The model to infer the framewrok from.
         model_classes (dictionary `str` to `type`, *optional*):
             A mapping framework to class.
@@ -326,7 +349,7 @@ def get_framework(model, revision: Optional[str] = None):
     Select framework (TensorFlow or PyTorch) to use.
 
     Args:
-        model (`str`, [`PreTrainedModel`] or [`TFPreTrainedModel`]):
+        model (`str`, [`PreTrainedModel`] or [`TFPreTrainedModel]`):
             If both frameworks are installed, picks the one corresponding to the model passed (either a model class or
             the model name). If no specific model is provided, defaults to using PyTorch.
     """
@@ -351,7 +374,7 @@ def get_framework(model, revision: Optional[str] = None):
             except OSError:
                 model = TFAutoModel.from_pretrained(model, revision=revision)
 
-    framework = "tf" if "keras.engine.training.Model" in str(inspect.getmro(model.__class__)) else "pt"
+    framework = infer_framework(model.__class__)
     return framework
 
 
@@ -362,7 +385,7 @@ def get_default_model_and_revision(
     Select a default model to use for a given task. Defaults to pytorch if ambiguous.
 
     Args:
-        targeted_task (`Dict` ):
+        targeted_task (`Dict`):
            Dictionary representing the given task, that should contain default models
 
         framework (`str`, None)
@@ -439,9 +462,9 @@ class PipelineDataFormat:
     pipelines keyword arguments through the `dataset_kwarg_1=dataset_column_1` format.
 
     Args:
-        output_path (`str`, *optional*): Where to save the outgoing data.
-        input_path (`str`, *optional*): Where to look for the input data.
-        column (`str`, *optional*): The column to read.
+        output_path (`str`): Where to save the outgoing data.
+        input_path (`str`): Where to look for the input data.
+        column (`str`): The column to read.
         overwrite (`bool`, *optional*, defaults to `False`):
             Whether or not to overwrite the `output_path`.
     """
@@ -515,7 +538,7 @@ class PipelineDataFormat:
         Creates an instance of the right subclass of [`~pipelines.PipelineDataFormat`] depending on `format`.
 
         Args:
-            format: (`str`):
+            format (`str`):
                 The format of the desired pipeline. Acceptable values are `"json"`, `"csv"` or `"pipe"`.
             output_path (`str`, *optional*):
                 Where to save the outgoing data.
@@ -544,9 +567,9 @@ class CsvPipelineDataFormat(PipelineDataFormat):
     Support for pipelines using CSV data format.
 
     Args:
-        output_path (`str`, *optional*): Where to save the outgoing data.
-        input_path (`str`, *optional*): Where to look for the input data.
-        column (`str`, *optional*): The column to read.
+        output_path (`str`): Where to save the outgoing data.
+        input_path (`str`): Where to look for the input data.
+        column (`str`): The column to read.
         overwrite (`bool`, *optional*, defaults to `False`):
             Whether or not to overwrite the `output_path`.
     """
@@ -588,9 +611,9 @@ class JsonPipelineDataFormat(PipelineDataFormat):
     Support for pipelines using JSON file format.
 
     Args:
-        output_path (`str`, *optional*): Where to save the outgoing data.
-        input_path (`str`, *optional*): Where to look for the input data.
-        column (`str`, *optional*): The column to read.
+        output_path (`str`): Where to save the outgoing data.
+        input_path (`str`): Where to look for the input data.
+        column (`str`): The column to read.
         overwrite (`bool`, *optional*, defaults to `False`):
             Whether or not to overwrite the `output_path`.
     """
@@ -632,9 +655,9 @@ class PipedPipelineDataFormat(PipelineDataFormat):
     If columns are provided, then the output will be a dictionary with {column_x: value_x}
 
     Args:
-        output_path (`str`, *optional*): Where to save the outgoing data.
-        input_path (`str`, *optional*): Where to look for the input data.
-        column (`str`, *optional*): The column to read.
+        output_path (`str`): Where to save the outgoing data.
+        input_path (`str`): Where to look for the input data.
+        column (`str`): The column to read.
         overwrite (`bool`, *optional*, defaults to `False`):
             Whether or not to overwrite the `output_path`.
     """
@@ -687,14 +710,33 @@ class _ScikitCompat(ABC):
         raise NotImplementedError()
 
 
-PIPELINE_INIT_ARGS = r"""
+def build_pipeline_init_args(
+    has_tokenizer: bool = False,
+    has_feature_extractor: bool = False,
+    has_image_processor: bool = False,
+    supports_binary_output: bool = True,
+) -> str:
+    docstring = r"""
     Arguments:
         model ([`PreTrainedModel`] or [`TFPreTrainedModel`]):
             The model that will be used by the pipeline to make predictions. This needs to be a model inheriting from
-            [`PreTrainedModel`] for PyTorch and [`TFPreTrainedModel`] for TensorFlow.
+            [`PreTrainedModel`] for PyTorch and [`TFPreTrainedModel`] for TensorFlow."""
+    if has_tokenizer:
+        docstring += r"""
         tokenizer ([`PreTrainedTokenizer`]):
             The tokenizer that will be used by the pipeline to encode data for the model. This object inherits from
-            [`PreTrainedTokenizer`].
+            [`PreTrainedTokenizer`]."""
+    if has_feature_extractor:
+        docstring += r"""
+        feature_extractor ([`SequenceFeatureExtractor`]):
+            The feature extractor that will be used by the pipeline to encode data for the model. This object inherits from
+            [`SequenceFeatureExtractor`]."""
+    if has_image_processor:
+        docstring += r"""
+        image_processor ([`BaseImageProcessor`]):
+            The image processor that will be used by the pipeline to encode data for the model. This object inherits from
+            [`BaseImageProcessor`]."""
+    docstring += r"""
         modelcard (`str` or [`ModelCard`], *optional*):
             Model card attributed to the model for this pipeline.
         framework (`str`, *optional*):
@@ -717,10 +759,22 @@ PIPELINE_INIT_ARGS = r"""
             Reference to the object in charge of parsing supplied pipeline parameters.
         device (`int`, *optional*, defaults to -1):
             Device ordinal for CPU/GPU supports. Setting this to -1 will leverage CPU, a positive will run the model on
-            the associated CUDA device id. You can pass native `torch.device` or a `str` too.
+            the associated CUDA device id. You can pass native `torch.device` or a `str` too
+        torch_dtype (`str` or `torch.dtype`, *optional*):
+            Sent directly as `model_kwargs` (just a simpler shortcut) to use the available precision for this model
+            (`torch.float16`, `torch.bfloat16`, ... or `"auto"`)"""
+    if supports_binary_output:
+        docstring += r"""
         binary_output (`bool`, *optional*, defaults to `False`):
-            Flag indicating if the output the pipeline should happen in a binary format (i.e., pickle) or as raw text.
-"""
+            Flag indicating if the output the pipeline should happen in a serialized format (i.e., pickle) or as
+            the raw output data e.g. text."""
+    return docstring
+
+
+PIPELINE_INIT_ARGS = build_pipeline_init_args(
+    has_tokenizer=True, has_feature_extractor=True, has_image_processor=True, supports_binary_output=True
+)
+
 
 if is_torch_available():
     from transformers.pipelines.pt_utils import (
@@ -731,8 +785,8 @@ if is_torch_available():
     )
 
 
-@add_end_docstrings(PIPELINE_INIT_ARGS)
-class Pipeline(_ScikitCompat):
+@add_end_docstrings(build_pipeline_init_args(has_tokenizer=True, has_feature_extractor=True, has_image_processor=True))
+class Pipeline(_ScikitCompat, PushToHubMixin):
     """
     The Pipeline class is the class from which all pipelines inherit. Refer to this class for methods shared across
     different pipelines.
@@ -761,7 +815,7 @@ class Pipeline(_ScikitCompat):
         framework: Optional[str] = None,
         task: str = "",
         args_parser: ArgumentHandler = None,
-        device: Union[int, str, "torch.device"] = None,
+        device: Union[int, "torch.device"] = None,
         torch_dtype: Optional[Union[str, "torch.dtype"]] = None,
         binary_output: bool = False,
         **kwargs,
@@ -777,31 +831,70 @@ class Pipeline(_ScikitCompat):
         self.modelcard = modelcard
         self.framework = framework
 
-        if self.framework == "pt" and device is not None and not (isinstance(device, int) and device < 0):
-            self.model.to(device)
+        # `accelerate` device map
+        hf_device_map = getattr(self.model, "hf_device_map", None)
+
+        if hf_device_map is not None and device is not None:
+            raise ValueError(
+                "The model has been loaded with `accelerate` and therefore cannot be moved to a specific device. Please "
+                "discard the `device` argument when creating your pipeline object."
+            )
 
         if device is None:
-            # `accelerate` device map
-            hf_device_map = getattr(self.model, "hf_device_map", None)
             if hf_device_map is not None:
                 # Take the first device used by `accelerate`.
                 device = next(iter(hf_device_map.values()))
             else:
                 device = -1
+                if (
+                    is_torch_mlu_available()
+                    or is_torch_cuda_available()
+                    or is_torch_npu_available()
+                    or is_torch_xpu_available(check_device=True)
+                    or is_torch_mps_available()
+                ):
+                    logger.warning(
+                        "Hardware accelerator e.g. GPU is available in the environment, but no `device` argument"
+                        " is passed to the `Pipeline` object. Model will be on CPU."
+                    )
 
         if is_torch_available() and self.framework == "pt":
+            if device == -1 and self.model.device is not None:
+                device = self.model.device
             if isinstance(device, torch.device):
+                if device.type == "xpu" and not is_torch_xpu_available(check_device=True):
+                    raise ValueError(f'{device} is not available, you should use device="cpu" instead')
                 self.device = device
             elif isinstance(device, str):
+                if "xpu" in device and not is_torch_xpu_available(check_device=True):
+                    raise ValueError(f'{device} is not available, you should use device="cpu" instead')
                 self.device = torch.device(device)
             elif device < 0:
                 self.device = torch.device("cpu")
-            else:
+            elif is_torch_mlu_available():
+                self.device = torch.device(f"mlu:{device}")
+            elif is_torch_cuda_available():
                 self.device = torch.device(f"cuda:{device}")
+            elif is_torch_npu_available():
+                self.device = torch.device(f"npu:{device}")
+            elif is_torch_xpu_available(check_device=True):
+                self.device = torch.device(f"xpu:{device}")
+            elif is_torch_mps_available():
+                self.device = torch.device(f"mps:{device}")
+            else:
+                raise ValueError(f"{device} unrecognized or not available.")
         else:
             self.device = device if device is not None else -1
-        self.torch_dtype = torch_dtype
+
         self.binary_output = binary_output
+        # We shouldn't call `model.to()` for models loaded with accelerate as well as the case that model is already on device
+        if (
+            self.framework == "pt"
+            and self.model.device != self.device
+            and not (isinstance(self.device, int) and self.device < 0)
+            and hf_device_map is None
+        ):
+            self.model.to(self.device)
 
         # Update config and generation_config with task specific parameters
         task_specific_params = self.model.config.task_specific_params
@@ -809,6 +902,16 @@ class Pipeline(_ScikitCompat):
             self.model.config.update(task_specific_params.get(task))
             if self.model.can_generate():
                 self.model.generation_config.update(**task_specific_params.get(task))
+
+        # Pipelines calling `generate`: if the tokenizer has a pad token but the model doesn't, set it in the
+        # forward params so that `generate` is aware of the pad token.
+        if (
+            self.tokenizer is not None
+            and self.model.can_generate()
+            and self.tokenizer.pad_token_id is not None
+            and self.model.generation_config.pad_token_id is None
+        ):
+            self.model.generation_config.pad_token_id = self.tokenizer.pad_token_id
 
         self.call_count = 0
         self._batch_size = kwargs.pop("batch_size", None)
@@ -822,14 +925,36 @@ class Pipeline(_ScikitCompat):
                 # then we should keep working
                 self.image_processor = self.feature_extractor
 
-    def save_pretrained(self, save_directory: str):
+    def save_pretrained(
+        self,
+        save_directory: Union[str, os.PathLike],
+        safe_serialization: bool = True,
+        **kwargs,
+    ):
         """
         Save the pipeline's model and tokenizer.
 
         Args:
-            save_directory (`str`):
+            save_directory (`str` or `os.PathLike`):
                 A path to the directory where to saved. It will be created if it doesn't exist.
+            safe_serialization (`str`):
+                Whether to save the model using `safetensors` or the traditional way for PyTorch or Tensorflow.
+            kwargs (`Dict[str, Any]`, *optional*):
+                Additional key word arguments passed along to the [`~utils.PushToHubMixin.push_to_hub`] method.
         """
+        use_auth_token = kwargs.pop("use_auth_token", None)
+
+        if use_auth_token is not None:
+            warnings.warn(
+                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
+                FutureWarning,
+            )
+            if kwargs.get("token", None) is not None:
+                raise ValueError(
+                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
+                )
+            kwargs["token"] = use_auth_token
+
         if os.path.isfile(save_directory):
             logger.error(f"Provided path ({save_directory}) should be a directory, not a file")
             return
@@ -856,13 +981,17 @@ class Pipeline(_ScikitCompat):
             # Save the pipeline custom code
             custom_object_save(self, save_directory)
 
-        self.model.save_pretrained(save_directory)
+        kwargs["safe_serialization"] = safe_serialization
+        self.model.save_pretrained(save_directory, **kwargs)
 
         if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(save_directory)
+            self.tokenizer.save_pretrained(save_directory, **kwargs)
 
         if self.feature_extractor is not None:
-            self.feature_extractor.save_pretrained(save_directory)
+            self.feature_extractor.save_pretrained(save_directory, **kwargs)
+
+        if self.image_processor is not None:
+            self.image_processor.save_pretrained(save_directory, **kwargs)
 
         if self.modelcard is not None:
             self.modelcard.save_pretrained(save_directory)
@@ -878,6 +1007,13 @@ class Pipeline(_ScikitCompat):
         Scikit / Keras interface to transformers' pipelines. This method will forward to __call__().
         """
         return self(X)
+
+    @property
+    def torch_dtype(self) -> Optional["torch.dtype"]:
+        """
+        Torch dtype of the model (if it's Pytorch model), `None` otherwise.
+        """
+        return getattr(self.model, "dtype", None)
 
     @contextmanager
     def device_placement(self):
@@ -901,9 +1037,13 @@ class Pipeline(_ScikitCompat):
                 yield
         else:
             if self.device.type == "cuda":
-                torch.cuda.set_device(self.device)
-
-            yield
+                with torch.cuda.device(self.device):
+                    yield
+            elif self.device.type == "mlu":
+                with torch.mlu.device(self.device):
+                    yield
+            else:
+                yield
 
     def ensure_tensor_on_device(self, **inputs):
         """
@@ -933,8 +1073,6 @@ class Pipeline(_ScikitCompat):
         elif isinstance(inputs, tuple):
             return tuple([self._ensure_tensor_on_device(item, device) for item in inputs])
         elif isinstance(inputs, torch.Tensor):
-            if device == torch.device("cpu") and inputs.dtype in {torch.float16, torch.bfloat16}:
-                inputs = inputs.float()
             return inputs.to(device)
         else:
             return inputs
@@ -949,12 +1087,18 @@ class Pipeline(_ScikitCompat):
         """
         if not isinstance(supported_models, list):  # Create from a model mapping
             supported_models_names = []
-            for config, model in supported_models.items():
+            for _, model_name in supported_models.items():
                 # Mapping can now contain tuples of models for the same configuration.
-                if isinstance(model, tuple):
-                    supported_models_names.extend([_model.__name__ for _model in model])
+                if isinstance(model_name, tuple):
+                    supported_models_names.extend(list(model_name))
                 else:
-                    supported_models_names.append(model.__name__)
+                    supported_models_names.append(model_name)
+            if hasattr(supported_models, "_model_mapping"):
+                for _, model in supported_models._model_mapping._extra_content.items():
+                    if isinstance(model_name, tuple):
+                        supported_models_names.extend([m.__name__ for m in model])
+                    else:
+                        supported_models_names.append(model.__name__)
             supported_models = supported_models_names
         if self.model.__class__.__name__ not in supported_models:
             logger.error(
@@ -966,9 +1110,9 @@ class Pipeline(_ScikitCompat):
     def _sanitize_parameters(self, **pipeline_parameters):
         """
         _sanitize_parameters will be called with any excessive named arguments from either `__init__` or `__call__`
-        methods. It should return 3 dictionnaries of the resolved parameters used by the various `preprocess`,
-        `forward` and `postprocess` methods. Do not fill dictionnaries if the caller didn't specify a kwargs. This
-        let's you keep defaults in function signatures, which is more "natural".
+        methods. It should return 3 dictionaries of the resolved parameters used by the various `preprocess`,
+        `forward` and `postprocess` methods. Do not fill dictionaries if the caller didn't specify a kwargs. This
+        lets you keep defaults in function signatures, which is more "natural".
 
         It is not meant to be called directly, it will be automatically called and the final parameters resolved by
         `__init__` and `__call__`
@@ -1006,12 +1150,7 @@ class Pipeline(_ScikitCompat):
         raise NotImplementedError("postprocess not implemented")
 
     def get_inference_context(self):
-        inference_context = (
-            torch.inference_mode
-            if version.parse(version.parse(torch.__version__).base_version) >= version.parse("1.9.0")
-            else torch.no_grad
-        )
-        return inference_context
+        return torch.no_grad
 
     def forward(self, model_inputs, **forward_params):
         with self.device_placement():
@@ -1077,10 +1216,9 @@ class Pipeline(_ScikitCompat):
 
         self.call_count += 1
         if self.call_count > 10 and self.framework == "pt" and self.device.type == "cuda":
-            warnings.warn(
+            logger.warning_once(
                 "You seem to be using the pipelines sequentially on GPU. In order to maximize efficiency please use a"
                 " dataset",
-                UserWarning,
             )
 
         is_dataset = Dataset is not None and isinstance(inputs, Dataset)
@@ -1132,6 +1270,13 @@ class Pipeline(_ScikitCompat):
         # easy solution.
         for input_ in inputs:
             yield self.run_single(input_, preprocess_params, forward_params, postprocess_params)
+
+
+Pipeline.push_to_hub = copy_func(Pipeline.push_to_hub)
+if Pipeline.push_to_hub.__doc__ is not None:
+    Pipeline.push_to_hub.__doc__ = Pipeline.push_to_hub.__doc__.format(
+        object="pipe", object_class="pipeline", object_files="pipeline file"
+    ).replace(".from_pretrained", "")
 
 
 class ChunkPipeline(Pipeline):

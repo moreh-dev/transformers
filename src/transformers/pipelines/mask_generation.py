@@ -8,18 +8,28 @@ from ..utils import (
     logging,
     requires_backends,
 )
-from .base import PIPELINE_INIT_ARGS, ChunkPipeline
+from .base import ChunkPipeline, build_pipeline_init_args
 
 
 if is_torch_available():
     import torch
 
-    from ..models.auto.modeling_auto import MODEL_FOR_MASK_GENERATION_MAPPING
+    from ..models.auto.modeling_auto import MODEL_FOR_MASK_GENERATION_MAPPING_NAMES
 
 logger = logging.get_logger(__name__)
 
 
-@add_end_docstrings(PIPELINE_INIT_ARGS)
+@add_end_docstrings(
+    build_pipeline_init_args(has_image_processor=True),
+    r"""
+        points_per_batch (*optional*, int, default to 64):
+            Sets the number of points run simultaneously by the model. Higher numbers may be faster but use more GPU
+            memory.
+        output_bboxes_mask (`bool`, *optional*, default to `False`):
+            Whether or not to output the bounding box predictions.
+        output_rle_masks (`bool`, *optional*, default to `False`):
+            Whether or not to output the masks in `RLE` format""",
+)
 class MaskGenerationPipeline(ChunkPipeline):
     """
     Automatic mask generation for images using `SamForMaskGeneration`. This pipeline predicts binary masks for an
@@ -47,23 +57,6 @@ class MaskGenerationPipeline(ChunkPipeline):
                   `stability_scores`. Also
                 applies a variety of filters based on non maximum suppression to remove bad masks.
                 - image_processor.postprocess_masks_for_amg applies the NSM on the mask to only keep relevant ones.
-
-    Arguments:
-        model ([`PreTrainedModel`] or [`TFPreTrainedModel`]):
-            The model that will be used by the pipeline to make predictions. This needs to be a model inheriting from
-            [`PreTrainedModel`] for PyTorch and [`TFPreTrainedModel`] for TensorFlow.
-        tokenizer ([`PreTrainedTokenizer`]):
-            The tokenizer that will be used by the pipeline to encode data for the model. This object inherits from
-            [`PreTrainedTokenizer`].
-        feature_extractor ([`SequenceFeatureExtractor`]):
-            The feature extractor that will be used by the pipeline to encode the input.
-        points_per_batch (*optional*, int, default to 64):
-            Sets the number of points run simultaneously by the model. Higher numbers may be faster but use more GPU
-            memory.
-        output_bboxes_mask (`bool`, *optional*, default to `False`):
-           Whether or not to output the bounding box predictions.
-        output_rle_masks (`bool`, *optional*, default to `False`):
-            Whether or not to output the masks in `RLE` format
 
     Example:
 
@@ -96,7 +89,7 @@ class MaskGenerationPipeline(ChunkPipeline):
         if self.framework != "pt":
             raise ValueError(f"The {self.__class__} is only available in PyTorch.")
 
-        self.check_model_type(MODEL_FOR_MASK_GENERATION_MAPPING)
+        self.check_model_type(MODEL_FOR_MASK_GENERATION_MAPPING_NAMES)
 
     def _sanitize_parameters(self, **kwargs):
         preprocess_kwargs = {}
@@ -113,6 +106,8 @@ class MaskGenerationPipeline(ChunkPipeline):
             preprocess_kwargs["crop_overlap_ratio"] = kwargs["crop_overlap_ratio"]
         if "crop_n_points_downscale_factor" in kwargs:
             preprocess_kwargs["crop_n_points_downscale_factor"] = kwargs["crop_n_points_downscale_factor"]
+        if "timeout" in kwargs:
+            preprocess_kwargs["timeout"] = kwargs["timeout"]
         # postprocess args
         if "pred_iou_thresh" in kwargs:
             forward_params["pred_iou_thresh"] = kwargs["pred_iou_thresh"]
@@ -156,6 +151,9 @@ class MaskGenerationPipeline(ChunkPipeline):
                 the image length. Later layers with more crops scale down this overlap.
             crop_n_points_downscale_factor (`int`, *optional*, defaults to `1`):
                 The number of points-per-side sampled in layer n is scaled down by crop_n_points_downscale_factor**n.
+            timeout (`float`, *optional*, defaults to None):
+                The maximum time in seconds to wait for fetching images from the web. If None, no timeout is set and
+                the call may block forever.
 
         Return:
             `Dict`: A dictionary with the following keys:
@@ -175,13 +173,16 @@ class MaskGenerationPipeline(ChunkPipeline):
         crop_overlap_ratio: float = 512 / 1500,
         points_per_crop: Optional[int] = 32,
         crop_n_points_downscale_factor: Optional[int] = 1,
+        timeout: Optional[float] = None,
     ):
-        image = load_image(image)
+        image = load_image(image, timeout=timeout)
         target_size = self.image_processor.size["longest_edge"]
         crop_boxes, grid_points, cropped_images, input_labels = self.image_processor.generate_crop_boxes(
             image, target_size, crops_n_layers, crop_overlap_ratio, points_per_crop, crop_n_points_downscale_factor
         )
         model_inputs = self.image_processor(images=cropped_images, return_tensors="pt")
+        if self.framework == "pt":
+            model_inputs = model_inputs.to(self.torch_dtype)
 
         with self.device_placement():
             if self.framework == "pt":

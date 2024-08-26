@@ -25,7 +25,7 @@ from ..utils import (
     is_vision_available,
     logging,
 )
-from .base import PIPELINE_INIT_ARGS, ChunkPipeline
+from .base import ChunkPipeline, build_pipeline_init_args
 from .question_answering import select_starts_ends
 
 
@@ -37,7 +37,7 @@ if is_vision_available():
 if is_torch_available():
     import torch
 
-    from ..models.auto.modeling_auto import MODEL_FOR_DOCUMENT_QUESTION_ANSWERING_MAPPING
+    from ..models.auto.modeling_auto import MODEL_FOR_DOCUMENT_QUESTION_ANSWERING_MAPPING_NAMES
 
 TESSERACT_LOADED = False
 if is_pytesseract_available():
@@ -98,7 +98,7 @@ class ModelType(ExplicitEnum):
     VisionEncoderDecoder = "vision_encoder_decoder"
 
 
-@add_end_docstrings(PIPELINE_INIT_ARGS)
+@add_end_docstrings(build_pipeline_init_args(has_image_processor=True, has_tokenizer=True))
 class DocumentQuestionAnsweringPipeline(ChunkPipeline):
     # TODO: Update task_summary docs to include an example with document QA and then update the first sentence
     """
@@ -142,7 +142,7 @@ class DocumentQuestionAnsweringPipeline(ChunkPipeline):
             if self.model.config.encoder.model_type != "donut-swin":
                 raise ValueError("Currently, the only supported VisionEncoderDecoder model is Donut")
         else:
-            self.check_model_type(MODEL_FOR_DOCUMENT_QUESTION_ANSWERING_MAPPING)
+            self.check_model_type(MODEL_FOR_DOCUMENT_QUESTION_ANSWERING_MAPPING_NAMES)
             if self.model.config.__class__.__name__ == "LayoutLMConfig":
                 self.model_type = ModelType.LayoutLM
             else:
@@ -159,6 +159,7 @@ class DocumentQuestionAnsweringPipeline(ChunkPipeline):
         max_seq_len=None,
         top_k=None,
         handle_impossible_answer=None,
+        timeout=None,
         **kwargs,
     ):
         preprocess_params, postprocess_params = {}, {}
@@ -174,6 +175,8 @@ class DocumentQuestionAnsweringPipeline(ChunkPipeline):
             preprocess_params["lang"] = lang
         if tesseract_config is not None:
             preprocess_params["tesseract_config"] = tesseract_config
+        if timeout is not None:
+            preprocess_params["timeout"] = timeout
 
         if top_k is not None:
             if top_k < 1:
@@ -244,6 +247,9 @@ class DocumentQuestionAnsweringPipeline(ChunkPipeline):
                 Language to use while running OCR. Defaults to english.
             tesseract_config (`str`, *optional*):
                 Additional flags to pass to tesseract while running OCR.
+            timeout (`float`, *optional*, defaults to None):
+                The maximum time in seconds to wait for fetching images from the web. If None, no timeout is set and
+                the call may block forever.
 
         Return:
             A `dict` or a list of `dict`: Each result comes as a dictionary with the following keys:
@@ -273,6 +279,7 @@ class DocumentQuestionAnsweringPipeline(ChunkPipeline):
         word_boxes: Tuple[str, List[float]] = None,
         lang=None,
         tesseract_config="",
+        timeout=None,
     ):
         # NOTE: This code mirrors the code in question answering and will be implemented in a follow up PR
         # to support documents with enough tokens that overflow the model's window
@@ -285,9 +292,12 @@ class DocumentQuestionAnsweringPipeline(ChunkPipeline):
         image = None
         image_features = {}
         if input.get("image", None) is not None:
-            image = load_image(input["image"])
+            image = load_image(input["image"], timeout=timeout)
             if self.image_processor is not None:
-                image_features.update(self.image_processor(images=image, return_tensors=self.framework))
+                image_inputs = self.image_processor(images=image, return_tensors=self.framework)
+                if self.framework == "pt":
+                    image_inputs = image_inputs.to(self.torch_dtype)
+                image_features.update(image_inputs)
             elif self.feature_extractor is not None:
                 image_features.update(self.feature_extractor(images=image, return_tensors=self.framework))
             elif self.model_type == ModelType.VisionEncoderDecoder:
@@ -368,7 +378,7 @@ class DocumentQuestionAnsweringPipeline(ChunkPipeline):
             # p_mask: mask with 1 for token than cannot be in the answer (0 for token which can be in an answer)
             # We put 0 on the tokens from the context and 1 everywhere else (question and special tokens)
             # This logic mirrors the logic in the question_answering pipeline
-            p_mask = [[tok != 1 for tok in encoding.sequence_ids(span_id)] for span_id in range(num_spans)]
+            p_mask = np.array([[tok != 1 for tok in encoding.sequence_ids(span_id)] for span_id in range(num_spans)])
             for span_idx in range(num_spans):
                 if self.framework == "pt":
                     span_encoding = {k: torch.tensor(v[span_idx : span_idx + 1]) for (k, v) in encoding.items()}
@@ -412,14 +422,14 @@ class DocumentQuestionAnsweringPipeline(ChunkPipeline):
                     "is_last": span_idx == num_spans - 1,
                 }
 
-    def _forward(self, model_inputs):
+    def _forward(self, model_inputs, **generate_kwargs):
         p_mask = model_inputs.pop("p_mask", None)
         word_ids = model_inputs.pop("word_ids", None)
         words = model_inputs.pop("words", None)
         is_last = model_inputs.pop("is_last", False)
 
         if self.model_type == ModelType.VisionEncoderDecoder:
-            model_outputs = self.model.generate(**model_inputs)
+            model_outputs = self.model.generate(**model_inputs, **generate_kwargs)
         else:
             model_outputs = self.model(**model_inputs)
 

@@ -9,7 +9,7 @@ from ..utils import (
     logging,
     requires_backends,
 )
-from .base import PIPELINE_INIT_ARGS, Pipeline
+from .base import Pipeline, build_pipeline_init_args
 
 
 if is_vision_available():
@@ -18,16 +18,18 @@ if is_vision_available():
     from ..image_utils import load_image
 
 if is_torch_available():
-    from ..models.auto.modeling_auto import MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING
+    import torch
+
+    from ..models.auto.modeling_auto import MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING_NAMES
 
 if is_tf_available():
-    from ..models.auto.modeling_tf_auto import TF_MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING
+    from ..models.auto.modeling_tf_auto import TF_MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING_NAMES
     from ..tf_utils import stable_softmax
 
 logger = logging.get_logger(__name__)
 
 
-@add_end_docstrings(PIPELINE_INIT_ARGS)
+@add_end_docstrings(build_pipeline_init_args(has_image_processor=True))
 class ZeroShotImageClassificationPipeline(Pipeline):
     """
     Zero shot image classification pipeline using `CLIPModel`. This pipeline predicts the class of an image when you
@@ -38,7 +40,7 @@ class ZeroShotImageClassificationPipeline(Pipeline):
     ```python
     >>> from transformers import pipeline
 
-    >>> classifier = pipeline(model="openai/clip-vit-large-patch14")
+    >>> classifier = pipeline(model="google/siglip-so400m-patch14-384")
     >>> classifier(
     ...     "https://huggingface.co/datasets/Narsil/image_dummy/raw/main/parrots.png",
     ...     candidate_labels=["animals", "humans", "landscape"],
@@ -66,9 +68,9 @@ class ZeroShotImageClassificationPipeline(Pipeline):
 
         requires_backends(self, "vision")
         self.check_model_type(
-            TF_MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING
+            TF_MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING_NAMES
             if self.framework == "tf"
-            else MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING
+            else MODEL_FOR_ZERO_SHOT_IMAGE_CLASSIFICATION_MAPPING_NAMES
         )
 
     def __call__(self, images: Union[str, List[str], "Image", List["Image"]], **kwargs):
@@ -91,6 +93,10 @@ class ZeroShotImageClassificationPipeline(Pipeline):
                 replacing the placeholder with the candidate_labels. Then likelihood is estimated by using
                 logits_per_image
 
+            timeout (`float`, *optional*, defaults to None):
+                The maximum time in seconds to wait for fetching images from the web. If None, no timeout is set and
+                the call may block forever.
+
         Return:
             A list of dictionaries containing result, one dictionary per proposed label. The dictionaries contain the
             following keys:
@@ -104,17 +110,22 @@ class ZeroShotImageClassificationPipeline(Pipeline):
         preprocess_params = {}
         if "candidate_labels" in kwargs:
             preprocess_params["candidate_labels"] = kwargs["candidate_labels"]
+        if "timeout" in kwargs:
+            preprocess_params["timeout"] = kwargs["timeout"]
         if "hypothesis_template" in kwargs:
             preprocess_params["hypothesis_template"] = kwargs["hypothesis_template"]
 
         return preprocess_params, {}, {}
 
-    def preprocess(self, image, candidate_labels=None, hypothesis_template="This is a photo of {}."):
-        image = load_image(image)
+    def preprocess(self, image, candidate_labels=None, hypothesis_template="This is a photo of {}.", timeout=None):
+        image = load_image(image, timeout=timeout)
         inputs = self.image_processor(images=[image], return_tensors=self.framework)
+        if self.framework == "pt":
+            inputs = inputs.to(self.torch_dtype)
         inputs["candidate_labels"] = candidate_labels
         sequences = [hypothesis_template.format(x) for x in candidate_labels]
-        text_inputs = self.tokenizer(sequences, return_tensors=self.framework, padding=True)
+        padding = "max_length" if self.model.config.model_type == "siglip" else True
+        text_inputs = self.tokenizer(sequences, return_tensors=self.framework, padding=padding)
         inputs["text_inputs"] = [text_inputs]
         return inputs
 
@@ -138,9 +149,16 @@ class ZeroShotImageClassificationPipeline(Pipeline):
     def postprocess(self, model_outputs):
         candidate_labels = model_outputs.pop("candidate_labels")
         logits = model_outputs["logits"][0]
-        if self.framework == "pt":
+        if self.framework == "pt" and self.model.config.model_type == "siglip":
+            probs = torch.sigmoid(logits).squeeze(-1)
+            scores = probs.tolist()
+            if not isinstance(scores, list):
+                scores = [scores]
+        elif self.framework == "pt":
             probs = logits.softmax(dim=-1).squeeze(-1)
             scores = probs.tolist()
+            if not isinstance(scores, list):
+                scores = [scores]
         elif self.framework == "tf":
             probs = stable_softmax(logits, axis=-1)
             scores = probs.numpy().tolist()

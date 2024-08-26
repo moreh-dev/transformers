@@ -474,27 +474,6 @@ class TFGenerationMixin:
             "A model class needs to define a `prepare_inputs_for_generation` method in order to use `generate`."
         )
 
-    def adjust_logits_during_generation(
-        self, logits, cur_len, max_length, forced_bos_token_id, forced_eos_token_id, **kwargs
-    ):
-        """
-        Implement in subclasses of [`PreTrainedModel`] for custom behavior to adjust the logits in the generate method.
-        """
-        vocab_size = getattr(self.config, "vocab_size", None)
-        if vocab_size is None and self.config.is_encoder_decoder:
-            decoder_config = getattr(self.config, "decoder", None)
-            if decoder_config is not None:
-                vocab_size = getattr(self.config.decoder, "vocab_size", None)
-
-        if cur_len == 1 and forced_bos_token_id is not None:
-            vocab_range = tf.constant(range(vocab_size))
-            return tf.where(vocab_range != forced_bos_token_id, -1e8, logits)
-        elif cur_len == max_length - 1 and forced_eos_token_id is not None:
-            vocab_range = tf.constant(range(vocab_size))
-            return tf.where(vocab_range != forced_eos_token_id, -1e8, logits)
-        else:
-            return logits
-
     def compute_transition_scores(
         self,
         sequences: tf.Tensor,
@@ -532,8 +511,8 @@ class TFGenerationMixin:
         >>> from transformers import GPT2Tokenizer, TFAutoModelForCausalLM
         >>> import numpy as np
 
-        >>> tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-        >>> model = TFAutoModelForCausalLM.from_pretrained("gpt2")
+        >>> tokenizer = GPT2Tokenizer.from_pretrained("openai-community/gpt2")
+        >>> model = TFAutoModelForCausalLM.from_pretrained("openai-community/gpt2")
         >>> tokenizer.pad_token_id = tokenizer.eos_token_id
         >>> inputs = tokenizer(["Today is"], return_tensors="tf")
 
@@ -549,9 +528,9 @@ class TFGenerationMixin:
         >>> for tok, score in zip(generated_tokens[0], transition_scores[0]):
         ...     # | token | token string | logits | probability
         ...     print(f"| {tok:5d} | {tokenizer.decode(tok):8s} | {score.numpy():.3f} | {np.exp(score.numpy()):.2%}")
-        |   262 |  the     | -1.413 | 24.33%
+        |   262 |  the     | -1.414 | 24.33%
         |  1110 |  day     | -2.609 | 7.36%
-        |   618 |  when    | -2.009 | 13.41%
+        |   618 |  when    | -2.010 | 13.40%
         |   356 |  we      | -1.859 | 15.58%
         |   460 |  can     | -2.508 | 8.14%
 
@@ -570,7 +549,7 @@ class TFGenerationMixin:
         >>> # If you sum the generated tokens' scores and apply the length penalty, you'll get the sequence scores.
         >>> # Tip: recomputing the scores is only guaranteed to match with `normalize_logits=False`. Depending on the
         >>> # use case, you might want to recompute it with `normalize_logits=True`.
-        >>> output_length = input_length + np.sum(transition_scores.numpy() < 0, axis=1)
+        >>> output_length = np.sum(transition_scores.numpy() < 0, axis=1)
         >>> length_penalty = model.generation_config.length_penalty
         >>> reconstructed_scores = np.sum(transition_scores, axis=1) / (output_length**length_penalty)
         >>> print(np.allclose(outputs.sequences_scores, reconstructed_scores))
@@ -705,7 +684,7 @@ class TFGenerationMixin:
             seed (`List[int]`, *optional*):
                 Random seed to control sampling, containing two integers, used when `do_sample` is `True`. See the
                 `seed` argument from stateless functions in `tf.random`.
-            kwargs:
+            kwargs (`Dict[str, Any]`, *optional*):
                 Ad hoc parametrization of `generate_config` and/or additional model-specific kwargs that will be
                 forwarded to the `forward` function of the model. If the model is an encoder-decoder model, encoder
                 specific kwargs should not be prefixed and decoder specific kwargs should be prefixed with *decoder_*.
@@ -737,23 +716,26 @@ class TFGenerationMixin:
 
         # priority: `generation_config` argument > `model.generation_config` (the default generation config)
         if generation_config is None:
-            # legacy: users may modify the model configuration to control generation -- update the generation config
-            # model attribute accordingly, if it was created from the model config
-            if self.generation_config._from_model_config:
+            # legacy: users may modify the model configuration to control generation. To trigger this legacy behavior,
+            # two conditions must be met
+            # 1) the generation config must have been created from the model config (`_from_model_config` field);
+            # 2) the generation config must have seen no modification since its creation (the hash is the same).
+            if self.generation_config._from_model_config and self.generation_config._original_object_hash == hash(
+                self.generation_config
+            ):
                 new_generation_config = GenerationConfig.from_model_config(self.config)
                 if new_generation_config != self.generation_config:
                     warnings.warn(
                         "You have modified the pretrained model configuration to control generation. This is a"
                         " deprecated strategy to control generation and will be removed soon, in a future version."
-                        " Please use a generation configuration file (see"
-                        " https://huggingface.co/docs/transformers/main_classes/text_generation)"
+                        " Please use and modify the model generation configuration (see"
+                        " https://huggingface.co/docs/transformers/generation_strategies#default-text-generation-configuration )"
                     )
                     self.generation_config = new_generation_config
             generation_config = self.generation_config
 
         generation_config = copy.deepcopy(generation_config)
         model_kwargs = generation_config.update(**kwargs)  # All unused kwargs must be model kwargs
-        generation_config.validate()
         self._validate_model_kwargs(model_kwargs.copy())
 
         # 2. Cast input dtypes to tf.int32 unless they're floats (which happens for some image models)
@@ -850,15 +832,15 @@ class TFGenerationMixin:
         # 7. Prepare `max_length` depending on other stopping criteria.
         input_ids_seq_length = shape_list(input_ids)[-1]
         has_default_max_length = kwargs.get("max_length") is None and generation_config.max_length is not None
-        if has_default_max_length and generation_config.max_new_tokens is None:
+        if has_default_max_length and generation_config.max_new_tokens is None and generation_config.max_length == 20:
+            # 20 is the default max_length of the generation config
             warnings.warn(
-                f"Using `max_length`'s default ({generation_config.max_length}) to control the generation length. "
-                "This behaviour is deprecated and will be removed from the config in v5 of Transformers -- we"
-                " recommend using `max_new_tokens` to control the maximum length of the generation.",
+                f"Using the model-agnostic default `max_length` (={generation_config.max_length}) "
+                "to control the generation length.  recommend setting `max_new_tokens` to control the maximum length of the generation.",
                 UserWarning,
             )
         elif generation_config.max_new_tokens is not None:
-            if not has_default_max_length:
+            if not has_default_max_length and generation_config.max_length is not None:
                 logger.warning(
                     f"Both `max_new_tokens` (={generation_config.max_new_tokens}) and `max_length`(="
                     f"{generation_config.max_length}) seem to have been set. `max_new_tokens` will take precedence. "
@@ -1215,7 +1197,7 @@ class TFGenerationMixin:
         inputs_kwarg = model_kwargs.pop(input_name, None)
         if inputs_kwarg is not None and inputs is not None:
             raise ValueError(
-                f"`inputs`: {inputs}` were passed alongside {input_name} which is not allowed."
+                f"`inputs`: {inputs}` were passed alongside {input_name} which is not allowed. "
                 f"Make sure to either pass {inputs} or {input_name}=..."
             )
         elif inputs_kwarg is not None:
@@ -1447,14 +1429,22 @@ class TFGenerationMixin:
         # instantiate warpers list
         warpers = TFLogitsProcessorList()
 
-        # the following idea is largely copied from this PR: https://github.com/huggingface/transformers/pull/5420/files
-        # all samplers can be found in `generation_utils_samplers.py`
+        # In beam methods, we need to keep at least one non-eos token to explore continuations that might have a
+        # better score (i.e. keep len(generation_config.eos_token_id) + 1)
+        if generation_config.num_beams > 1:
+            if isinstance(generation_config.eos_token_id, list):
+                min_tokens_to_keep = len(generation_config.eos_token_id) + 1
+            else:
+                min_tokens_to_keep = 2
+        else:
+            min_tokens_to_keep = 1
+
         if generation_config.temperature is not None and generation_config.temperature != 1.0:
             warpers.append(TFTemperatureLogitsWarper(generation_config.temperature))
         if generation_config.top_k is not None and generation_config.top_k != 0:
-            warpers.append(TFTopKLogitsWarper(top_k=generation_config.top_k, min_tokens_to_keep=1))
+            warpers.append(TFTopKLogitsWarper(top_k=generation_config.top_k, min_tokens_to_keep=min_tokens_to_keep))
         if generation_config.top_p is not None and generation_config.top_p < 1.0:
-            warpers.append(TFTopPLogitsWarper(top_p=generation_config.top_p, min_tokens_to_keep=1))
+            warpers.append(TFTopPLogitsWarper(top_p=generation_config.top_p, min_tokens_to_keep=min_tokens_to_keep))
         return warpers
 
     def _get_logits_processor(
@@ -1592,8 +1582,8 @@ class TFGenerationMixin:
         ...     TFMinLengthLogitsProcessor,
         ... )
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2")
-        >>> model = TFAutoModelForCausalLM.from_pretrained("gpt2")
+        >>> tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        >>> model = TFAutoModelForCausalLM.from_pretrained("openai-community/gpt2")
 
         >>> # set pad_token_id to eos_token_id because GPT2 does not have a PAD token
         >>> model.generation_config.pad_token_id = model.generation_config.eos_token_id
@@ -1638,7 +1628,7 @@ class TFGenerationMixin:
         # TODO (Joao): fix cache format or find programatic way to detect cache index
         # GPT2 and other models has a slightly different cache structure, with a different batch axis
         model_name = str(self.decoder) if "EncoderDecoder" in str(self) else str(self)
-        cache_batch_axis = 1 if any([model_prefix in model_name for model_prefix in ("TFGPT2", "TFCTRL")]) else 0
+        cache_batch_axis = 1 if any(model_prefix in model_name for model_prefix in ("TFGPT2", "TFCTRL")) else 0
         # some models, like XLNet, need more than the last token in the presence of past_key_values
         needs_full_input = "use_mems" in set(inspect.signature(self.prepare_inputs_for_generation).parameters.keys())
 
@@ -1866,8 +1856,8 @@ class TFGenerationMixin:
         ...     TFTemperatureLogitsWarper,
         ... )
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("gpt2")
-        >>> model = TFAutoModelForCausalLM.from_pretrained("gpt2")
+        >>> tokenizer = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        >>> model = TFAutoModelForCausalLM.from_pretrained("openai-community/gpt2")
 
         >>> # set pad_token_id to eos_token_id because GPT2 does not have a EOS token
         >>> model.generation_config.pad_token_id = model.generation_config.eos_token_id
@@ -1922,7 +1912,7 @@ class TFGenerationMixin:
         # TODO (Joao): fix cache format or find programatic way to detect cache index
         # GPT2 and other models has a slightly different cache structure, with a different batch axis
         model_name = str(self.decoder) if "EncoderDecoder" in str(self) else str(self)
-        cache_batch_axis = 1 if any([model_prefix in model_name for model_prefix in ("TFGPT2", "TFCTRL")]) else 0
+        cache_batch_axis = 1 if any(model_prefix in model_name for model_prefix in ("TFGPT2", "TFCTRL")) else 0
         # some models, like XLNet, need more than the last token in the presence of past_key_values
         needs_full_input = "use_mems" in set(inspect.signature(self.prepare_inputs_for_generation).parameters.keys())
 
@@ -2189,8 +2179,8 @@ class TFGenerationMixin:
         ... )
         >>> import tensorflow as tf
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("t5-base")
-        >>> model = TFAutoModelForSeq2SeqLM.from_pretrained("t5-base")
+        >>> tokenizer = AutoTokenizer.from_pretrained("google-t5/t5-base")
+        >>> model = TFAutoModelForSeq2SeqLM.from_pretrained("google-t5/t5-base")
 
         >>> encoder_input_str = "translate English to German: How old are you?"
         >>> encoder_input_ids = tokenizer(encoder_input_str, return_tensors="tf").input_ids
@@ -2265,7 +2255,7 @@ class TFGenerationMixin:
         # TODO (Joao): fix cache format or find programatic way to detect cache index
         # GPT2 and other models has a slightly different cache structure, with a different batch axis
         model_name = str(self.decoder) if "EncoderDecoder" in str(self) else str(self)
-        cache_batch_axis = 1 if any([model_prefix in model_name for model_prefix in ("TFGPT2", "TFCTRL")]) else 0
+        cache_batch_axis = 1 if any(model_prefix in model_name for model_prefix in ("TFGPT2", "TFCTRL")) else 0
         # some models, like XLNet, need more than the last token in the presence of past_key_values
         needs_full_input = "use_mems" in set(inspect.signature(self.prepare_inputs_for_generation).parameters.keys())
 
@@ -2277,6 +2267,8 @@ class TFGenerationMixin:
 
         # 3. init tensors to use for "xla-compileable" generate function
         batch_size, num_beams, cur_len = shape_list(input_ids)
+        # store the prompt length of decoder
+        decoder_prompt_len = cur_len
 
         # per batch, beam-item holding current token in loop, pre-populated with `pad_token_id`
         input_ids_padding = tf.ones((batch_size, num_beams, max_length - cur_len), dtype=tf.int32) * (
@@ -2295,8 +2287,8 @@ class TFGenerationMixin:
         scores = tf.ones((batch_size, num_beams)) * -1.0e9
 
         # per batch beam indices
-        running_beam_indices = tf.ones((batch_size, num_beams, max_length), dtype=tf.int32) * -1
-        beam_indices = tf.ones((batch_size, num_beams, max_length), dtype=tf.int32) * -1
+        running_beam_indices = tf.ones((batch_size, num_beams, max_length - decoder_prompt_len), dtype=tf.int32) * -1
+        beam_indices = tf.ones((batch_size, num_beams, max_length - decoder_prompt_len), dtype=tf.int32) * -1
 
         # flatten beam dim
         if "encoder_outputs" in model_kwargs:
@@ -2317,6 +2309,7 @@ class TFGenerationMixin:
             scores,
             beam_indices,
             is_sent_finished,
+            decoder_prompt_len,
             model_kwargs,
         ):
             """
@@ -2327,15 +2320,17 @@ class TFGenerationMixin:
             not_max_length_yet = cur_len < max_length
 
             # 2. can the new beams still improve?
-            # early_stopping == False -> apply heuristic = always get the best score from `cur_len`. See the discussion
+            # early_stopping == False -> apply heuristic = always get the best score from `cur_len - decoder_prompt_len`. See the discussion
             # below for more details.
             # https://github.com/huggingface/transformers/pull/20901#issuecomment-1369845565
             # early_stopping == "never" -> compute the best score from max_length or cur_len, depending on the sign of
             #   length_penalty. Positive length_penalty favors longer sequences, thus we use max_length there.
             if early_stopping == "never" and length_penalty > 0.0:
-                best_running_score = running_scores[:, :1] / (max_length**length_penalty)
+                best_running_score = running_scores[:, :1] / ((max_length - decoder_prompt_len) ** length_penalty)
             else:
-                best_running_score = running_scores[:, :1] / (tf.cast(cur_len, dtype=tf.float32) ** length_penalty)
+                best_running_score = running_scores[:, :1] / (
+                    tf.cast(cur_len - decoder_prompt_len, dtype=tf.float32) ** length_penalty
+                )
             worst_finished_score = tf.where(
                 is_sent_finished, tf.math.reduce_min(scores, axis=1, keepdims=True), -1.0e9
             )
@@ -2355,6 +2350,7 @@ class TFGenerationMixin:
             scores,
             beam_indices,
             is_sent_finished,
+            decoder_prompt_len,
             model_kwargs,
         ):
             """
@@ -2383,14 +2379,11 @@ class TFGenerationMixin:
             log_probs = tf.nn.log_softmax(logits)
             log_probs = logits_processor(flatten_beam_dim(running_sequences), flatten_beam_dim(log_probs), cur_len)
             log_probs = unflatten_beam_dim(log_probs, num_beams)
-            log_probs_processed = log_probs
-            log_probs = log_probs + tf.expand_dims(running_scores, axis=2)
             if do_sample:
-                # Note: logits warpers are intentionally applied after adding running beam scores. On some logits
-                # warpers (like top_p) this is indiferent, but on others (like temperature) it is not. For reference,
-                # see https://github.com/huggingface/transformers/pull/5420#discussion_r449779867
                 log_probs = logits_warper(flatten_beam_dim(running_sequences), flatten_beam_dim(log_probs), cur_len)
                 log_probs = unflatten_beam_dim(log_probs, num_beams)
+            log_probs_processed = log_probs
+            log_probs = log_probs + tf.expand_dims(running_scores, axis=2)
             vocab_size = log_probs.shape[2]
             log_probs = tf.reshape(log_probs, (batch_size, num_beams * vocab_size))
 
@@ -2399,7 +2392,9 @@ class TFGenerationMixin:
                 if output_scores:
                     all_scores.append(
                         logits_warper(
-                            flatten_beam_dim(running_sequences), flatten_beam_dim(log_probs_processed), cur_len
+                            flatten_beam_dim(running_sequences),
+                            flatten_beam_dim(log_probs_processed),
+                            cur_len,
                         )
                     )
                 if output_attentions and self.config.is_encoder_decoder:
@@ -2451,6 +2446,14 @@ class TFGenerationMixin:
             batch_modified_indices = topk_current_beam_indices + tf.broadcast_to(
                 tf.expand_dims(tf.range(batch_size) * num_beams, axis=1), topk_current_beam_indices.shape
             )
+            update_indices = tf.stack(
+                [
+                    indices_batch,
+                    indices_beam,
+                    tf.broadcast_to(cur_len - decoder_prompt_len, [batch_size * beams_to_keep]),
+                ],
+                axis=-1,
+            )
             topk_beam_indices = tf.tensor_scatter_nd_update(
                 tensor=topk_running_beam_indices,
                 indices=update_indices,
@@ -2467,7 +2470,8 @@ class TFGenerationMixin:
                 eos_in_next_token = tf.math.reduce_any(
                     tf.equal(
                         tf.broadcast_to(
-                            topk_sequences[:, :, cur_len], [len(eos_token_id)] + topk_sequences[:, :, cur_len].shape
+                            topk_sequences[:, :, cur_len],
+                            [len(eos_token_id)] + topk_sequences[:, :, cur_len].shape,
                         ),
                         tf.expand_dims(tf.expand_dims(eos_token_id, -1), -1),
                     ),
@@ -2495,7 +2499,9 @@ class TFGenerationMixin:
             # - add length penalty
             # - make sure no scores can be added anymore if beam is full
             # - make sure still running sequences cannot be chosen as finalized beam
-            topk_log_probs = topk_log_probs / (tf.cast(cur_len, dtype=tf.float32) ** length_penalty)
+            topk_log_probs = topk_log_probs / (
+                tf.cast(cur_len + 1 - decoder_prompt_len, dtype=tf.float32) ** length_penalty
+            )
             beams_in_batch_are_full = tf.broadcast_to(
                 tf.math.reduce_all(is_sent_finished, axis=-1, keepdims=True), shape_list(did_topk_just_finished)
             ) & (early_stopping is True)
@@ -2558,6 +2564,7 @@ class TFGenerationMixin:
                 next_scores,
                 next_beam_indices,
                 next_is_sent_finished,
+                decoder_prompt_len,
                 next_model_kwargs,
             )
 
@@ -2572,6 +2579,7 @@ class TFGenerationMixin:
             scores,
             beam_indices,
             is_sent_finished,
+            decoder_prompt_len,
             model_kwargs,
         ) = beam_search_body_fn(
             cur_len,
@@ -2582,6 +2590,7 @@ class TFGenerationMixin:
             scores,
             beam_indices,
             is_sent_finished,
+            decoder_prompt_len,
             model_kwargs,
         )
 
@@ -2597,6 +2606,7 @@ class TFGenerationMixin:
             scores,
             beam_indices,
             is_sent_finished,
+            decoder_prompt_len,
             _,
         ) = tf.while_loop(
             beam_search_cond_fn,
@@ -2610,6 +2620,7 @@ class TFGenerationMixin:
                 scores,
                 beam_indices,
                 is_sent_finished,
+                decoder_prompt_len,
                 model_kwargs,
             ),
             maximum_iterations=maximum_iterations,
@@ -2623,7 +2634,7 @@ class TFGenerationMixin:
         beam_indices = tf.where(none_finished[:, None, None], beam_indices, running_beam_indices)
 
         # Apply the length penalty so that running scores match the finalized scores if they are used
-        running_scores = running_scores / (tf.cast(cur_len, dtype=tf.float32) ** length_penalty)
+        running_scores = running_scores / (tf.cast(cur_len - decoder_prompt_len, dtype=tf.float32) ** length_penalty)
         scores = tf.where(none_finished[:, None], scores, running_scores)
 
         # Take best beams for each batch (the score is sorted in descending order)
@@ -2634,7 +2645,7 @@ class TFGenerationMixin:
         if not use_xla:
             # Cut for backward compatibility
             sequences = sequences[:, :cur_len]
-            beam_indices = beam_indices[:, :cur_len]
+            beam_indices = beam_indices[:, : cur_len - decoder_prompt_len]
 
         if return_dict_in_generate:
             if self.config.is_encoder_decoder:
@@ -2779,7 +2790,7 @@ class TFGenerationMixin:
         # TODO (Joao): fix cache format or find programatic way to detect cache index
         # GPT2 and other models has a slightly different cache structure, with a different batch axis
         model_name = str(self.decoder) if "EncoderDecoder" in str(self) else str(self)
-        cache_batch_axis = 1 if any([model_prefix in model_name for model_prefix in ("TFGPT2", "TFCTRL")]) else 0
+        cache_batch_axis = 1 if any(model_prefix in model_name for model_prefix in ("TFGPT2", "TFCTRL")) else 0
 
         # 2. init `attentions`, `hidden_states`, and `scores` tuples
         scores = [] if (return_dict_in_generate and output_scores) else None
@@ -3075,61 +3086,6 @@ class TFGenerationMixin:
                 )
         else:
             return generated
-
-
-def tf_top_k_top_p_filtering(logits, top_k=0, top_p=1.0, filter_value=-float("Inf"), min_tokens_to_keep=1):
-    """
-    Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
-
-    Args:
-        logits: logits distribution shape (batch size, vocabulary size)
-        top_k (`int`, *optional*, defaults to 0):
-            If > 0, only keep the top k tokens with highest probability (top-k filtering)
-        top_p (`float`, *optional*, defaults to 1.0):
-            If < 1.0, only keep the top tokens with cumulative probability >= top_p (nucleus filtering). Nucleus
-            filtering is described in Holtzman et al. (http://arxiv.org/abs/1904.09751)
-        min_tokens_to_keep (`int`, *optional*, defaults to 1):
-            Minimumber of tokens we keep per batch example in the output.
-
-    From: https://gist.github.com/thomwolf/1a5a29f6962089e871b94cbd09daf317
-    """
-    logits_shape = shape_list(logits)
-
-    if top_k > 0:
-        top_k = min(max(top_k, min_tokens_to_keep), logits_shape[-1])  # Safety check
-        # Remove all tokens with a probability less than the last token of the top-k
-        indices_to_remove = logits < tf.math.top_k(logits, k=top_k)[0][..., -1, None]
-        logits = tf.where(indices_to_remove, filter_value, logits)
-    if top_p < 1.0:
-        sorted_indices = tf.argsort(logits, direction="DESCENDING")
-        sorted_logits = tf.gather(
-            logits, sorted_indices, axis=-1, batch_dims=1
-        )  # expects logits to be of dim (batch_size, vocab_size)
-
-        cumulative_probs = tf.math.cumsum(stable_softmax(sorted_logits, axis=-1), axis=-1)
-
-        # Remove tokens with cumulative probability above the threshold (token with 0 are kept)
-        sorted_indices_to_remove = cumulative_probs > top_p
-
-        if min_tokens_to_keep > 1:
-            # Keep at least min_tokens_to_keep (set to min_tokens_to_keep-1 because we add the first one below)
-            sorted_indices_to_remove = tf.concat(
-                [
-                    tf.zeros_like(sorted_indices_to_remove[:, :min_tokens_to_keep]),
-                    sorted_indices_to_remove[:, min_tokens_to_keep:],
-                ],
-                -1,
-            )
-
-        # Shift the indices to the right to keep also the first token above the threshold
-        sorted_indices_to_remove = tf.concat(
-            [tf.zeros_like(sorted_indices_to_remove[:, :1]), sorted_indices_to_remove[:, :-1]],
-            -1,
-        )
-        # scatter sorted tensors to original indexing
-        indices_to_remove = scatter_values_on_batch_indices(sorted_indices_to_remove, sorted_indices)
-        logits = tf.where(indices_to_remove, filter_value, logits)
-    return logits
 
 
 def scatter_values_on_batch_indices(values, batch_indices):

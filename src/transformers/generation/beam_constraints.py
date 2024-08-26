@@ -156,7 +156,7 @@ class PhrasalConstraint(Constraint):
 
     def does_advance(self, token_id: int):
         if not isinstance(token_id, int):
-            raise ValueError(f"`token_id` has to be an `int`, but is {token_id} of type {type(token_id)}")
+            raise TypeError(f"`token_id` has to be an `int`, but is {token_id} of type {type(token_id)}")
 
         if self.completed:
             return False
@@ -165,7 +165,7 @@ class PhrasalConstraint(Constraint):
 
     def update(self, token_id: int):
         if not isinstance(token_id, int):
-            raise ValueError(f"`token_id` has to be an `int`, but is {token_id} of type {type(token_id)}")
+            raise TypeError(f"`token_id` has to be an `int`, but is {token_id} of type {type(token_id)}")
 
         stepped = False
         completed = False
@@ -263,8 +263,9 @@ class DisjunctiveConstraint(Constraint):
     A special [`Constraint`] that is fulfilled by fulfilling just one of several constraints.
 
     Args:
-        nested_token_ids (`List[List[int]]`): a list of words, where each word is a list of ids. This constraint
-        is fulfilled by generating just one from the list of words.
+        nested_token_ids (`List[List[int]]`):
+            A list of words, where each word is a list of ids. This constraint is fulfilled by generating just one from
+            the list of words.
     """
 
     def __init__(self, nested_token_ids: List[List[int]]):
@@ -299,7 +300,7 @@ class DisjunctiveConstraint(Constraint):
 
     def does_advance(self, token_id: int):
         if not isinstance(token_id, int):
-            raise ValueError(f"`token_id` is supposed to be type `int`, but is {token_id} of type {type(token_id)}")
+            raise TypeError(f"`token_id` is supposed to be type `int`, but is {token_id} of type {type(token_id)}")
 
         next_tokens = self.trie.next_tokens(self.current_seq)
 
@@ -307,7 +308,7 @@ class DisjunctiveConstraint(Constraint):
 
     def update(self, token_id: int):
         if not isinstance(token_id, int):
-            raise ValueError(f"`token_id` is supposed to be type `int`, but is {token_id} of type {type(token_id)}")
+            raise TypeError(f"`token_id` is supposed to be type `int`, but is {token_id} of type {type(token_id)}")
 
         stepped = False
         completed = False
@@ -431,7 +432,7 @@ class ConstraintListState:
 
     def add(self, token_id: int):
         if not isinstance(token_id, int):
-            raise ValueError(f"`token_id` should be an `int`, but is `{token_id}`.")
+            raise TypeError(f"`token_id` should be an `int`, but is `{token_id}`.")
 
         complete, stepped = False, False
 

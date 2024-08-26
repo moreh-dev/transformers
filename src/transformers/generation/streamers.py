@@ -58,8 +58,8 @@ class TextStreamer(BaseStreamer):
         ```python
         >>> from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
-        >>> tok = AutoTokenizer.from_pretrained("gpt2")
-        >>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+        >>> tok = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        >>> model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
         >>> inputs = tok(["An increasing sequence: one,"], return_tensors="pt")
         >>> streamer = TextStreamer(tok)
 
@@ -81,7 +81,7 @@ class TextStreamer(BaseStreamer):
 
     def put(self, value):
         """
-        Recives tokens, decodes them, and prints them to stdout as soon as they form entire words.
+        Receives tokens, decodes them, and prints them to stdout as soon as they form entire words.
         """
         if len(value.shape) > 1 and value.shape[0] > 1:
             raise ValueError("TextStreamer only supports batch size 1")
@@ -185,8 +185,8 @@ class TextIteratorStreamer(TextStreamer):
         >>> from transformers import AutoModelForCausalLM, AutoTokenizer, TextIteratorStreamer
         >>> from threading import Thread
 
-        >>> tok = AutoTokenizer.from_pretrained("gpt2")
-        >>> model = AutoModelForCausalLM.from_pretrained("gpt2")
+        >>> tok = AutoTokenizer.from_pretrained("openai-community/gpt2")
+        >>> model = AutoModelForCausalLM.from_pretrained("openai-community/gpt2")
         >>> inputs = tok(["An increasing sequence: one,"], return_tensors="pt")
         >>> streamer = TextIteratorStreamer(tok)
 

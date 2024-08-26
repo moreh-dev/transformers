@@ -167,17 +167,3 @@ tags
 
 # ruff
 .ruff_cache
-
-outputs/
-outputs-no-trainer/
-logs/
-logs-no-trainer/
-OUTPUT_DIR/
-mlruns/
-None/
-test*.py
-test.sh
-.nfs*
-model_*.txt
-model_batchsize.txt
-dummy*

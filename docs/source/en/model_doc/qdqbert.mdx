@@ -12,6 +12,14 @@ specific language governing permissions and limitations under the License.
 
 # QDQBERT
 
+<Tip warning={true}>
+
+This model is in maintenance mode only, we don't accept any new PRs changing its code.
+If you run into any issues running this model, please reinstall the last version that supported this model: v4.40.2.
+You can do so by running the following command: `pip install -U transformers==4.40.2`.
+
+</Tip>
+
 ## Overview
 
 The QDQBERT model can be referenced in [Integer Quantization for Deep Learning Inference: Principles and Empirical
@@ -34,8 +42,12 @@ Tips:
   inputs and weights, (ii) matmul inputs, (iii) residual add inputs, in BERT model.
 
 - QDQBERT requires the dependency of [Pytorch Quantization Toolkit](https://github.com/NVIDIA/TensorRT/tree/master/tools/pytorch-quantization). To install `pip install pytorch-quantization --extra-index-url https://pypi.ngc.nvidia.com`
+<<<<<<< HEAD:docs/source/en/model_doc/qdqbert.mdx
 
 - QDQBERT model can be loaded from any checkpoint of HuggingFace BERT model (for example *bert-base-uncased*), and
+=======
+- QDQBERT model can be loaded from any checkpoint of HuggingFace BERT model (for example *google-bert/bert-base-uncased*), and
+>>>>>>> temp-branch:docs/source/en/model_doc/qdqbert.md
   perform Quantization Aware Training/Post Training Quantization.
 
 - A complete example of using QDQBERT model to perform Quatization Aware Training and Post Training Quantization for

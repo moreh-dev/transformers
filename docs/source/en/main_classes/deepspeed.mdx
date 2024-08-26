@@ -10,10 +10,11 @@ an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express o
 specific language governing permissions and limitations under the License.
 -->
 
-# DeepSpeed Integration
+# DeepSpeed
 
-[DeepSpeed](https://github.com/microsoft/DeepSpeed) implements everything described in the [ZeRO paper](https://arxiv.org/abs/1910.02054). Currently it provides full support for:
+[DeepSpeed](https://github.com/microsoft/DeepSpeed), powered by Zero Redundancy Optimizer (ZeRO), is an optimization library for training and fitting very large models onto a GPU. It is available in several ZeRO stages, where each stage progressively saves more GPU memory by partitioning the optimizer state, gradients, parameters, and enabling offloading to a CPU or NVMe. DeepSpeed is integrated with the [`Trainer`] class and most of the setup is automatically taken care of for you. 
 
+<<<<<<< HEAD:docs/source/en/main_classes/deepspeed.mdx
 1. Optimizer state partitioning (ZeRO stage 1)
 2. Gradient partitioning (ZeRO stage 2)
 3. Parameter partitioning (ZeRO stage 3)
@@ -1703,16 +1704,17 @@ checkpoint_dir = os.path.join(trainer.args.output_dir, "checkpoint-final")
 trainer.deepspeed.save_checkpoint(checkpoint_dir)
 fp32_model = load_state_dict_from_zero_checkpoint(trainer.model, checkpoint_dir)
 ```
+=======
+However, if you want to use DeepSpeed without the [`Trainer`], Transformers provides a [`HfDeepSpeedConfig`] class.
+>>>>>>> temp-branch:docs/source/en/main_classes/deepspeed.md
 
 <Tip>
 
-Note, that once `load_state_dict_from_zero_checkpoint` was run, the `model` will no longer be usable in the
-DeepSpeed context of the same application. i.e. you will need to re-initialize the deepspeed engine, since
-`model.load_state_dict(state_dict)` will remove all the DeepSpeed magic from it. So do this only at the very end
-of the training.
+Learn more about using DeepSpeed with [`Trainer`] in the [DeepSpeed](../deepspeed) guide.
 
 </Tip>
 
+<<<<<<< HEAD:docs/source/en/main_classes/deepspeed.mdx
 Of course, you don't have to use class:*~transformers.Trainer* and you can adjust the examples above to your own
 trainer.
 
@@ -2100,10 +2102,13 @@ engine = deepspeed.initialize(model=model, config_params=ds_config, ...)
 
 Please note that if you're not using the [`Trainer`] integration, you're completely on your own. Basically follow the documentation on the [Deepspeed](https://www.deepspeed.ai/) website. Also you have to configure explicitly the config file - you can't use `"auto"` values and you will have to put real values instead.
 
+=======
+>>>>>>> temp-branch:docs/source/en/main_classes/deepspeed.md
 ## HfDeepSpeedConfig
 
 [[autodoc]] deepspeed.HfDeepSpeedConfig
     - all
+<<<<<<< HEAD:docs/source/en/main_classes/deepspeed.mdx
 
 ### Custom DeepSpeed ZeRO Inference
 
@@ -2310,3 +2315,5 @@ Papers:
 
 Finally, please, remember that, HuggingFace [`Trainer`] only integrates DeepSpeed, therefore if you
 have any problems or questions with regards to DeepSpeed usage, please, file an issue with [DeepSpeed GitHub](https://github.com/microsoft/DeepSpeed/issues).
+=======
+>>>>>>> temp-branch:docs/source/en/main_classes/deepspeed.md

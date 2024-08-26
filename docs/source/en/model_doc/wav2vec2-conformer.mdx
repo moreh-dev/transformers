@@ -20,7 +20,16 @@ The official results of the model can be found in Table 3 and Table 4 of the pap
 
 The Wav2Vec2-Conformer weights were released by the Meta AI team within the [Fairseq library](https://github.com/pytorch/fairseq/blob/main/examples/wav2vec/README.md#pre-trained-models).
 
+<<<<<<< HEAD:docs/source/en/model_doc/wav2vec2-conformer.mdx
 Tips:
+=======
+This model was contributed by [patrickvonplaten](https://huggingface.co/patrickvonplaten).
+The original code can be found [here](https://github.com/pytorch/fairseq/tree/main/examples/wav2vec).
+
+Note: Meta (FAIR) released a new version of [Wav2Vec2-BERT 2.0](https://huggingface.co/docs/transformers/en/model_doc/wav2vec2-bert) - it's pretrained on 4.5M hours of audio. We especially recommend using it for fine-tuning tasks, e.g. as per [this guide](https://huggingface.co/blog/fine-tune-w2v2-bert).
+
+## Usage tips
+>>>>>>> temp-branch:docs/source/en/model_doc/wav2vec2-conformer.md
 
 - Wav2Vec2-Conformer follows the same architecture as Wav2Vec2, but replaces the *Attention*-block with a *Conformer*-block
   as introduced in [Conformer: Convolution-augmented Transformer for Speech Recognition](https://arxiv.org/abs/2005.08100).

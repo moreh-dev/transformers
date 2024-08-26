@@ -12,8 +12,9 @@ specific language governing permissions and limitations under the License.
 
 # Trainer
 
-The [`Trainer`] class provides an API for feature-complete training in PyTorch for most standard use cases. It's used in most of the [example scripts](https://github.com/huggingface/transformers/tree/main/examples).
+The [`Trainer`] class provides an API for feature-complete training in PyTorch, and it supports distributed training on multiple GPUs/TPUs, mixed precision for [NVIDIA GPUs](https://nvidia.github.io/apex/), [AMD GPUs](https://rocm.docs.amd.com/en/latest/rocm.html), and [`torch.amp`](https://pytorch.org/docs/stable/amp.html) for PyTorch. [`Trainer`] goes hand-in-hand with the [`TrainingArguments`] class, which offers a wide range of options to customize how a model is trained. Together, these two classes provide a complete training API.
 
+<<<<<<< HEAD:docs/source/en/main_classes/trainer.mdx
 Before instantiating your [`Trainer`], create a [`TrainingArguments`] to access all the points of customization during training.
 
 The API supports distributed training on multiple GPUs/TPUs, mixed precision through [NVIDIA Apex](https://github.com/NVIDIA/apex) and Native AMP for PyTorch.
@@ -34,19 +35,23 @@ The [`Trainer`] contains the basic training loop which supports the above featur
 - **prediction_step** -- Performs an evaluation/test step.
 - **evaluate** -- Runs an evaluation loop and returns metrics.
 - **predict** -- Returns predictions (with metrics if labels are available) on a test set.
+=======
+[`Seq2SeqTrainer`] and [`Seq2SeqTrainingArguments`] inherit from the [`Trainer`] and [`TrainingArgument`] classes and they're adapted for training models for sequence-to-sequence tasks such as summarization or translation.
+>>>>>>> temp-branch:docs/source/en/main_classes/trainer.md
 
 <Tip warning={true}>
 
 The [`Trainer`] class is optimized for 🤗 Transformers models and can have surprising behaviors
-when you use it on other models. When using it on your own model, make sure:
+when used with other models. When using it with your own model, make sure:
 
-- your model always return tuples or subclasses of [`~utils.ModelOutput`].
+- your model always return tuples or subclasses of [`~utils.ModelOutput`]
 - your model can compute the loss if a `labels` argument is provided and that loss is returned as the first
   element of the tuple (if your model returns tuples)
-- your model can accept multiple label arguments (use the `label_names` in your [`TrainingArguments`] to indicate their name to the [`Trainer`]) but none of them should be named `"label"`.
+- your model can accept multiple label arguments (use `label_names` in [`TrainingArguments`] to indicate their name to the [`Trainer`]) but none of them should be named `"label"`
 
 </Tip>
 
+<<<<<<< HEAD:docs/source/en/main_classes/trainer.mdx
 Here is an example of how to customize [`Trainer`] to use a weighted loss (useful when you have an unbalanced training set):
 
 ```python
@@ -70,6 +75,9 @@ Another way to customize the training loop behavior for the PyTorch [`Trainer`] 
 
 
 ## Trainer
+=======
+## Trainer[[api-reference]]
+>>>>>>> temp-branch:docs/source/en/main_classes/trainer.md
 
 [[autodoc]] Trainer
     - all
@@ -89,6 +97,7 @@ Another way to customize the training loop behavior for the PyTorch [`Trainer`] 
 
 [[autodoc]] Seq2SeqTrainingArguments
     - all
+<<<<<<< HEAD:docs/source/en/main_classes/trainer.mdx
 
 ## Checkpoints
 
@@ -714,3 +723,5 @@ Sections that were moved:
 | <a href="./deepspeed#deepspeed-grad-clip">Gradient Clipping</a><a id="gradient-clipping"></a>
 | <a href="./deepspeed#deepspeed-weight-extraction">Getting The Model Weights Out</a><a id="getting-the-model-weights-out"></a>
 ]
+=======
+>>>>>>> temp-branch:docs/source/en/main_classes/trainer.md

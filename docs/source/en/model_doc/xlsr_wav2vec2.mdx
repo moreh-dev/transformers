@@ -30,7 +30,15 @@ individual models. Analysis shows that the latent discrete speech representation
 increased sharing for related languages. We hope to catalyze research in low-resource speech understanding by releasing
 XLSR-53, a large model pretrained in 53 languages.*
 
+<<<<<<< HEAD:docs/source/en/model_doc/xlsr_wav2vec2.mdx
 Tips:
+=======
+The original code can be found [here](https://github.com/pytorch/fairseq/tree/master/fairseq/models/wav2vec).
+
+Note: Meta (FAIR) released a new version of [Wav2Vec2-BERT 2.0](https://huggingface.co/docs/transformers/en/model_doc/wav2vec2-bert) - it's pretrained on 4.5M hours of audio. We especially recommend using it for fine-tuning tasks, e.g. as per [this guide](https://huggingface.co/blog/fine-tune-w2v2-bert).
+
+## Usage tips
+>>>>>>> temp-branch:docs/source/en/model_doc/xlsr_wav2vec2.md
 
 - XLSR-Wav2Vec2 is a speech model that accepts a float array corresponding to the raw waveform of the speech signal.
 - XLSR-Wav2Vec2 model was trained using connectionist temporal classification (CTC) so the model output has to be

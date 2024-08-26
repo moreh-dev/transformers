@@ -17,20 +17,26 @@ Generic utilities
 
 import inspect
 import tempfile
+import warnings
 from collections import OrderedDict, UserDict
 from collections.abc import MutableMapping
 from contextlib import ExitStack, contextmanager
-from dataclasses import fields
+from dataclasses import fields, is_dataclass
 from enum import Enum
-from typing import Any, ContextManager, List, Tuple
+from functools import partial, wraps
+from typing import Any, ContextManager, Iterable, List, Optional, Tuple
 
 import numpy as np
+from packaging import version
 
-from .import_utils import is_flax_available, is_tf_available, is_torch_available, is_torch_fx_proxy
-
-
-if is_flax_available():
-    import jax.numpy as jnp
+from .import_utils import (
+    get_torch_version,
+    is_flax_available,
+    is_mlx_available,
+    is_tf_available,
+    is_torch_available,
+    is_torch_fx_proxy,
+)
 
 
 class cached_property(property):
@@ -71,31 +77,67 @@ def strtobool(val):
     raise ValueError(f"invalid truth value {val!r}")
 
 
+def infer_framework_from_repr(x):
+    """
+    Tries to guess the framework of an object `x` from its repr (brittle but will help in `is_tensor` to try the
+    frameworks in a smart order, without the need to import the frameworks).
+    """
+    representation = str(type(x))
+    if representation.startswith("<class 'torch."):
+        return "pt"
+    elif representation.startswith("<class 'tensorflow."):
+        return "tf"
+    elif representation.startswith("<class 'jax"):
+        return "jax"
+    elif representation.startswith("<class 'numpy."):
+        return "np"
+    elif representation.startswith("<class 'mlx."):
+        return "mlx"
+
+
+def _get_frameworks_and_test_func(x):
+    """
+    Returns an (ordered since we are in Python 3.7+) dictionary framework to test function, which places the framework
+    we can guess from the repr first, then Numpy, then the others.
+    """
+    framework_to_test = {
+        "pt": is_torch_tensor,
+        "tf": is_tf_tensor,
+        "jax": is_jax_tensor,
+        "np": is_numpy_array,
+        "mlx": is_mlx_array,
+    }
+    preferred_framework = infer_framework_from_repr(x)
+    # We will test this one first, then numpy, then the others.
+    frameworks = [] if preferred_framework is None else [preferred_framework]
+    if preferred_framework != "np":
+        frameworks.append("np")
+    frameworks.extend([f for f in framework_to_test if f not in [preferred_framework, "np"]])
+    return {f: framework_to_test[f] for f in frameworks}
+
+
 def is_tensor(x):
     """
-    Tests if `x` is a `torch.Tensor`, `tf.Tensor`, `jaxlib.xla_extension.DeviceArray` or `np.ndarray`.
+    Tests if `x` is a `torch.Tensor`, `tf.Tensor`, `jaxlib.xla_extension.DeviceArray`, `np.ndarray` or `mlx.array`
+    in the order defined by `infer_framework_from_repr`
     """
+    # This gives us a smart order to test the frameworks with the corresponding tests.
+    framework_to_test_func = _get_frameworks_and_test_func(x)
+    for test_func in framework_to_test_func.values():
+        if test_func(x):
+            return True
+
+    # Tracers
     if is_torch_fx_proxy(x):
         return True
-    if is_torch_available():
-        import torch
-
-        if isinstance(x, torch.Tensor):
-            return True
-    if is_tf_available():
-        import tensorflow as tf
-
-        if isinstance(x, tf.Tensor):
-            return True
 
     if is_flax_available():
-        import jax.numpy as jnp
         from jax.core import Tracer
 
-        if isinstance(x, (jnp.ndarray, Tracer)):
+        if isinstance(x, Tracer):
             return True
 
-    return isinstance(x, np.ndarray)
+    return False
 
 
 def _is_numpy(x):
@@ -172,7 +214,7 @@ def _is_tf_symbolic_tensor(x):
     # the `is_symbolic_tensor` predicate is only available starting with TF 2.14
     if hasattr(tf, "is_symbolic_tensor"):
         return tf.is_symbolic_tensor(x)
-    return type(x) == tf.Tensor
+    return isinstance(x, tf.Tensor)
 
 
 def is_tf_symbolic_tensor(x):
@@ -196,21 +238,44 @@ def is_jax_tensor(x):
     return False if not is_flax_available() else _is_jax(x)
 
 
+def _is_mlx(x):
+    import mlx.core as mx
+
+    return isinstance(x, mx.array)
+
+
+def is_mlx_array(x):
+    """
+    Tests if `x` is a mlx array or not. Safe to call even when mlx is not installed.
+    """
+    return False if not is_mlx_available() else _is_mlx(x)
+
+
 def to_py_obj(obj):
     """
     Convert a TensorFlow tensor, PyTorch tensor, Numpy array or python list to a python list.
     """
+
+    framework_to_py_obj = {
+        "pt": lambda obj: obj.detach().cpu().tolist(),
+        "tf": lambda obj: obj.numpy().tolist(),
+        "jax": lambda obj: np.asarray(obj).tolist(),
+        "np": lambda obj: obj.tolist(),
+    }
+
     if isinstance(obj, (dict, UserDict)):
         return {k: to_py_obj(v) for k, v in obj.items()}
     elif isinstance(obj, (list, tuple)):
         return [to_py_obj(o) for o in obj]
-    elif is_tf_tensor(obj):
-        return obj.numpy().tolist()
-    elif is_torch_tensor(obj):
-        return obj.detach().cpu().tolist()
-    elif is_jax_tensor(obj):
-        return np.asarray(obj).tolist()
-    elif isinstance(obj, (np.ndarray, np.number)):  # tolist also works on 0d np arrays
+
+    # This gives us a smart order to test the frameworks with the corresponding tests.
+    framework_to_test_func = _get_frameworks_and_test_func(obj)
+    for framework, test_func in framework_to_test_func.items():
+        if test_func(obj):
+            return framework_to_py_obj[framework](obj)
+
+    # tolist also works on 0d np arrays
+    if isinstance(obj, np.number):
         return obj.tolist()
     else:
         return obj
@@ -220,18 +285,26 @@ def to_numpy(obj):
     """
     Convert a TensorFlow tensor, PyTorch tensor, Numpy array or python list to a Numpy array.
     """
+
+    framework_to_numpy = {
+        "pt": lambda obj: obj.detach().cpu().numpy(),
+        "tf": lambda obj: obj.numpy(),
+        "jax": lambda obj: np.asarray(obj),
+        "np": lambda obj: obj,
+    }
+
     if isinstance(obj, (dict, UserDict)):
         return {k: to_numpy(v) for k, v in obj.items()}
     elif isinstance(obj, (list, tuple)):
         return np.array(obj)
-    elif is_tf_tensor(obj):
-        return obj.numpy()
-    elif is_torch_tensor(obj):
-        return obj.detach().cpu().numpy()
-    elif is_jax_tensor(obj):
-        return np.asarray(obj)
-    else:
-        return obj
+
+    # This gives us a smart order to test the frameworks with the corresponding tests.
+    framework_to_test_func = _get_frameworks_and_test_func(obj)
+    for framework, test_func in framework_to_test_func.items():
+        if test_func(obj):
+            return framework_to_numpy[framework](obj)
+
+    return obj
 
 
 class ModelOutput(OrderedDict):
@@ -248,7 +321,47 @@ class ModelOutput(OrderedDict):
     </Tip>
     """
 
+    def __init_subclass__(cls) -> None:
+        """Register subclasses as pytree nodes.
+
+        This is necessary to synchronize gradients when using `torch.nn.parallel.DistributedDataParallel` with
+        `static_graph=True` with modules that output `ModelOutput` subclasses.
+        """
+        if is_torch_available():
+            if version.parse(get_torch_version()) >= version.parse("2.2"):
+                _torch_pytree.register_pytree_node(
+                    cls,
+                    _model_output_flatten,
+                    partial(_model_output_unflatten, output_type=cls),
+                    serialized_type_name=f"{cls.__module__}.{cls.__name__}",
+                )
+            else:
+                _torch_pytree._register_pytree_node(
+                    cls,
+                    _model_output_flatten,
+                    partial(_model_output_unflatten, output_type=cls),
+                )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Subclasses of ModelOutput must use the @dataclass decorator
+        # This check is done in __init__ because the @dataclass decorator operates after __init_subclass__
+        # issubclass() would return True for issubclass(ModelOutput, ModelOutput) when False is needed
+        # Just need to check that the current class is not ModelOutput
+        is_modeloutput_subclass = self.__class__ != ModelOutput
+
+        if is_modeloutput_subclass and not is_dataclass(self):
+            raise TypeError(
+                f"{self.__module__}.{self.__class__.__name__} is not a dataclasss."
+                " This is a subclass of ModelOutput and so must use the @dataclass decorator."
+            )
+
     def __post_init__(self):
+        """Check the ModelOutput dataclass.
+
+        Only occurs if @dataclass decorator has been used.
+        """
         class_fields = fields(self)
 
         # Safety and consistency checks
@@ -331,11 +444,46 @@ class ModelOutput(OrderedDict):
         # Don't call self.__setattr__ to avoid recursion errors
         super().__setattr__(key, value)
 
+    def __reduce__(self):
+        if not is_dataclass(self):
+            return super().__reduce__()
+        callable, _args, *remaining = super().__reduce__()
+        args = tuple(getattr(self, field.name) for field in fields(self))
+        return callable, args, *remaining
+
     def to_tuple(self) -> Tuple[Any]:
         """
         Convert self to a tuple containing all the attributes/keys that are not `None`.
         """
         return tuple(self[k] for k in self.keys())
+
+
+if is_torch_available():
+    import torch.utils._pytree as _torch_pytree
+
+    def _model_output_flatten(output: ModelOutput) -> Tuple[List[Any], "_torch_pytree.Context"]:
+        return list(output.values()), list(output.keys())
+
+    def _model_output_unflatten(
+        values: Iterable[Any],
+        context: "_torch_pytree.Context",
+        output_type=None,
+    ) -> ModelOutput:
+        return output_type(**dict(zip(context, values)))
+
+    if version.parse(get_torch_version()) >= version.parse("2.2"):
+        _torch_pytree.register_pytree_node(
+            ModelOutput,
+            _model_output_flatten,
+            partial(_model_output_unflatten, output_type=ModelOutput),
+            serialized_type_name=f"{ModelOutput.__module__}.{ModelOutput.__name__}",
+        )
+    else:
+        _torch_pytree._register_pytree_node(
+            ModelOutput,
+            _model_output_flatten,
+            partial(_model_output_unflatten, output_type=ModelOutput),
+        )
 
 
 class ExplicitEnum(str, Enum):
@@ -371,6 +519,7 @@ class TensorType(ExplicitEnum):
     TENSORFLOW = "tf"
     NUMPY = "np"
     JAX = "jax"
+    MLX = "mlx"
 
 
 class ContextManagers:
@@ -398,11 +547,10 @@ def can_return_loss(model_class):
     Args:
         model_class (`type`): The class of the model.
     """
-    base_classes = str(inspect.getmro(model_class))
-
-    if "keras.engine.training.Model" in base_classes:
+    framework = infer_framework(model_class)
+    if framework == "tf":
         signature = inspect.signature(model_class.call)  # TensorFlow models
-    elif "torch.nn.modules.module.Module" in base_classes:
+    elif framework == "pt":
         signature = inspect.signature(model_class.forward)  # PyTorch models
     else:
         signature = inspect.signature(model_class.__call__)  # Flax models
@@ -422,11 +570,10 @@ def find_labels(model_class):
         model_class (`type`): The class of the model.
     """
     model_name = model_class.__name__
-    base_classes = str(inspect.getmro(model_class))
-
-    if "keras.engine.training.Model" in base_classes:
+    framework = infer_framework(model_class)
+    if framework == "tf":
         signature = inspect.signature(model_class.call)  # TensorFlow models
-    elif "torch.nn.modules.module.Module" in base_classes:
+    elif framework == "pt":
         signature = inspect.signature(model_class.forward)  # PyTorch models
     else:
         signature = inspect.signature(model_class.__call__)  # Flax models
@@ -474,6 +621,8 @@ def transpose(array, axes=None):
 
         return tf.transpose(array, perm=axes)
     elif is_jax_tensor(array):
+        import jax.numpy as jnp
+
         return jnp.transpose(array, axes=axes)
     else:
         raise ValueError(f"Type not supported for transpose: {type(array)}.")
@@ -493,6 +642,8 @@ def reshape(array, newshape):
 
         return tf.reshape(array, newshape)
     elif is_jax_tensor(array):
+        import jax.numpy as jnp
+
         return jnp.reshape(array, newshape)
     else:
         raise ValueError(f"Type not supported for reshape: {type(array)}.")
@@ -512,6 +663,8 @@ def squeeze(array, axis=None):
 
         return tf.squeeze(array, axis=axis)
     elif is_jax_tensor(array):
+        import jax.numpy as jnp
+
         return jnp.squeeze(array, axis=axis)
     else:
         raise ValueError(f"Type not supported for squeeze: {type(array)}.")
@@ -531,6 +684,8 @@ def expand_dims(array, axis):
 
         return tf.expand_dims(array, axis=axis)
     elif is_jax_tensor(array):
+        import jax.numpy as jnp
+
         return jnp.expand_dims(array, axis=axis)
     else:
         raise ValueError(f"Type not supported for expand_dims: {type(array)}.")
@@ -551,7 +706,7 @@ def tensor_size(array):
     elif is_jax_tensor(array):
         return array.size
     else:
-        raise ValueError(f"Type not supported for expand_dims: {type(array)}.")
+        raise ValueError(f"Type not supported for tensor_size: {type(array)}.")
 
 
 def add_model_info_to_auto_map(auto_map, repo_id):
@@ -565,3 +720,137 @@ def add_model_info_to_auto_map(auto_map, repo_id):
             auto_map[key] = f"{repo_id}--{value}"
 
     return auto_map
+
+
+def add_model_info_to_custom_pipelines(custom_pipeline, repo_id):
+    """
+    Adds the information of the repo_id to a given custom pipeline.
+    """
+    # {custom_pipelines : {task: {"impl": "path.to.task"},...} }
+    for task in custom_pipeline.keys():
+        if "impl" in custom_pipeline[task]:
+            module = custom_pipeline[task]["impl"]
+            if "--" not in module:
+                custom_pipeline[task]["impl"] = f"{repo_id}--{module}"
+    return custom_pipeline
+
+
+def infer_framework(model_class):
+    """
+    Infers the framework of a given model without using isinstance(), because we cannot guarantee that the relevant
+    classes are imported or available.
+    """
+    for base_class in inspect.getmro(model_class):
+        module = base_class.__module__
+        name = base_class.__name__
+        if module.startswith("tensorflow") or module.startswith("keras") or name == "TFPreTrainedModel":
+            return "tf"
+        elif module.startswith("torch") or name == "PreTrainedModel":
+            return "pt"
+        elif module.startswith("flax") or module.startswith("jax") or name == "FlaxPreTrainedModel":
+            return "flax"
+    else:
+        raise TypeError(f"Could not infer framework from class {model_class}.")
+
+
+def torch_int(x):
+    """
+    Casts an input to a torch int64 tensor if we are in a tracing context, otherwise to a Python int.
+    """
+    if not is_torch_available():
+        return int(x)
+
+    import torch
+
+    return x.to(torch.int64) if torch.jit.is_tracing() and isinstance(x, torch.Tensor) else int(x)
+
+
+def torch_float(x):
+    """
+    Casts an input to a torch float32 tensor if we are in a tracing context, otherwise to a Python float.
+    """
+    if not is_torch_available():
+        return int(x)
+
+    import torch
+
+    return x.to(torch.float32) if torch.jit.is_tracing() and isinstance(x, torch.Tensor) else int(x)
+
+
+def filter_out_non_signature_kwargs(extra: Optional[list] = None):
+    """
+    Decorator to filter out named arguments that are not in the function signature.
+
+    This decorator ensures that only the keyword arguments that match the function's signature, or are specified in the
+    `extra` list, are passed to the function. Any additional keyword arguments are filtered out and a warning is issued.
+
+    Parameters:
+        extra (`Optional[list]`, *optional*):
+            A list of extra keyword argument names that are allowed even if they are not in the function's signature.
+
+    Returns:
+        Callable:
+            A decorator that wraps the function and filters out invalid keyword arguments.
+
+    Example usage:
+
+        ```python
+        @filter_out_non_signature_kwargs(extra=["allowed_extra_arg"])
+        def my_function(arg1, arg2, **kwargs):
+            print(arg1, arg2, kwargs)
+
+        my_function(arg1=1, arg2=2, allowed_extra_arg=3, invalid_arg=4)
+        # This will print: 1 2 {"allowed_extra_arg": 3}
+        # And issue a warning: "The following named arguments are not valid for `my_function` and were ignored: 'invalid_arg'"
+        ```
+    """
+    extra = extra or []
+    extra_params_to_pass = set(extra)
+
+    def decorator(func):
+        sig = inspect.signature(func)
+        function_named_args = set(sig.parameters.keys())
+        valid_kwargs_to_pass = function_named_args.union(extra_params_to_pass)
+
+        # Required for better warning message
+        is_instance_method = "self" in function_named_args
+        is_class_method = "cls" in function_named_args
+
+        # Mark function as decorated
+        func._filter_out_non_signature_kwargs = True
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            valid_kwargs = {}
+            invalid_kwargs = {}
+
+            for k, v in kwargs.items():
+                if k in valid_kwargs_to_pass:
+                    valid_kwargs[k] = v
+                else:
+                    invalid_kwargs[k] = v
+
+            if invalid_kwargs:
+                invalid_kwargs_names = [f"'{k}'" for k in invalid_kwargs.keys()]
+                invalid_kwargs_names = ", ".join(invalid_kwargs_names)
+
+                # Get the class name for better warning message
+                if is_instance_method:
+                    cls_prefix = args[0].__class__.__name__ + "."
+                elif is_class_method:
+                    cls_prefix = args[0].__name__ + "."
+                else:
+                    cls_prefix = ""
+
+                warnings.warn(
+                    f"The following named arguments are not valid for `{cls_prefix}{func.__name__}`"
+                    f" and were ignored: {invalid_kwargs_names}",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            return func(*args, **valid_kwargs)
+
+        return wrapper
+
+    return decorator

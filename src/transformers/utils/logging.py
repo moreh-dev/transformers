@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Logging utilities."""
-
+"""Logging utilities."""
 
 import functools
 import logging
@@ -30,6 +29,7 @@ from logging import (
     WARN,  # NOQA
     WARNING,  # NOQA
 )
+from logging import captureWarnings as _captureWarnings
 from typing import Optional
 
 import huggingface_hub.utils as hf_hub_utils
@@ -40,6 +40,7 @@ _lock = threading.Lock()
 _default_handler: Optional[logging.Handler] = None
 
 log_levels = {
+    "detail": logging.DEBUG,  # will also print filename and line number
     "debug": logging.DEBUG,
     "info": logging.INFO,
     "warning": logging.WARNING,
@@ -49,7 +50,7 @@ log_levels = {
 
 _default_log_level = logging.WARNING
 
-_tqdm_active = True
+_tqdm_active = not hf_hub_utils.are_progress_bars_disabled()
 
 
 def _get_default_logging_level():
@@ -85,12 +86,21 @@ def _configure_library_root_logger() -> None:
             # This library has already configured the library root logger.
             return
         _default_handler = logging.StreamHandler()  # Set sys.stderr as stream.
+        # set defaults based on https://github.com/pyinstaller/pyinstaller/issues/7334#issuecomment-1357447176
+        if sys.stderr is None:
+            sys.stderr = open(os.devnull, "w")
+
         _default_handler.flush = sys.stderr.flush
 
         # Apply our default configuration to the library root logger.
         library_root_logger = _get_library_root_logger()
         library_root_logger.addHandler(_default_handler)
         library_root_logger.setLevel(_get_default_logging_level())
+        # if logging level is debug, we add pathname and lineno to formatter for easy debugging
+        if os.getenv("TRANSFORMERS_VERBOSITY", None) == "detail":
+            formatter = logging.Formatter("[%(levelname)s|%(pathname)s:%(lineno)s] %(asctime)s >> %(message)s")
+            _default_handler.setFormatter(formatter)
+
         library_root_logger.propagate = False
 
 
@@ -109,6 +119,29 @@ def _reset_library_root_logger() -> None:
 
 def get_log_levels_dict():
     return log_levels
+
+
+def captureWarnings(capture):
+    """
+    Calls the `captureWarnings` method from the logging library to enable management of the warnings emitted by the
+    `warnings` library.
+
+    Read more about this method here:
+    https://docs.python.org/3/library/logging.html#integration-with-the-warnings-module
+
+    All warnings will be logged through the `py.warnings` logger.
+
+    Careful: this method also adds a handler to this logger if it does not already have one, and updates the logging
+    level of that logger to the library's root logger.
+    """
+    logger = get_logger("py.warnings")
+
+    if not logger.handlers:
+        logger.addHandler(_default_handler)
+
+    logger.setLevel(_get_library_root_logger().level)
+
+    _captureWarnings(capture)
 
 
 def get_logger(name: Optional[str] = None) -> logging.Logger:
@@ -296,6 +329,21 @@ def warning_once(self, *args, **kwargs):
 
 
 logging.Logger.warning_once = warning_once
+
+
+@functools.lru_cache(None)
+def info_once(self, *args, **kwargs):
+    """
+    This method is identical to `logger.info()`, but will emit the info with the same message only once
+
+    Note: The cache is for the function arguments, so 2 different callers using the same arguments will hit the cache.
+    The assumption here is that all warning messages are unique across the code. If they aren't then need to switch to
+    another type of cache that includes the caller frame information in the hashing function.
+    """
+    self.info(*args, **kwargs)
+
+
+logging.Logger.info_once = info_once
 
 
 class EmptyTqdm:

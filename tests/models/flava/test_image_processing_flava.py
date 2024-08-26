@@ -21,7 +21,7 @@ import numpy as np
 from transformers.testing_utils import require_torch, require_vision
 from transformers.utils import is_torch_available, is_vision_available
 
-from ...test_image_processing_common import ImageProcessingSavingTestMixin, prepare_image_inputs
+from ...test_image_processing_common import ImageProcessingTestMixin, prepare_image_inputs
 
 
 if is_torch_available():
@@ -76,6 +76,7 @@ class FlavaImageProcessingTester(unittest.TestCase):
         codebook_image_mean=FLAVA_CODEBOOK_MEAN,
         codebook_image_std=FLAVA_CODEBOOK_STD,
     ):
+        super().__init__()
         size = size if size is not None else {"height": 224, "width": 224}
         crop_size = crop_size if crop_size is not None else {"height": 224, "width": 224}
         codebook_size = codebook_size if codebook_size is not None else {"height": 112, "width": 112}
@@ -156,14 +157,26 @@ class FlavaImageProcessingTester(unittest.TestCase):
     def get_expected_codebook_image_size(self):
         return (self.codebook_size["height"], self.codebook_size["width"])
 
+    def prepare_image_inputs(self, equal_resolution=False, numpify=False, torchify=False):
+        return prepare_image_inputs(
+            batch_size=self.batch_size,
+            num_channels=self.num_channels,
+            min_resolution=self.min_resolution,
+            max_resolution=self.max_resolution,
+            equal_resolution=equal_resolution,
+            numpify=numpify,
+            torchify=torchify,
+        )
+
 
 @require_torch
 @require_vision
-class FlavaImageProcessingTest(ImageProcessingSavingTestMixin, unittest.TestCase):
+class FlavaImageProcessingTest(ImageProcessingTestMixin, unittest.TestCase):
     image_processing_class = FlavaImageProcessor if is_vision_available() else None
     maxDiff = None
 
     def setUp(self):
+        super().setUp()
         self.image_processor_tester = FlavaImageProcessingTester(self)
 
     @property
@@ -207,14 +220,11 @@ class FlavaImageProcessingTest(ImageProcessingSavingTestMixin, unittest.TestCase
         self.assertEqual(image_processor.codebook_size, {"height": 33, "width": 33})
         self.assertEqual(image_processor.codebook_crop_size, {"height": 66, "width": 66})
 
-    def test_batch_feature(self):
-        pass
-
     def test_call_pil(self):
         # Initialize image_processing
         image_processing = self.image_processing_class(**self.image_processor_dict)
         # create random PIL images
-        image_inputs = prepare_image_inputs(self.image_processor_tester, equal_resolution=False)
+        image_inputs = self.image_processor_tester.prepare_image_inputs(equal_resolution=False)
         for image in image_inputs:
             self.assertIsInstance(image, PIL.Image.Image)
 
@@ -252,7 +262,7 @@ class FlavaImageProcessingTest(ImageProcessingSavingTestMixin, unittest.TestCase
         # Initialize image_processing
         image_processing = self.image_processing_class(**self.image_processor_dict)
         # create random tensors
-        image_inputs = prepare_image_inputs(self.image_processor_tester, equal_resolution=False, **prepare_kwargs)
+        image_inputs = self.image_processor_tester.prepare_image_inputs(equal_resolution=False, **prepare_kwargs)
         for image in image_inputs:
             self.assertIsInstance(image, instance_class)
 
@@ -329,6 +339,11 @@ class FlavaImageProcessingTest(ImageProcessingSavingTestMixin, unittest.TestCase
     def test_call_numpy(self):
         self._test_call_framework(np.ndarray, prepare_kwargs={"numpify": True})
 
+    def test_call_numpy_4_channels(self):
+        self.image_processing_class.num_channels = 4
+        self._test_call_framework(np.ndarray, prepare_kwargs={"numpify": True})
+        self.image_processing_class.num_channels = 3
+
     def test_call_pytorch(self):
         self._test_call_framework(torch.Tensor, prepare_kwargs={"torchify": True})
 
@@ -336,7 +351,7 @@ class FlavaImageProcessingTest(ImageProcessingSavingTestMixin, unittest.TestCase
         # Initialize image_processing
         random.seed(1234)
         image_processing = self.image_processing_class(**self.image_processor_dict)
-        image_inputs = prepare_image_inputs(self.image_processor_tester, equal_resolution=False, torchify=True)
+        image_inputs = self.image_processor_tester.prepare_image_inputs(equal_resolution=False, torchify=True)
 
         # Test not batched input
         encoded_images = image_processing(image_inputs[0], return_image_mask=True, return_tensors="pt")
@@ -346,7 +361,7 @@ class FlavaImageProcessingTest(ImageProcessingSavingTestMixin, unittest.TestCase
         # Initialize image_processing
         image_processing = self.image_processing_class(**self.image_processor_dict)
         # create random PIL images
-        image_inputs = prepare_image_inputs(self.image_processor_tester, equal_resolution=False)
+        image_inputs = self.image_processor_tester.prepare_image_inputs(equal_resolution=False)
         for image in image_inputs:
             self.assertIsInstance(image, PIL.Image.Image)
 

@@ -46,7 +46,7 @@ class FlaxRobertaModelTester(unittest.TestCase):
         use_labels=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -154,6 +154,6 @@ class FlaxRobertaModelTest(FlaxModelTesterMixin, unittest.TestCase):
     @slow
     def test_model_from_pretrained(self):
         for model_class_name in self.all_model_classes:
-            model = model_class_name.from_pretrained("roberta-base", from_pt=True)
+            model = model_class_name.from_pretrained("FacebookAI/roberta-base", from_pt=True)
             outputs = model(np.ones((1, 1)))
             self.assertIsNotNone(outputs)

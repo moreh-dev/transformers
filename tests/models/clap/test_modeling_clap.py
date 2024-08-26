@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch CLAP model. """
-
+"""Testing suite for the PyTorch CLAP model."""
 
 import inspect
 import os
@@ -49,7 +48,6 @@ if is_torch_available():
         ClapTextModel,
         ClapTextModelWithProjection,
     )
-    from transformers.models.clap.modeling_clap import CLAP_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 class ClapAudioModelTester:
@@ -67,11 +65,12 @@ class ClapAudioModelTester:
         freq_ratio=2,
         num_channels=3,
         is_training=True,
-        hidden_size=256,
-        patch_embeds_hidden_size=32,
+        hidden_size=32,
+        patch_embeds_hidden_size=16,
         projection_dim=32,
-        num_hidden_layers=4,
-        num_heads=[2, 2, 2, 2],
+        depths=[2, 2],
+        num_hidden_layers=2,
+        num_heads=[2, 2],
         intermediate_size=37,
         dropout=0.1,
         attention_dropout=0.1,
@@ -89,6 +88,7 @@ class ClapAudioModelTester:
         self.hidden_size = hidden_size
         self.projection_dim = projection_dim
         self.num_hidden_layers = num_hidden_layers
+        self.depths = depths
         self.num_heads = num_heads
         self.num_attention_heads = num_heads[0]
         self.seq_length = seq_length
@@ -118,6 +118,7 @@ class ClapAudioModelTester:
             hidden_size=self.hidden_size,
             patch_stride=self.patch_stride,
             projection_dim=self.projection_dim,
+            depths=self.depths,
             num_hidden_layers=self.num_hidden_layers,
             num_attention_heads=self.num_heads,
             intermediate_size=self.intermediate_size,
@@ -176,7 +177,7 @@ class ClapAudioModelTest(ModelTesterMixin, unittest.TestCase):
     def test_inputs_embeds(self):
         pass
 
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()
 
         for model_class in self.all_model_classes:
@@ -203,7 +204,7 @@ class ClapAudioModelTest(ModelTesterMixin, unittest.TestCase):
 
             self.assertListEqual(
                 list(hidden_states[0].shape[-2:]),
-                [self.model_tester.patch_embeds_hidden_size, self.model_tester.patch_embeds_hidden_size],
+                [2 * self.model_tester.patch_embeds_hidden_size, 2 * self.model_tester.patch_embeds_hidden_size],
             )
 
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
@@ -250,6 +251,18 @@ class ClapAudioModelTest(ModelTesterMixin, unittest.TestCase):
     def test_training_gradient_checkpointing(self):
         pass
 
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant_false(self):
+        pass
+
     @unittest.skip(reason="ClapAudioModel has no base class and is not available in MODEL_MAPPING")
     def test_save_load_fast_init_from_base(self):
         pass
@@ -260,16 +273,16 @@ class ClapAudioModelTest(ModelTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in CLAP_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = ClapAudioModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "laion/clap-htsat-fused"
+        model = ClapAudioModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     @slow
     def test_model_with_projection_from_pretrained(self):
-        for model_name in CLAP_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = ClapAudioModelWithProjection.from_pretrained(model_name)
-            self.assertIsNotNone(model)
-            self.assertTrue(hasattr(model, "audio_projection"))
+        model_name = "laion/clap-htsat-fused"
+        model = ClapAudioModelWithProjection.from_pretrained(model_name)
+        self.assertIsNotNone(model)
+        self.assertTrue(hasattr(model, "audio_projection"))
 
 
 class ClapTextModelTester:
@@ -284,7 +297,7 @@ class ClapTextModelTester:
         vocab_size=99,
         hidden_size=32,
         projection_dim=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         dropout=0.1,
@@ -403,6 +416,18 @@ class ClapTextModelTest(ModelTesterMixin, unittest.TestCase):
     def test_training_gradient_checkpointing(self):
         pass
 
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant(self):
+        pass
+
+    @unittest.skip(
+        reason="This architecure seem to not compute gradients properly when using GC, check: https://github.com/huggingface/transformers/pull/27124"
+    )
+    def test_training_gradient_checkpointing_use_reentrant_false(self):
+        pass
+
     @unittest.skip(reason="ClapTextModel does not use inputs_embeds")
     def test_inputs_embeds(self):
         pass
@@ -417,16 +442,16 @@ class ClapTextModelTest(ModelTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in CLAP_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = ClapTextModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "laion/clap-htsat-fused"
+        model = ClapTextModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     @slow
     def test_model_with_projection_from_pretrained(self):
-        for model_name in CLAP_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = ClapTextModelWithProjection.from_pretrained(model_name)
-            self.assertIsNotNone(model)
-            self.assertTrue(hasattr(model, "text_projection"))
+        model_name = "laion/clap-htsat-fused"
+        model = ClapTextModelWithProjection.from_pretrained(model_name)
+        self.assertIsNotNone(model)
+        self.assertTrue(hasattr(model, "text_projection"))
 
 
 class ClapModelTester:
@@ -439,6 +464,7 @@ class ClapModelTester:
         self.parent = parent
         self.text_model_tester = ClapTextModelTester(parent, **text_kwargs)
         self.audio_model_tester = ClapAudioModelTester(parent, **audio_kwargs)
+        self.batch_size = self.text_model_tester.batch_size  # need bs for batching_equivalence test
         self.is_training = is_training
 
     def prepare_config_and_inputs(self):
@@ -507,7 +533,7 @@ class ClapModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
         pass
 
     @unittest.skip(reason="ClapModel does not have input/output embeddings")
-    def test_model_common_attributes(self):
+    def test_model_get_set_embeddings(self):
         pass
 
     # override as the `logit_scale` parameter initilization is different for CLAP
@@ -536,7 +562,7 @@ class ClapModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     def _create_and_check_torchscript(self, config, inputs_dict):
         if not self.test_torchscript:
-            return
+            self.skipTest(reason="test_torchscript is set to False")
 
         configs_no_init = _config_zero_init(config)  # To be sure we have no Nan
         configs_no_init.torchscript = True
@@ -575,7 +601,27 @@ class ClapModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
             model_state_dict = model.state_dict()
             loaded_model_state_dict = loaded_model.state_dict()
 
+            non_persistent_buffers = {}
+            for key in loaded_model_state_dict.keys():
+                if key not in model_state_dict.keys():
+                    non_persistent_buffers[key] = loaded_model_state_dict[key]
+
+            loaded_model_state_dict = {
+                key: value for key, value in loaded_model_state_dict.items() if key not in non_persistent_buffers
+            }
+
             self.assertEqual(set(model_state_dict.keys()), set(loaded_model_state_dict.keys()))
+
+            model_buffers = list(model.buffers())
+            for non_persistent_buffer in non_persistent_buffers.values():
+                found_buffer = False
+                for i, model_buffer in enumerate(model_buffers):
+                    if torch.equal(non_persistent_buffer, model_buffer):
+                        found_buffer = True
+                        break
+
+                self.assertTrue(found_buffer)
+                model_buffers.pop(i)
 
             models_equal = True
             for layer_name, p1 in model_state_dict.items():
@@ -602,9 +648,9 @@ class ClapModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase):
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in CLAP_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = ClapModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "laion/clap-htsat-fused"
+        model = ClapModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 @slow

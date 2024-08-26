@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch RemBERT model. """
-
+"""Testing suite for the PyTorch RemBERT model."""
 
 import unittest
 
@@ -38,7 +37,6 @@ if is_torch_available():
         RemBertForTokenClassification,
         RemBertModel,
     )
-    from transformers.models.rembert.modeling_rembert import REMBERT_PRETRAINED_MODEL_ARCHIVE_LIST
 
 
 class RemBertModelTester:
@@ -55,7 +53,7 @@ class RemBertModelTester:
         hidden_size=32,
         input_embedding_size=18,
         output_embedding_size=43,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -465,9 +463,9 @@ class RemBertModelTest(ModelTesterMixin, PipelineTesterMixin, unittest.TestCase)
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in REMBERT_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = RemBertModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "google/rembert"
+        model = RemBertModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
 
 @require_torch

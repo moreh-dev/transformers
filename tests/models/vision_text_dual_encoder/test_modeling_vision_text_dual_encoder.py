@@ -12,8 +12,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the PyTorch VisionTextDualEncoder model. """
-
+"""Testing suite for the PyTorch VisionTextDualEncoder model."""
 
 import collections
 import tempfile
@@ -430,7 +429,7 @@ class DeiTRobertaModelTest(VisionTextDualEncoderMixin, unittest.TestCase):
             "text_choice_labels": choice_labels,
         }
 
-    # skip as DeiT is not available in Flax
+    @unittest.skip(reason="DeiT is not available in Flax")
     def test_pt_flax_equivalence(self):
         pass
 
@@ -497,7 +496,7 @@ class CLIPVisionBertModelTest(VisionTextDualEncoderMixin, unittest.TestCase):
 class VisionTextDualEncoderIntegrationTest(unittest.TestCase):
     @slow
     def test_inference(self):
-        model = VisionTextDualEncoderModel.from_pretrained("clip-italian/clip-italian", logit_scale_init_value=1)
+        model = VisionTextDualEncoderModel.from_pretrained("clip-italian/clip-italian", logit_scale_init_value=1.0)
         processor = VisionTextDualEncoderProcessor.from_pretrained("clip-italian/clip-italian")
 
         image = Image.open("./tests/fixtures/tests_samples/COCO/000000039769.png")

@@ -15,7 +15,6 @@
 
 
 import unittest
-from copy import deepcopy
 
 from transformers import RobertaConfig, is_torch_available
 from transformers.testing_utils import TestCasePlus, require_torch, slow, torch_device
@@ -39,7 +38,6 @@ if is_torch_available():
         RobertaModel,
     )
     from transformers.models.roberta.modeling_roberta import (
-        ROBERTA_PRETRAINED_MODEL_ARCHIVE_LIST,
         RobertaEmbeddings,
         create_position_ids_from_input_ids,
     )
@@ -59,7 +57,7 @@ class RobertaModelTester:
         use_labels=True,
         vocab_size=99,
         hidden_size=32,
-        num_hidden_layers=5,
+        num_hidden_layers=2,
         num_attention_heads=4,
         intermediate_size=37,
         hidden_act="gelu",
@@ -396,6 +394,7 @@ class RobertaModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
         else {}
     )
     fx_compatible = True
+    model_split_percents = [0.5, 0.8, 0.9]
 
     def setUp(self):
         self.model_tester = RobertaModelTester(self)
@@ -477,13 +476,12 @@ class RobertaModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
 
     @slow
     def test_model_from_pretrained(self):
-        for model_name in ROBERTA_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
-            model = RobertaModel.from_pretrained(model_name)
-            self.assertIsNotNone(model)
+        model_name = "FacebookAI/roberta-base"
+        model = RobertaModel.from_pretrained(model_name)
+        self.assertIsNotNone(model)
 
     def test_create_position_ids_respects_padding_index(self):
-        """Ensure that the default position ids only assign a sequential . This is a regression
-        test for https://github.com/huggingface/transformers/issues/1761
+        """This is a regression test for https://github.com/huggingface/transformers/issues/1761
 
         The position ids should be masked with the embedding object's padding index. Therefore, the
         first available non-padding position index is RobertaEmbeddings.padding_idx + 1
@@ -501,8 +499,7 @@ class RobertaModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
         self.assertTrue(torch.all(torch.eq(position_ids, expected_positions)))
 
     def test_create_position_ids_from_inputs_embeds(self):
-        """Ensure that the default position ids only assign a sequential . This is a regression
-        test for https://github.com/huggingface/transformers/issues/1761
+        """This is a regression test for https://github.com/huggingface/transformers/issues/1761
 
         The position ids should be masked with the embedding object's padding index. Therefore, the
         first available non-padding position index is RobertaEmbeddings.padding_idx + 1
@@ -527,7 +524,7 @@ class RobertaModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
 class RobertaModelIntegrationTest(TestCasePlus):
     @slow
     def test_inference_masked_lm(self):
-        model = RobertaForMaskedLM.from_pretrained("roberta-base")
+        model = RobertaForMaskedLM.from_pretrained("FacebookAI/roberta-base")
 
         input_ids = torch.tensor([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]])
         with torch.no_grad():
@@ -547,7 +544,7 @@ class RobertaModelIntegrationTest(TestCasePlus):
 
     @slow
     def test_inference_no_head(self):
-        model = RobertaModel.from_pretrained("roberta-base")
+        model = RobertaModel.from_pretrained("FacebookAI/roberta-base")
 
         input_ids = torch.tensor([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]])
         with torch.no_grad():
@@ -565,7 +562,7 @@ class RobertaModelIntegrationTest(TestCasePlus):
 
     @slow
     def test_inference_classification_head(self):
-        model = RobertaForSequenceClassification.from_pretrained("roberta-large-mnli")
+        model = RobertaForSequenceClassification.from_pretrained("FacebookAI/roberta-large-mnli")
 
         input_ids = torch.tensor([[0, 31414, 232, 328, 740, 1140, 12695, 69, 46078, 1588, 2]])
         with torch.no_grad():
@@ -579,23 +576,3 @@ class RobertaModelIntegrationTest(TestCasePlus):
         # expected_tensor = roberta.predict("mnli", input_ids, return_logits=True).detach()
 
         self.assertTrue(torch.allclose(output, expected_tensor, atol=1e-4))
-
-    # XXX: this might be a candidate for common tests if we have many of those
-    def test_lm_head_ignore_keys(self):
-        keys_to_ignore_on_save_tied = [r"lm_head.decoder.weight", r"lm_head.decoder.bias"]
-        keys_to_ignore_on_save_untied = [r"lm_head.decoder.bias"]
-        config = RobertaConfig.from_pretrained(ROBERTA_TINY)
-        config_tied = deepcopy(config)
-        config_tied.tie_word_embeddings = True
-        config_untied = deepcopy(config)
-        config_untied.tie_word_embeddings = False
-        for cls in [RobertaForMaskedLM, RobertaForCausalLM]:
-            model = cls(config_tied)
-            self.assertEqual(model._keys_to_ignore_on_save, keys_to_ignore_on_save_tied, cls)
-
-            # the keys should be different when embeddings aren't tied
-            model = cls(config_untied)
-            self.assertEqual(model._keys_to_ignore_on_save, keys_to_ignore_on_save_untied, cls)
-
-            # test that saving works with updated ignore keys - just testing that it doesn't fail
-            model.save_pretrained(self.get_auto_remove_tmp_dir())

@@ -12,7 +12,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-""" Testing suite for the TensorFlow ConvNext model. """
+"""Testing suite for the TensorFlow ConvNext model."""
+
+from __future__ import annotations
 
 import inspect
 import unittest
@@ -36,7 +38,7 @@ if is_tf_available():
 if is_vision_available():
     from PIL import Image
 
-    from transformers import ConvNextFeatureExtractor
+    from transformers import ConvNextImageProcessor
 
 
 class TFConvNextModelTester:
@@ -154,6 +156,7 @@ class TFConvNextModelTest(TFModelTesterMixin, PipelineTesterMixin, unittest.Test
         not is_tf_available() or len(tf.config.list_physical_devices("GPU")) == 0,
         reason="TF does not support backprop for grouped convolutions on CPU.",
     )
+    @slow
     def test_keras_fit(self):
         super().test_keras_fit()
 
@@ -276,18 +279,16 @@ def prepare_img():
 @require_vision
 class TFConvNextModelIntegrationTest(unittest.TestCase):
     @cached_property
-    def default_feature_extractor(self):
-        return (
-            ConvNextFeatureExtractor.from_pretrained("facebook/convnext-tiny-224") if is_vision_available() else None
-        )
+    def default_image_processor(self):
+        return ConvNextImageProcessor.from_pretrained("facebook/convnext-tiny-224") if is_vision_available() else None
 
     @slow
     def test_inference_image_classification_head(self):
         model = TFConvNextForImageClassification.from_pretrained("facebook/convnext-tiny-224")
 
-        feature_extractor = self.default_feature_extractor
+        image_processor = self.default_image_processor
         image = prepare_img()
-        inputs = feature_extractor(images=image, return_tensors="tf")
+        inputs = image_processor(images=image, return_tensors="tf")
 
         # forward pass
         outputs = model(**inputs)

@@ -44,6 +44,9 @@ from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.tbtrainercallback import TBTrainerCallback
+from utils.utils import get_num_parameters
 
 logger = logging.getLogger(__name__)
 
@@ -492,7 +495,7 @@ def main():
         data_collator=collate_fn,
         compute_metrics=eval_compute_metrics_fn,
     )
-
+    trainer.add_callback(TBTrainerCallback)
     # Training
     if training_args.do_train:
         train_result = trainer.train(resume_from_checkpoint=checkpoint)

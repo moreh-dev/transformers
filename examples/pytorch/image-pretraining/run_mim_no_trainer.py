@@ -22,14 +22,15 @@ from pathlib import Path
 import datasets
 import numpy as np
 import torch
-import transformers
 from accelerate import Accelerator, DistributedType
 from accelerate.utils import set_seed
 from datasets import load_dataset
-from huggingface_hub import Repository
+from huggingface_hub import HfApi
 from torch.utils.data import DataLoader
 from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
 from tqdm.auto import tqdm
+
+import transformers
 from transformers import (
     CONFIG_MAPPING,
     IMAGE_PROCESSOR_MAPPING,
@@ -40,8 +41,9 @@ from transformers import (
     SchedulerType,
     get_scheduler,
 )
-from transformers.utils import check_min_version, get_full_repo_name, send_example_telemetry
+from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
+
 
 """ Pre-training a 🤗 Transformers model for simple masked image modeling (SimMIM)
 without using HuggingFace Trainer.
@@ -51,7 +53,7 @@ Any model supported by the AutoModelForMaskedImageModeling API can be used.
 logger = logging.getLogger(__name__)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.29.0")
+check_min_version("4.44.0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt")
 
@@ -64,7 +66,10 @@ def parse_args():
         description="Finetune a transformers model on a simple Masked Image Modeling task"
     )
     parser.add_argument(
-        "--dataset_name", type=str, default="cifar10", help="Name of a dataset from the datasets package",
+        "--dataset_name",
+        type=str,
+        default="cifar10",
+        help="Name of a dataset from the datasets package",
     )
     parser.add_argument(
         "--dataset_config_name",
@@ -79,19 +84,34 @@ def parse_args():
         help="The column name of the images in the files. If not set, will try to use 'image' or 'img'.",
     )
     parser.add_argument(
-        "--train_dir", type=str, default=None, help="A folder containing the training data.",
+        "--train_dir",
+        type=str,
+        default=None,
+        help="A folder containing the training data.",
     )
     parser.add_argument(
-        "--validation_dir", type=None, default=None, help="A folder containing the validation data.",
+        "--validation_dir",
+        type=None,
+        default=None,
+        help="A folder containing the validation data.",
     )
     parser.add_argument(
-        "--train_val_split", type=float, default=0.15, help="Percent to split off of train for validation.",
+        "--train_val_split",
+        type=float,
+        default=0.15,
+        help="Percent to split off of train for validation.",
     )
     parser.add_argument(
-        "--mask_patch_size", type=int, default=32, help="The size of the square patches to use for masking.",
+        "--mask_patch_size",
+        type=int,
+        default=32,
+        help="The size of the square patches to use for masking.",
     )
     parser.add_argument(
-        "--mask_ratio", type=float, default=0.6, help="Percentage of patches to mask.",
+        "--mask_ratio",
+        type=float,
+        default=0.6,
+        help="Percentage of patches to mask.",
     )
     parser.add_argument(
         "--max_train_samples",
@@ -161,15 +181,27 @@ def parse_args():
         help="Number of updates steps to accumulate before performing a backward/update pass.",
     )
     parser.add_argument(
-        "--image_processor_name", type=str, default=None, help="Name or path of preprocessor config.",
+        "--image_processor_name",
+        type=str,
+        default=None,
+        help="Name or path of preprocessor config.",
     )
     parser.add_argument(
-        "--use_auth_token",
-        type=bool,
-        default=False,
+        "--token",
+        type=str,
+        default=None,
         help=(
-            "Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-            "with private models)."
+            "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+            "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+        ),
+    )
+    parser.add_argument(
+        "--trust_remote_code",
+        action="store_true",
+        help=(
+            "Whether to trust the execution of code from datasets/models defined on the Hub."
+            " This option should only be set to `True` for repositories you trust and in which you have read the"
+            " code, as it will execute code present on the Hub on your local machine."
         ),
     )
     parser.add_argument(
@@ -185,13 +217,20 @@ def parse_args():
         help="The size (resolution) of each patch. If not specified, will use `patch_size` of the configuration.",
     )
     parser.add_argument(
-        "--encoder_stride", type=int, default=None, help={"help": "Stride to use for the encoder."},
+        "--encoder_stride",
+        type=int,
+        default=None,
+        help={"help": "Stride to use for the encoder."},
     )
     parser.add_argument(
-        "--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.",
+        "--push_to_hub",
+        action="store_true",
+        help="Whether or not to push the model to the Hub.",
     )
     parser.add_argument(
-        "--with_tracking", action="store_true", help="Whether to enable experiment trackers for logging.",
+        "--with_tracking",
+        action="store_true",
+        help="Whether to enable experiment trackers for logging.",
     )
     parser.add_argument(
         "--report_to",
@@ -199,12 +238,15 @@ def parse_args():
         default="all",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`,'
-            ' `"wandb"`, `"comet_ml"` and `"clearml"`. Use `"all"` (default) to report to all integrations.'
+            ' `"wandb"`, `"comet_ml"` and `"clearml"`. Use `"all"` (default) to report to all integrations. '
             "Only applicable when `--with_tracking` is passed."
         ),
     )
     parser.add_argument(
-        "--seed", type=int, default=None, help="A seed for reproducible training.",
+        "--seed",
+        type=int,
+        default=None,
+        help="A seed for reproducible training.",
     )
     parser.add_argument(
         "--per_device_train_batch_size",
@@ -213,10 +255,16 @@ def parse_args():
         help="Batch size (per device) for the training dataloader.",
     )
     parser.add_argument(
-        "--learning_rate", type=float, default=5e-5, help="The initial learning rate for [`AdamW`] optimizer.",
+        "--learning_rate",
+        type=float,
+        default=5e-5,
+        help="The initial learning rate for [`AdamW`] optimizer.",
     )
     parser.add_argument(
-        "--weight_decay", type=float, default=0.0, help="Weight decay to use.",
+        "--weight_decay",
+        type=float,
+        default=0.0,
+        help="Weight decay to use.",
     )
     parser.add_argument(
         "--num_train_epochs",
@@ -238,7 +286,10 @@ def parse_args():
         choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
     )
     parser.add_argument(
-        "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler.",
+        "--num_warmup_steps",
+        type=int,
+        default=0,
+        help="Number of steps for the warmup in the lr scheduler.",
     )
     parser.add_argument(
         "--checkpointing_steps",
@@ -259,7 +310,10 @@ def parse_args():
         help="Batch size (per device) for the evaluation dataloader.",
     )
     parser.add_argument(
-        "--output_dir", type=str, default=None, help="Where to store the final model.",
+        "--output_dir",
+        type=str,
+        default=None,
+        help="Where to store the final model.",
     )
     args = parser.parse_args()
 
@@ -299,7 +353,7 @@ class MaskGenerator:
         self.rand_size = self.input_size // self.mask_patch_size
         self.scale = self.mask_patch_size // self.model_patch_size
 
-        self.token_count = self.rand_size ** 2
+        self.token_count = self.rand_size**2
         self.mask_count = int(np.ceil(self.token_count * self.mask_ratio))
 
     def __call__(self):
@@ -333,13 +387,18 @@ def main():
 
     if args.with_tracking:
         accelerator_log_kwargs["log_with"] = args.report_to
-        accelerator_log_kwargs["logging_dir"] = args.output_dir
+        accelerator_log_kwargs["project_dir"] = args.output_dir
 
-    accelerator = Accelerator(gradient_accumulation_steps=args.gradient_accumulation_steps, **accelerator_log_kwargs,)
+    accelerator = Accelerator(
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        **accelerator_log_kwargs,
+    )
 
     # Make one log on every process with the configuration for debugging.
     logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s", datefmt="%m/%d/%Y %H:%M:%S", level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        level=logging.INFO,
     )
     logger.info(accelerator.state)
     if accelerator.is_local_main_process:
@@ -356,17 +415,20 @@ def main():
     # Handle the repository creation
     if accelerator.is_main_process:
         if args.push_to_hub:
-            if args.hub_model_id is None:
-                repo_name = get_full_repo_name(Path(args.output_dir).name, token=args.hub_token)
-            else:
-                repo_name = args.hub_model_id
-            repo = Repository(args.output_dir, clone_from=repo_name)
+            # Retrieve of infer repo_name
+            repo_name = args.hub_model_id
+            if repo_name is None:
+                repo_name = Path(args.output_dir).absolute().name
+            # Create repo and retrieve repo_id
+            api = HfApi()
+            repo_id = api.create_repo(repo_name, exist_ok=True, token=args.hub_token).repo_id
 
             with open(os.path.join(args.output_dir, ".gitignore"), "w+") as gitignore:
                 if "step_*" not in gitignore:
                     gitignore.write("step_*\n")
                 if "epoch_*" not in gitignore:
                     gitignore.write("epoch_*\n")
+
         elif args.output_dir is not None:
             os.makedirs(args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
@@ -377,7 +439,8 @@ def main():
         args.dataset_config_name,
         data_files=args.data_files,
         cache_dir=args.cache_dir,
-        use_auth_token=True if args.use_auth_token else None,
+        token=args.token,
+        trust_remote_code=args.trust_remote_code,
     )
 
     # If we don't have a validation split, split off a percentage of train as validation.
@@ -394,7 +457,8 @@ def main():
     config_kwargs = {
         "cache_dir": args.cache_dir,
         "revision": args.model_revision,
-        "use_auth_token": True if args.use_auth_token else None,
+        "token": args.token,
+        "trust_remote_code": args.trust_remote_code,
     }
     if args.config_name_or_path:
         config = AutoConfig.from_pretrained(args.config_name_or_path, **config_kwargs)
@@ -418,7 +482,11 @@ def main():
     args.encoder_stride = args.encoder_stride if args.encoder_stride is not None else config.encoder_stride
 
     config.update(
-        {"image_size": args.image_size, "patch_size": args.patch_size, "encoder_stride": args.encoder_stride,}
+        {
+            "image_size": args.image_size,
+            "patch_size": args.patch_size,
+            "encoder_stride": args.encoder_stride,
+        }
     )
 
     # create image processor
@@ -440,11 +508,16 @@ def main():
             config=config,
             cache_dir=args.cache_dir,
             revision=args.model_revision,
-            use_auth_token=True if args.use_auth_token else None,
+            token=args.token,
+            trust_remote_code=args.trust_remote_code,
         )
     else:
         logger.info("Training new model from scratch")
-        model = AutoModelForMaskedImageModeling.from_config(config)
+        model = AutoModelForMaskedImageModeling.from_config(
+            config,
+            token=args.token,
+            trust_remote_code=args.trust_remote_code,
+        )
 
     column_names = ds["train"].column_names
 
@@ -498,9 +571,16 @@ def main():
 
     # DataLoaders creation:
     train_dataloader = DataLoader(
-        ds["train"], shuffle=True, collate_fn=collate_fn, batch_size=args.per_device_train_batch_size,
+        ds["train"],
+        shuffle=True,
+        collate_fn=collate_fn,
+        batch_size=args.per_device_train_batch_size,
     )
-    eval_dataloader = DataLoader(ds["validation"], collate_fn=collate_fn, batch_size=args.per_device_eval_batch_size,)
+    eval_dataloader = DataLoader(
+        ds["validation"],
+        collate_fn=collate_fn,
+        batch_size=args.per_device_eval_batch_size,
+    )
 
     # Optimizer
     # Split weights in two groups, one with weight decay and the other not.
@@ -510,7 +590,10 @@ def main():
             "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
             "weight_decay": args.weight_decay,
         },
-        {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], "weight_decay": 0.0,},
+        {
+            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
     ]
     optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate)
 
@@ -527,13 +610,19 @@ def main():
     lr_scheduler = get_scheduler(
         name=args.lr_scheduler_type,
         optimizer=optimizer,
-        num_warmup_steps=args.num_warmup_steps * args.gradient_accumulation_steps,
-        num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
+        num_warmup_steps=args.num_warmup_steps * accelerator.num_processes,
+        num_training_steps=args.max_train_steps
+        if overrode_max_train_steps
+        else args.max_train_steps * accelerator.num_processes,
     )
 
     # Prepare everything with our `accelerator`.
     model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader, lr_scheduler,
+        model,
+        optimizer,
+        train_dataloader,
+        eval_dataloader,
+        lr_scheduler,
     )
 
     # On TPU, the tie weights in our model have been disconnected, so we need to restore the ties.
@@ -578,43 +667,45 @@ def main():
     # Potentially load in the weights and states from a previous save
     if args.resume_from_checkpoint:
         if args.resume_from_checkpoint is not None or args.resume_from_checkpoint != "":
-            accelerator.print(f"Resumed from checkpoint: {args.resume_from_checkpoint}")
-            accelerator.load_state(args.resume_from_checkpoint)
+            checkpoint_path = args.resume_from_checkpoint
             path = os.path.basename(args.resume_from_checkpoint)
         else:
             # Get the most recent checkpoint
             dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
             dirs.sort(key=os.path.getctime)
             path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
+            checkpoint_path = path
+            path = os.path.basename(checkpoint_path)
+
+        accelerator.print(f"Resumed from checkpoint: {checkpoint_path}")
+        accelerator.load_state(checkpoint_path)
         # Extract `epoch_{i}` or `step_{i}`
         training_difference = os.path.splitext(path)[0]
 
         if "epoch" in training_difference:
             starting_epoch = int(training_difference.replace("epoch_", "")) + 1
             resume_step = None
+            completed_steps = starting_epoch * num_update_steps_per_epoch
         else:
             # need to multiply `gradient_accumulation_steps` to reflect real steps
             resume_step = int(training_difference.replace("step_", "")) * args.gradient_accumulation_steps
             starting_epoch = resume_step // len(train_dataloader)
+            completed_steps = resume_step // args.gradient_accumulation_steps
             resume_step -= starting_epoch * len(train_dataloader)
 
     # update the progress_bar if load from checkpoint
-    progress_bar.update(starting_epoch * num_update_steps_per_epoch)
-    completed_steps = starting_epoch * num_update_steps_per_epoch
+    progress_bar.update(completed_steps)
 
     for epoch in range(starting_epoch, args.num_train_epochs):
         model.train()
         if args.with_tracking:
             total_loss = 0
-        for step, batch in enumerate(train_dataloader):
-            # We need to skip steps until we reach the resumed step
-            if args.resume_from_checkpoint and epoch == starting_epoch:
-                if resume_step is not None and step < resume_step:
-                    if step % args.gradient_accumulation_steps == 0:
-                        progress_bar.update(1)
-                        completed_steps += 1
-                    continue
-
+        if args.resume_from_checkpoint and epoch == starting_epoch and resume_step is not None:
+            # We skip the first `n` batches in the dataloader when resuming from a checkpoint
+            active_dataloader = accelerator.skip_first_batches(train_dataloader, resume_step)
+        else:
+            active_dataloader = train_dataloader
+        for step, batch in enumerate(active_dataloader):
             with accelerator.accumulate(model):
                 outputs = model(**batch)
                 loss = outputs.loss
@@ -633,7 +724,7 @@ def main():
 
             if isinstance(checkpointing_steps, int):
                 if completed_steps % checkpointing_steps == 0:
-                    output_dir = f"step_{completed_steps }"
+                    output_dir = f"step_{completed_steps}"
                     if args.output_dir is not None:
                         output_dir = os.path.join(args.output_dir, output_dir)
                     accelerator.save_state(output_dir)
@@ -674,8 +765,12 @@ def main():
             )
             if accelerator.is_main_process:
                 image_processor.save_pretrained(args.output_dir)
-                repo.push_to_hub(
-                    commit_message=f"Training in progress epoch {epoch}", blocking=False, auto_lfs_prune=True
+                api.upload_folder(
+                    commit_message=f"Training in progress epoch {epoch}",
+                    folder_path=args.output_dir,
+                    repo_id=repo_id,
+                    repo_type="model",
+                    token=args.hub_token,
                 )
 
         if args.checkpointing_steps == "epoch":
@@ -696,7 +791,13 @@ def main():
         if accelerator.is_main_process:
             image_processor.save_pretrained(args.output_dir)
             if args.push_to_hub:
-                repo.push_to_hub(commit_message="End of training", auto_lfs_prune=True)
+                api.upload_folder(
+                    commit_message="End of training",
+                    folder_path=args.output_dir,
+                    repo_id=repo_id,
+                    repo_type="model",
+                    token=args.hub_token,
+                )
 
 
 if __name__ == "__main__":

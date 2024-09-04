@@ -16,22 +16,24 @@
 import logging
 import os
 import sys
-import time
 from dataclasses import dataclass, field
 from typing import Optional
 
 import mlflow
 import torch
-import transformers
 from datasets import load_dataset
-from torchvision.transforms import (Compose, Lambda, Normalize,
-                                    RandomHorizontalFlip, RandomResizedCrop,
-                                    ToTensor)
+from torchvision.transforms import Compose, Lambda, Normalize, RandomHorizontalFlip, RandomResizedCrop, ToTensor
 from torchvision.transforms.functional import InterpolationMode
-from transformers import (HfArgumentParser, Trainer, TrainerCallback,
-                          TrainerControl, TrainerState, TrainingArguments,
-                          ViTImageProcessor, ViTMAEConfig,
-                          ViTMAEForPreTraining)
+
+import transformers
+from transformers import (
+    HfArgumentParser,
+    Trainer,
+    TrainingArguments,
+    ViTImageProcessor,
+    ViTMAEConfig,
+    ViTMAEForPreTraining,
+)
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
@@ -44,12 +46,9 @@ from utils.utils import get_num_parameters
 logger = logging.getLogger(__name__)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.29.0")
+check_min_version("4.44.0")
 
-require_version(
-    "datasets>=1.8.0",
-    "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt"
-)
+require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/image-pretraining/requirements.txt")
 
 
 @dataclass
@@ -62,40 +61,45 @@ class DataTrainingArguments:
     """
 
     dataset_name: Optional[str] = field(
-        default="cifar10",
-        metadata={"help": "Name of a dataset from the datasets package"})
+        default="cifar10", metadata={"help": "Name of a dataset from the datasets package"}
+    )
     dataset_config_name: Optional[str] = field(
-        default=None,
+        default=None, metadata={"help": "The configuration name of the dataset to use (via the datasets library)."}
+    )
+    trust_remote_code: bool = field(
+        default=False,
         metadata={
-            "help":
-            "The configuration name of the dataset to use (via the datasets library)."
-        })
+            "help": (
+                "Whether to trust the execution of code from datasets/models defined on the Hub."
+                " This option should only be set to `True` for repositories you trust and in which you have read the"
+                " code, as it will execute code present on the Hub on your local machine."
+            )
+        },
+    )
     image_column_name: Optional[str] = field(
-        default=None,
-        metadata={"help": "The column name of the images in the files."})
-    train_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "A folder containing the training data."})
-    validation_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "A folder containing the validation data."})
+        default=None, metadata={"help": "The column name of the images in the files."}
+    )
+    train_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the training data."})
+    validation_dir: Optional[str] = field(default=None, metadata={"help": "A folder containing the validation data."})
     train_val_split: Optional[float] = field(
-        default=0.15,
-        metadata={"help": "Percent to split off of train for validation."})
+        default=0.15, metadata={"help": "Percent to split off of train for validation."}
+    )
     max_train_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help":
-            ("For debugging purposes or quicker training, truncate the number of training examples to this "
-             "value if set.")
+            "help": (
+                "For debugging purposes or quicker training, truncate the number of training examples to this "
+                "value if set."
+            )
         },
     )
     max_eval_samples: Optional[int] = field(
         default=None,
         metadata={
-            "help":
-            ("For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-             "value if set.")
+            "help": (
+                "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
+                "value if set."
+            )
         },
     )
 
@@ -117,77 +121,57 @@ class ModelArguments:
     model_name_or_path: str = field(
         default=None,
         metadata={
-            "help":
-            ("The model checkpoint for weights initialization.Don't set if you want to train a model from scratch."
-             )
+            "help": (
+                "The model checkpoint for weights initialization. Don't set if you want to train a model from scratch."
+            )
         },
     )
     config_name: Optional[str] = field(
-        default=None,
-        metadata={
-            "help":
-            "Pretrained config name or path if not the same as model_name_or_path"
-        })
+        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name_or_path"}
+    )
     config_overrides: Optional[str] = field(
         default=None,
         metadata={
-            "help":
-            ("Override some existing default config settings when a model is trained from scratch. Example: "
-             "n_embd=10,resid_pdrop=0.2,scale_attn_weights=false,summary_type=cls_index"
-             )
+            "help": (
+                "Override some existing default config settings when a model is trained from scratch. Example: "
+                "n_embd=10,resid_pdrop=0.2,scale_attn_weights=false,summary_type=cls_index"
+            )
         },
     )
     cache_dir: Optional[str] = field(
-        default=None,
-        metadata={
-            "help":
-            "Where do you want to store the pretrained models downloaded from s3"
-        })
+        default=None, metadata={"help": "Where do you want to store the pretrained models downloaded from s3"}
+    )
     model_revision: str = field(
         default="main",
-        metadata={
-            "help":
-            "The specific model version to use (can be a branch name, tag name or commit id)."
-        },
+        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
     )
-    image_processor_name: str = field(
+    image_processor_name: str = field(default=None, metadata={"help": "Name or path of preprocessor config."})
+    token: str = field(
         default=None,
-        metadata={"help": "Name or path of preprocessor config."})
-    use_auth_token: bool = field(
-        default=False,
         metadata={
-            "help":
-            ("Will use the token generated when running `huggingface-cli login` (necessary to use this script "
-             "with private models).")
+            "help": (
+                "The token to use as HTTP bearer authorization for remote files. If not specified, will use the token "
+                "generated when running `huggingface-cli login` (stored in `~/.huggingface`)."
+            )
         },
     )
     mask_ratio: float = field(
-        default=0.75,
-        metadata={
-            "help":
-            "The ratio of the number of masked tokens in the input sequence."
-        })
+        default=0.75, metadata={"help": "The ratio of the number of masked tokens in the input sequence."}
+    )
     norm_pix_loss: bool = field(
-        default=True,
-        metadata={
-            "help":
-            "Whether or not to train with normalized pixel values as target."
-        })
+        default=True, metadata={"help": "Whether or not to train with normalized pixel values as target."}
+    )
 
 
 @dataclass
 class CustomTrainingArguments(TrainingArguments):
     base_learning_rate: float = field(
-        default=1e-3,
-        metadata={
-            "help":
-            "Base learning rate: absolute_lr = base_lr * total_batch_size / 256."
-        })
+        default=1e-3, metadata={"help": "Base learning rate: absolute_lr = base_lr * total_batch_size / 256."}
+    )
 
 
 def collate_fn(examples):
-    pixel_values = torch.stack(
-        [example["pixel_values"] for example in examples])
+    pixel_values = torch.stack([example["pixel_values"] for example in examples])
     return {"pixel_values": pixel_values}
 
 
@@ -197,20 +181,17 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser(
-        (ModelArguments, DataTrainingArguments, CustomTrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
-        model_args, data_args, training_args = parser.parse_json_file(
-            json_file=os.path.abspath(sys.argv[1]))
+        model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
-        model_args, data_args, training_args = parser.parse_args_into_dataclasses(
-        )
+        model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
     # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
     # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    # send_example_telemetry("run_mae", model_args, data_args)
+    send_example_telemetry("run_mae", model_args, data_args)
 
     # Setup logging
     logging.basicConfig(
@@ -231,23 +212,20 @@ def main():
 
     # Log on each process the small summary:
     logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        +
-        f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}, "
+        + f"distributed training: {training_args.parallel_mode.value == 'distributed'}, 16-bits training: {training_args.fp16}"
     )
     logger.info(f"Training/evaluation parameters {training_args}")
 
     # Detecting last checkpoint.
     last_checkpoint = None
-    if os.path.isdir(
-            training_args.output_dir
-    ) and training_args.do_train and not training_args.overwrite_output_dir:
+    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        if last_checkpoint is None and len(os.listdir(
-                training_args.output_dir)) > 0:
+        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
             raise ValueError(
                 f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-                "Use --overwrite_output_dir to overcome.")
+                "Use --overwrite_output_dir to overcome."
+            )
         elif last_checkpoint is not None and training_args.resume_from_checkpoint is None:
             logger.info(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
@@ -260,15 +238,13 @@ def main():
         data_args.dataset_config_name,
         data_files=data_args.data_files,
         cache_dir=model_args.cache_dir,
-        use_auth_token=True if model_args.use_auth_token else None,
-        trust_remote_code=True,
+        token=model_args.token,
+        trust_remote_code=data_args.trust_remote_code,
     )
 
     # If we don't have a validation split, split off a percentage of train as validation.
-    data_args.train_val_split = None if "validation" in ds.keys(
-    ) else data_args.train_val_split
-    if isinstance(data_args.train_val_split,
-                  float) and data_args.train_val_split > 0.0:
+    data_args.train_val_split = None if "validation" in ds.keys() else data_args.train_val_split
+    if isinstance(data_args.train_val_split, float) and data_args.train_val_split > 0.0:
         split = ds["train"].train_test_split(data_args.train_val_split)
         ds["train"] = split["train"]
         ds["validation"] = split["test"]
@@ -281,41 +257,36 @@ def main():
     config_kwargs = {
         "cache_dir": model_args.cache_dir,
         "revision": model_args.model_revision,
-        "use_auth_token": True if model_args.use_auth_token else None,
+        "token": model_args.token,
     }
     if model_args.config_name:
-        config = ViTMAEConfig.from_pretrained(model_args.config_name,
-                                              **config_kwargs)
+        config = ViTMAEConfig.from_pretrained(model_args.config_name, **config_kwargs)
     elif model_args.model_name_or_path:
-        config = ViTMAEConfig.from_pretrained(model_args.model_name_or_path,
-                                              **config_kwargs)
+        config = ViTMAEConfig.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         config = ViTMAEConfig()
-        logger.warning(
-            "You are instantiating a new config instance from scratch.")
+        logger.warning("You are instantiating a new config instance from scratch.")
         if model_args.config_overrides is not None:
             logger.info(f"Overriding config: {model_args.config_overrides}")
             config.update_from_string(model_args.config_overrides)
             logger.info(f"New config: {config}")
 
     # adapt config
-    config.update({
-        "mask_ratio": model_args.mask_ratio,
-        "norm_pix_loss": model_args.norm_pix_loss,
-    })
+    config.update(
+        {
+            "mask_ratio": model_args.mask_ratio,
+            "norm_pix_loss": model_args.norm_pix_loss,
+        }
+    )
 
     # create image processor
     if model_args.image_processor_name:
-        image_processor = ViTImageProcessor.from_pretrained(
-            model_args.image_processor_name, **config_kwargs)
+        image_processor = ViTImageProcessor.from_pretrained(model_args.image_processor_name, **config_kwargs)
     elif model_args.model_name_or_path:
-        image_processor = ViTImageProcessor.from_pretrained(
-            model_args.model_name_or_path, **config_kwargs)
+        image_processor = ViTImageProcessor.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         image_processor = ViTImageProcessor()
-    config.update({
-        "image_size": image_processor.size["height"],
-    })
+
     # create model
     if model_args.model_name_or_path:
         model = ViTMAEForPreTraining.from_pretrained(
@@ -324,7 +295,7 @@ def main():
             config=config,
             cache_dir=model_args.cache_dir,
             revision=model_args.model_revision,
-            use_auth_token=True if model_args.use_auth_token else None,
+            token=model_args.token,
         )
     else:
         logger.info("Training new model from scratch")
@@ -354,31 +325,27 @@ def main():
         size = image_processor.size["shortest_edge"]
     else:
         size = (image_processor.size["height"], image_processor.size["width"])
-    transforms = Compose([
-        Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
-        RandomResizedCrop(size,
-                          scale=(0.2, 1.0),
-                          interpolation=InterpolationMode.BICUBIC),
-        RandomHorizontalFlip(),
-        ToTensor(),
-        Normalize(mean=image_processor.image_mean,
-                  std=image_processor.image_std),
-    ])
+    transforms = Compose(
+        [
+            Lambda(lambda img: img.convert("RGB") if img.mode != "RGB" else img),
+            RandomResizedCrop(size, scale=(0.2, 1.0), interpolation=InterpolationMode.BICUBIC),
+            RandomHorizontalFlip(),
+            ToTensor(),
+            Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
+        ]
+    )
 
     def preprocess_images(examples):
         """Preprocess a batch of images by applying transforms."""
 
-        examples["pixel_values"] = [
-            transforms(image) for image in examples[image_column_name]
-        ]
+        examples["pixel_values"] = [transforms(image) for image in examples[image_column_name]]
         return examples
 
     if training_args.do_train:
         if "train" not in ds:
             raise ValueError("--do_train requires a train dataset")
         if data_args.max_train_samples is not None:
-            ds["train"] = ds["train"].shuffle(seed=training_args.seed).select(
-                range(data_args.max_train_samples))
+            ds["train"] = ds["train"].shuffle(seed=training_args.seed).select(range(data_args.max_train_samples))
         # Set the training transforms
         ds["train"].set_transform(preprocess_images)
 
@@ -386,16 +353,16 @@ def main():
         if "validation" not in ds:
             raise ValueError("--do_eval requires a validation dataset")
         if data_args.max_eval_samples is not None:
-            ds["validation"] = (ds["validation"].shuffle(
-                seed=training_args.seed).select(
-                    range(data_args.max_eval_samples)))
+            ds["validation"] = (
+                ds["validation"].shuffle(seed=training_args.seed).select(range(data_args.max_eval_samples))
+            )
         # Set the validation transforms
         ds["validation"].set_transform(preprocess_images)
 
     # Compute absolute learning rate
-    total_train_batch_size = (training_args.train_batch_size *
-                              training_args.gradient_accumulation_steps *
-                              training_args.world_size)
+    total_train_batch_size = (
+        training_args.train_batch_size * training_args.gradient_accumulation_steps * training_args.world_size
+    )
     if training_args.base_learning_rate is not None:
         training_args.learning_rate = training_args.base_learning_rate * total_train_batch_size / 256
 
@@ -419,10 +386,8 @@ def main():
             checkpoint = last_checkpoint
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         trainer.save_model()
-        metrics = train_result.metrics
-
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
+        trainer.log_metrics("train", train_result.metrics)
+        trainer.save_metrics("train", train_result.metrics)
         trainer.save_state()
 
     # Evaluation

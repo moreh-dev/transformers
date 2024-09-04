@@ -1,5 +1,4 @@
 transformers==4.29.2
-accelerate==0.21.0
 pandas==2.0.3
 sacremoses==0.0.53
 sacrebleu==2.3.1

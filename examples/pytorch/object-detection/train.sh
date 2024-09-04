@@ -1,0 +1,21 @@
+python run_object_detection.py \
+    --model_name_or_path facebook/detr-resnet-50 \
+    --dataset_name cppe-5 \
+    --do_train true \
+    --do_eval true \
+    --output_dir detr-finetuned-cppe-5-10k-steps \
+    --max_steps 100 \
+    --image_square_size 600 \
+    --fp16 true \
+    --learning_rate 5e-5 \
+    --weight_decay 1e-4 \
+    --per_device_train_batch_size 8 \
+    --remove_unused_columns false \
+    --eval_do_concat_batches false \
+    --ignore_mismatched_sizes true \
+    --metric_for_best_model eval_map \
+    --greater_is_better true \
+    --logging_strategy steps \
+    --evaluation_strategy steps \
+    --save_strategy no \
+    --seed 1337

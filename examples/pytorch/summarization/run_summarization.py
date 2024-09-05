@@ -53,7 +53,7 @@ from transformers.utils import check_min_version, is_offline_mode, send_example_
 from transformers.utils.versions import require_version
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from utils.tbtrainercallback import TBTrainerCallback
+from utils.tbtrainercallback import TBTrainerCallbackForSeq2Seq
 from utils.utils import get_num_parameters
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.

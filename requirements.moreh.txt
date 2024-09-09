@@ -22,3 +22,4 @@ rjieba
 nltk
 seqeval
 mlflow
+albumentations

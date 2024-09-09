@@ -3,7 +3,7 @@ accelerate
 pandas
 sacremoses
 sacrebleu
-setuptools
+setuptools==69.5.1
 scipy
 soundfile
 fsspec

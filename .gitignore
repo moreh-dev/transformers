@@ -172,3 +172,4 @@ dummy_*
 dummy/
 mlruns/
 outputs/
+train_*.sh

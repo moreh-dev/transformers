@@ -167,3 +167,8 @@ tags
 
 # ruff
 .ruff_cache
+
+dummy_*
+dummy/
+mlruns/
+outputs/

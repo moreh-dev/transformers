@@ -9,7 +9,7 @@ python run_object_detection.py \
     --fp16 true \
     --learning_rate 5e-5 \
     --weight_decay 1e-4 \
-    --per_device_train_batch_size 8 \
+    --per_device_train_batch_size 3 \
     --remove_unused_columns false \
     --eval_do_concat_batches false \
     --ignore_mismatched_sizes true \

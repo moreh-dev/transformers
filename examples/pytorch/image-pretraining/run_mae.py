@@ -286,7 +286,9 @@ def main():
         image_processor = ViTImageProcessor.from_pretrained(model_args.model_name_or_path, **config_kwargs)
     else:
         image_processor = ViTImageProcessor()
-
+    config.update({
+        "image_size": image_processor.size["height"],
+    })
     # create model
     if model_args.model_name_or_path:
         model = ViTMAEForPreTraining.from_pretrained(
@@ -296,6 +298,7 @@ def main():
             cache_dir=model_args.cache_dir,
             revision=model_args.model_revision,
             token=model_args.token,
+            force_download=True,
         )
     else:
         logger.info("Training new model from scratch")
@@ -334,7 +337,6 @@ def main():
             Normalize(mean=image_processor.image_mean, std=image_processor.image_std),
         ]
     )
-
     def preprocess_images(examples):
         """Preprocess a batch of images by applying transforms."""
 

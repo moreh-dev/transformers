@@ -14,7 +14,7 @@ jiwer
 librosa
 protobuf
 matplotlib
-datasets==2.0.0
+datasets==2.16.0
 evaluate
 sentencepiece
 rjieba

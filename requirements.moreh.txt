@@ -13,7 +13,7 @@ tqdm
 jiwer
 librosa
 matplotlib
-datasets==2.0.0
+datasets==3.1.0
 evaluate
 sentencepiece
 rjieba

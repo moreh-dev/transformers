@@ -998,7 +998,10 @@ class GPT2Model(GPT2PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
 
-        print('Moreh Moreh Moreh')
+        print('Moreh Moreh Moreh PP PP HaPPy')
+        print('[█████░░░░░░░░░░]')
+        print('[░░░░░█████░░░░░]')
+        print('[░░░░░░░░░░█████]')
         self.embed_dim = config.hidden_size
 
         self.wte = nn.Embedding(config.vocab_size, self.embed_dim)

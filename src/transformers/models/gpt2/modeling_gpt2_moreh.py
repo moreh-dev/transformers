@@ -1302,13 +1302,6 @@ class GPT2LMHeadModelMoreh(GPT2PreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
-        print("GPT2LMHeadModelMoreh ##################################")
-        if config.moreh_config is not None:
-            print("config.moreh_config")
-            for key, value in config.moreh_config.items():
-                print(f"\t {key}, {value}")
-        else:
-            print("config.moreh_config is None")
         self.transformer = GPT2Model(config)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 

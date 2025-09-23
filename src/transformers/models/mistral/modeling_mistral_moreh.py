@@ -1024,7 +1024,6 @@ class MistralModel(MistralPreTrainedModel):
 
             hidden_states = layer_outputs[0]
             if layer_idx in self.moreh_pipeline_layers:
-                print(f"Set pipe in mistral L : {layer_idx}")
                 hidden_states = torch.moreh.pipeline_assign(hidden_states)
 
             if use_cache:
@@ -1165,14 +1164,6 @@ class MistralForCausalLMMoreh(MistralPreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
-        print("MistralForCausalLMMoreh #########################################")
-        if config.moreh_config is not None:
-            print("config.moreh_config")
-            for key, value in config.moreh_config.items():
-                print(f"\t {key}, {value}")
-        else:
-            print("config.moreh_config is None")
-
         self.model = MistralModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)

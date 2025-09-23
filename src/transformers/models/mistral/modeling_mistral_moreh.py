@@ -94,7 +94,7 @@ class MistralRMSNorm(nn.Module):
 
 
 class MistralRotaryEmbedding(nn.Module):
-    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
+    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None, use_rope_cache=False):
         super().__init__()
 
         self.dim = dim
@@ -103,9 +103,36 @@ class MistralRotaryEmbedding(nn.Module):
         inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2, dtype=torch.int64).float().to(device) / self.dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
+        self.use_rope_cache = use_rope_cache
+        if self.use_rope_cache:
+            self._set_cos_sin_cache(max_position_embeddings, dtype=torch.float32)
+
+    def _set_cos_sin_cache(self, seq_len, dtype):
+        self.max_seq_len_cached = seq_len
+
+        t = torch.arange(seq_len, dtype=torch.float32, device="cpu")
+        freqs = torch.outer(t, self.inv_freq.cpu())  # [seq_len, dim/2]
+        emb = torch.cat((freqs, freqs), dim=-1)      # [seq_len, dim]
+
+        cos = emb.cos()
+        sin = emb.sin()
+
+        cos = cos.to(device='cuda', dtype=dtype)
+        sin = sin.to(device='cuda', dtype=dtype)
+
+        self.register_buffer("cos_cached", cos, persistent=False)
+        self.register_buffer("sin_cached", sin, persistent=False)
+
     @torch.no_grad()
     # Copied from transformers.models.llama.modeling_llama.LlamaRotaryEmbedding.forward
     def forward(self, x, position_ids):
+        if self.use_rope_cache:
+            seq_len = position_ids.shape[-1]
+            assert seq_len <= self.max_position_embeddings, "Sequence length exceeds maximum position embeddings"
+            cos = self.cos_cached[:seq_len].to(dtype=x.dtype, device=x.device).unsqueeze(0)
+            sin = self.sin_cached[:seq_len].to(dtype=x.dtype, device=x.device).unsqueeze(0)
+            return cos, sin
+
         # x: [bs, num_attention_heads, seq_len, head_size]
         inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1)
         position_ids_expanded = position_ids[:, None, :].float()
@@ -221,10 +248,16 @@ class MistralAttention(nn.Module):
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
 
+        use_rope_cache = False
+        moreh_config = getattr(config, "moreh_config", None)
+        if moreh_config is not None and "rope_cache" in moreh_config:
+            use_rope_cache = moreh_config["rope_cache"]
+
         self.rotary_emb = MistralRotaryEmbedding(
             self.head_dim,
             max_position_embeddings=self.max_position_embeddings,
             base=self.rope_theta,
+            use_rope_cache=use_rope_cache,
         )
 
     def forward(
@@ -885,6 +918,12 @@ class MistralModel(MistralPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+        # Moreh Config
+        self.moreh_pipeline_layers = []
+        moreh_config = getattr(config, "moreh_config", None)
+        if moreh_config is not None and "pipeline_layers" in moreh_config:
+            self.moreh_pipeline_layers = moreh_config["pipeline_layers"]
+
     def get_input_embeddings(self):
         return self.embed_tokens
 
@@ -957,7 +996,7 @@ class MistralModel(MistralPreTrainedModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = None
 
-        for decoder_layer in self.layers:
+        for layer_idx, decoder_layer in enumerate(self.layers):
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 
@@ -984,6 +1023,9 @@ class MistralModel(MistralPreTrainedModel):
                 )
 
             hidden_states = layer_outputs[0]
+            if layer_idx in self.moreh_pipeline_layers:
+                print(f"Set pipe in mistral L : {layer_idx}")
+                hidden_states = torch.moreh.pipeline_assign(hidden_states)
 
             if use_cache:
                 next_decoder_cache = layer_outputs[2 if output_attentions else 1]
@@ -1124,6 +1166,13 @@ class MistralForCausalLMMoreh(MistralPreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         print("MistralForCausalLMMoreh #########################################")
+        if config.moreh_config is not None:
+            print("config.moreh_config")
+            for key, value in config.moreh_config.items():
+                print(f"\t {key}, {value}")
+        else:
+            print("config.moreh_config is None")
+
         self.model = MistralModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)

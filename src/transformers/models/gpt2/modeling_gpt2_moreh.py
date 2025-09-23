@@ -51,7 +51,7 @@ from ...utils import (
     replace_return_docstrings,
 )
 from ...utils.model_parallel_utils import assert_device_map, get_device_map
-from .configuration_gpt2 import GPT2Config
+from .configuration_gpt2_moreh import GPT2MorehConfig
 
 
 if is_flash_attn_2_available():
@@ -772,7 +772,7 @@ class GPT2PreTrainedModel(PreTrainedModel):
     models.
     """
 
-    config_class = GPT2Config
+    config_class = GPT2MorehConfig
     load_tf_weights = load_tf_weights_in_gpt2
     base_model_prefix = "transformer"
     is_parallelizable = True

@@ -47,7 +47,7 @@ from ...utils import (
     logging,
     replace_return_docstrings,
 )
-from .configuration_mistral import MistralConfig
+from .configuration_mistral_moreh import MistralMorehConfig
 
 
 if is_flash_attn_2_available():
@@ -190,7 +190,7 @@ class MistralAttention(nn.Module):
     and "Generating Long Sequences with Sparse Transformers".
     """
 
-    def __init__(self, config: MistralConfig, layer_idx: Optional[int] = None):
+    def __init__(self, config: MistralMorehConfig, layer_idx: Optional[int] = None):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -670,7 +670,7 @@ MISTRAL_ATTENTION_CLASSES = {
 
 # Copied from transformers.models.llama.modeling_llama.LlamaDecoderLayer with Llama->Mistral, LLAMA->MISTRAL
 class MistralDecoderLayer(nn.Module):
-    def __init__(self, config: MistralConfig, layer_idx: int):
+    def __init__(self, config: MistralMorehConfig, layer_idx: int):
         super().__init__()
         self.hidden_size = config.hidden_size
 
@@ -765,7 +765,7 @@ MISTRAL_START_DOCSTRING = r"""
     MISTRAL_START_DOCSTRING,
 )
 class MistralPreTrainedModel(PreTrainedModel):
-    config_class = MistralConfig
+    config_class = MistralMorehConfig
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
     _no_split_modules = ["MistralDecoderLayer"]
@@ -866,10 +866,10 @@ class MistralModel(MistralPreTrainedModel):
     Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`MistralDecoderLayer`]
 
     Args:
-        config: MistralConfig
+        config: MistralMorehConfig
     """
 
-    def __init__(self, config: MistralConfig):
+    def __init__(self, config: MistralMorehConfig):
         super().__init__(config)
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
@@ -1122,8 +1122,8 @@ class MistralForCausalLMMoreh(MistralPreTrainedModel):
     _tied_weights_keys = ["lm_head.weight"]
 
     def __init__(self, config):
-        print("MistralForCausalLMMoreh #########################################")
         super().__init__(config)
+        print("MistralForCausalLMMoreh #########################################")
         self.model = MistralModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)

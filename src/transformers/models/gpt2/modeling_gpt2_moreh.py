@@ -1016,6 +1016,13 @@ class GPT2Model(GPT2PreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+        # Moreh Config
+        self.moreh_pipeline_layers = []
+        moreh_config = getattr(config, "moreh_config", None)
+        if moreh_config is not None and "pipeline_layers" in moreh_config:
+            self.moreh_pipeline_layers = moreh_config["pipeline_layers"]
+
+
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
         # Check validity of device_map
@@ -1257,6 +1264,8 @@ class GPT2Model(GPT2PreTrainedModel):
                 for k, v in self.device_map.items():
                     if i == v[-1] and "cuda:" + str(k) != self.last_device:
                         hidden_states = hidden_states.to("cuda:" + str(k + 1))
+            if i in self.moreh_pipeline_layers:
+                hidden_states = torch.moreh.pipeline_assign(hidden_states)
 
         hidden_states = self.ln_f(hidden_states)
 
@@ -1293,7 +1302,6 @@ class GPT2LMHeadModelMoreh(GPT2PreTrainedModel):
 
     def __init__(self, config):
         super().__init__(config)
-        print("GPT2LMHeadModelMoreh ##################################")
         self.transformer = GPT2Model(config)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 

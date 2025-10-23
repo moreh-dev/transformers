@@ -1017,11 +1017,21 @@ class GPT2Model(GPT2PreTrainedModel):
         self.post_init()
 
         # Moreh Config
-        self.moreh_pipeline_layers = []
         moreh_config = getattr(config, "moreh_config", None)
+
+        # Moreh Pipeline Layers
+        self.moreh_pipeline_layers = []
         if moreh_config is not None and "pipeline_layers" in moreh_config:
             self.moreh_pipeline_layers = moreh_config["pipeline_layers"]
 
+        # Moreh Gradient Checkpoint Layers Step
+        # If moreh_gradient_checkpoint_layers_step is N,
+        # then 1st, (1+N)th, (1+2N)th, ... layer's input activations will be checkpointed
+        self.moreh_gradient_checkpoint_layers_step = None
+        if self.moreh_gradient_checkpoint_layers_step is not None and (
+                layer_idx %
+                self.moreh_gradient_checkpoint_layers_step) == 0:
+            hidden_states = torch.moreh.checkpoint_assign(hidden_states)
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -1212,6 +1222,12 @@ class GPT2Model(GPT2PreTrainedModel):
         all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
         all_hidden_states = () if output_hidden_states else None
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
+            # Gradient checkpoint assign
+            if self.moreh_gradient_checkpoint_layers_step is not None and (
+                    layer_idx %
+                    self.moreh_gradient_checkpoint_layers_step) == 0:
+                hidden_states = torch.moreh.checkpoint_assign(hidden_states)
+
             # Model parallel
             if self.model_parallel:
                 torch.cuda.set_device(hidden_states.device)

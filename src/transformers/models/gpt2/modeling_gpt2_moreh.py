@@ -1028,10 +1028,9 @@ class GPT2Model(GPT2PreTrainedModel):
         # If moreh_gradient_checkpoint_layers_step is N,
         # then 1st, (1+N)th, (1+2N)th, ... layer's input activations will be checkpointed
         self.moreh_gradient_checkpoint_layers_step = None
-        if self.moreh_gradient_checkpoint_layers_step is not None and (
-                layer_idx %
-                self.moreh_gradient_checkpoint_layers_step) == 0:
-            hidden_states = torch.moreh.checkpoint_assign(hidden_states)
+        if moreh_config is not None and "gradient_checkpoint_layers_step" in moreh_config:
+            self.moreh_gradient_checkpoint_layers_step = moreh_config[
+                "gradient_checkpoint_layers_step"]
 
     @add_start_docstrings(PARALLELIZE_DOCSTRING)
     def parallelize(self, device_map=None):
@@ -1224,7 +1223,7 @@ class GPT2Model(GPT2PreTrainedModel):
         for i, (block, layer_past) in enumerate(zip(self.h, past_key_values)):
             # Gradient checkpoint assign
             if self.moreh_gradient_checkpoint_layers_step is not None and (
-                    layer_idx %
+                    i %
                     self.moreh_gradient_checkpoint_layers_step) == 0:
                 hidden_states = torch.moreh.checkpoint_assign(hidden_states)
 

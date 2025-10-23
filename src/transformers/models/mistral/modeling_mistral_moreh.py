@@ -930,10 +930,9 @@ class MistralModel(MistralPreTrainedModel):
         # If moreh_gradient_checkpoint_layers_step is N,
         # then 1st, (1+N)th, (1+2N)th, ... layer's input activations will be checkpointed
         self.moreh_gradient_checkpoint_layers_step = None
-        if self.moreh_gradient_checkpoint_layers_step is not None and (
-                layer_idx %
-                self.moreh_gradient_checkpoint_layers_step) == 0:
-            hidden_states = torch.moreh.checkpoint_assign(hidden_states)
+        if moreh_config is not None and "gradient_checkpoint_layers_step" in moreh_config:
+            self.moreh_gradient_checkpoint_layers_step = moreh_config[
+                "gradient_checkpoint_layers_step"]
 
     def get_input_embeddings(self):
         return self.embed_tokens
@@ -1008,6 +1007,12 @@ class MistralModel(MistralPreTrainedModel):
         next_decoder_cache = None
 
         for layer_idx, decoder_layer in enumerate(self.layers):
+            # Gradient checkpoint assign
+            if self.moreh_gradient_checkpoint_layers_step is not None and (
+                    layer_idx %
+                    self.moreh_gradient_checkpoint_layers_step) == 0:
+                hidden_states = torch.moreh.checkpoint_assign(hidden_states)
+
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
 

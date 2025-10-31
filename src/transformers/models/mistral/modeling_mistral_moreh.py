@@ -69,7 +69,7 @@ _CONFIG_FOR_DOC = "MistralConfig"
 
 if MorehRMSNorm is not None:
     logger.warning(
-        "You can't use Masked Structured Growth Training..! You should avoid using rmsnorm in any way. "
+        "You can't use Masked Structured Growth Training..! You should avoid using RMSNorm in any way. "
     )
 
 # Copied from transformers.models.llama.modeling_llama._get_unpad_data
